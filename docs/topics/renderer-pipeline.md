@@ -78,7 +78,7 @@ flowchart LR
 ```
 
 The renderer uses Vulkan dynamic rendering (`vkCmdBeginRendering` / `vkCmdEndRendering`) rather than render-pass/framebuffer objects.
-Swapchain images are preferred as UNORM for tone-map output to avoid automatic sRGB re-encoding.
+Swapchain images are preferred as UNORM because `tonemap.frag` normally applies exposure, ACES, and the standard sRGB OETF manually; if a surface only provides an sRGB swapchain format, the tonemap push constant disables shader-side OETF so Vulkan performs the single required encode.
 
 ## Scene submission
 

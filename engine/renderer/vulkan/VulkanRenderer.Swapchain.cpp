@@ -1,6 +1,31 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 namespace ve {
+namespace {
+
+[[nodiscard]] bool isSrgbSwapchainFormat(const VkFormat format) noexcept {
+    switch (format) {
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] bool isUnormSwapchainFormat(const VkFormat format) noexcept {
+    switch (format) {
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+} // namespace
 
 VulkanRenderer::Impl::SwapchainSupport VulkanRenderer::Impl::querySwapchainSupport(VkPhysicalDevice device) const {
     SwapchainSupport support{};
@@ -23,15 +48,24 @@ VulkanRenderer::Impl::SwapchainSupport VulkanRenderer::Impl::querySwapchainSuppo
 }
 
 VkSurfaceFormatKHR VulkanRenderer::Impl::chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const {
-    // The tonemap shader writes gamma-encoded LDR values. Prefer UNORM swapchain
-    // formats so Vulkan does not apply a second sRGB conversion on color writes.
+    // The tonemap shader normally writes sRGB-encoded LDR values. Prefer UNORM
+    // swapchain formats so Vulkan does not apply a second conversion on color writes.
     for (const VkSurfaceFormatKHR& format : formats) {
-        if ((format.format == VK_FORMAT_B8G8R8A8_UNORM || format.format == VK_FORMAT_R8G8B8A8_UNORM) &&
-            format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if (isUnormSwapchainFormat(format.format) && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return format;
         }
     }
-    return formats.front();
+    for (const VkSurfaceFormatKHR& format : formats) {
+        if (isUnormSwapchainFormat(format.format)) {
+            return format;
+        }
+    }
+    const VkSurfaceFormatKHR fallback = formats.front();
+    if (isSrgbSwapchainFormat(fallback.format)) {
+        logger()->warn("Selected sRGB swapchain format {}; disabling shader-side sRGB OETF to avoid double encoding",
+                       static_cast<int>(fallback.format));
+    }
+    return fallback;
 }
 
 VkPresentModeKHR VulkanRenderer::Impl::choosePresentMode(const std::vector<VkPresentModeKHR>& presentModes) const {

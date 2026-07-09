@@ -261,7 +261,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         VkPushConstantRange tonemapPushRange{};
         tonemapPushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         tonemapPushRange.offset = 0;
-        tonemapPushRange.size = sizeof(float);
+        tonemapPushRange.size = sizeof(float) + sizeof(std::uint32_t);
 
         VkPipelineLayoutCreateInfo tonemapLayoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         tonemapLayoutInfo.setLayoutCount = 1;
