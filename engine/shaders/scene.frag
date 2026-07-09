@@ -53,14 +53,16 @@ void main() {
     float ndotv = max(dot(n, v), 0.0);
     float d = distributionGGX(n, h, roughness);
     float g = geometrySmith(ndotv, ndotl, roughness);
-    vec3 f = fresnelSchlick(max(dot(h, v), 0.0), f0);
-    vec3 specular = (d * g * f) / max(4.0 * ndotv * ndotl, 0.0001);
-    vec3 kd = (1.0 - f) * (1.0 - metallic);
-    vec3 diffuse = kd * albedo / PI;
+    vec3 directF = fresnelSchlick(max(dot(h, v), 0.0), f0);
+    vec3 specular = (d * g * directF) / max(4.0 * ndotv * ndotl, 0.0001);
+    vec3 directKd = (1.0 - directF) * (1.0 - metallic);
+    vec3 diffuse = directKd * albedo / PI;
 
+    vec3 ambientF = fresnelSchlickRoughness(ndotv, f0, roughness);
+    vec3 ambientKd = (1.0 - ambientF) * (1.0 - metallic);
     vec3 direct = (diffuse + specular) * scene.lightColor.rgb * scene.lightColor.a * ndotl;
-    vec3 ambientDiffuse = kd * albedo * environmentDiffuse(n);
-    vec3 ambientSpecular = f * scene.ambientSkyColor.rgb * scene.ambientSkyColor.a * (1.0 - roughness) * 0.12;
+    vec3 ambientDiffuse = ambientKd * albedo * environmentDiffuse(n);
+    vec3 ambientSpecular = ambientF * scene.ambientSkyColor.rgb * scene.ambientSkyColor.a * (1.0 - roughness) * 0.12;
     vec3 ambient = (ambientDiffuse + ambientSpecular) * ambientOcclusion;
     float groundGrid = 0.0;
     if (vMaterialFlags.x > 0.5) {

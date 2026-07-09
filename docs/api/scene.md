@@ -13,6 +13,7 @@ enum class SceneMeshId : std::uint8_t {
     GroundPlane,
     ImportedModel
 };
+```
 
 Logical mesh choices understood by the demo renderer. The Vulkan backend maps these to internal mesh/LOD buckets.
 

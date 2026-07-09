@@ -37,7 +37,11 @@ Valid SPIR-V is read directly into aligned `std::uint32_t` storage before `vkCre
 
 ## Scene shader data flow
 
-`scene.vert` reads per-instance material constants from the scene instance SSBO and emits them as `flat` fragment inputs, so albedo/roughness, emissive/metallic, and material flags are not perspective-interpolated per fragment. Position, normal, UV, and tangent remain interpolated vertex attributes. Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis instead of reconstructing an equivalent normal with another cross/normalize pair. `VulkanRenderer.FrameResources.cpp::updateUniforms()` uploads a unit-length light direction, so `scene.frag` consumes it directly instead of normalizing per fragment. The depth prepass uses `scene_depth.vert`, which keeps the same model/view-projection transform but declares only the position attribute and emits only `gl_Position`.
+`scene.vert` reads per-instance material constants from the scene instance SSBO and emits them as `flat` fragment inputs, so albedo/roughness, emissive/metallic, and material flags are not perspective-interpolated per fragment. Position, normal, UV, and tangent remain interpolated vertex attributes.
+
+`scene.frag` keeps direct-light Fresnel from the GGX half vector, but evaluates ambient diffuse/specular Fresnel from `N·V` with roughness-aware grazing reflectance so the image-based approximation does not change with sun direction. Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis instead of reconstructing an equivalent normal with another cross/normalize pair. `VulkanRenderer.FrameResources.cpp::updateUniforms()` uploads a unit-length light direction, so `scene.frag` consumes it directly instead of normalizing per fragment.
+
+The depth prepass uses `scene_depth.vert`, which keeps the same model/view-projection transform but declares only the position attribute and emits only `gl_Position`.
 
 ## Shader hot reload
 

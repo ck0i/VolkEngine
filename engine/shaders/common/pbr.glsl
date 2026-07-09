@@ -19,11 +19,18 @@ float geometrySmith(float ndotv, float ndotl, float roughness) {
     return geometrySchlickGGX(ndotv, roughness) * geometrySchlickGGX(ndotl, roughness);
 }
 
+float pow5(float value) {
+    float value2 = value * value;
+    return value2 * value2 * value;
+}
+
 vec3 fresnelSchlick(float cosTheta, vec3 f0) {
-    float f = clamp(1.0 - cosTheta, 0.0, 1.0);
-    float f2 = f * f;
-    float f5 = f2 * f2 * f;
-    return f0 + (1.0 - f0) * f5;
+    return f0 + (1.0 - f0) * pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
+}
+
+vec3 fresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness) {
+    vec3 grazing = max(vec3(1.0 - roughness), f0);
+    return f0 + (grazing - f0) * pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
 }
 
 float gridMask(vec2 uv) {
