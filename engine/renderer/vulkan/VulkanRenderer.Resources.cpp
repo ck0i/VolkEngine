@@ -66,11 +66,17 @@ void VulkanRenderer::Impl::destroyImage(ImageResource& image) {
 }
 
 void VulkanRenderer::Impl::createTextureResources() {
+    enum class TextureMipPolicy : std::uint8_t {
+        Albedo,
+        Normal,
+        Linear
+    };
+
     struct TextureUpload {
         std::filesystem::path path;
         VkFormat format = VK_FORMAT_UNDEFINED;
         std::string debugName;
-        bool cpuNormalMipChain = false;
+        TextureMipPolicy mipPolicy = TextureMipPolicy::Albedo;
         std::uint32_t baseWidth = 0;
         std::uint32_t baseHeight = 0;
         std::vector<LoadedImageRgba8> mipLevels;
@@ -80,9 +86,9 @@ void VulkanRenderer::Impl::createTextureResources() {
     };
 
     std::array<TextureUpload, 3> uploads{{
-        {.path = config_.assetDirectory / "textures" / "ground_albedo.png", .format = VK_FORMAT_R8G8B8A8_SRGB, .debugName = "Ground Albedo", .cpuNormalMipChain = false},
-        {.path = config_.assetDirectory / "textures" / "ground_normal.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground Normal", .cpuNormalMipChain = true},
-        {.path = config_.assetDirectory / "textures" / "ground_orm.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground ORM", .cpuNormalMipChain = false},
+        {.path = config_.assetDirectory / "textures" / "ground_albedo.png", .format = VK_FORMAT_R8G8B8A8_SRGB, .debugName = "Ground Albedo", .mipPolicy = TextureMipPolicy::Albedo},
+        {.path = config_.assetDirectory / "textures" / "ground_normal.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground Normal", .mipPolicy = TextureMipPolicy::Normal},
+        {.path = config_.assetDirectory / "textures" / "ground_orm.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground ORM", .mipPolicy = TextureMipPolicy::Linear},
     }};
     VkCommandBuffer uploadCommands = VK_NULL_HANDLE;
     VkDeviceSize totalStagingSize = 0;
@@ -108,18 +114,24 @@ void VulkanRenderer::Impl::createTextureResources() {
             upload.baseHeight = baseLevel.height;
             const std::uint32_t requestedMipLevels = mipLevelCountForExtent(textureExtent);
             const bool canLinearBlitMipmaps = requestedMipLevels > 1U && formatSupportsLinearMipBlit(upload.format);
-            const bool alphaNeedsCpuMips = !upload.cpuNormalMipChain && requestedMipLevels > 1U && hasNonOpaqueAlpha(baseLevel);
-            upload.gpuMipGeneration = !upload.cpuNormalMipChain && canLinearBlitMipmaps && !alphaNeedsCpuMips;
-            if (upload.cpuNormalMipChain) {
+            const bool isAlbedo = upload.mipPolicy == TextureMipPolicy::Albedo;
+            const bool isNormal = upload.mipPolicy == TextureMipPolicy::Normal;
+            const bool alphaNeedsCpuMips = isAlbedo && requestedMipLevels > 1U && hasNonOpaqueAlpha(baseLevel);
+            upload.gpuMipGeneration = !isNormal && canLinearBlitMipmaps && !alphaNeedsCpuMips;
+            if (isNormal) {
                 upload.mipLevels = buildNormalMapMipChainRgba8(std::move(baseLevel));
             } else if (alphaNeedsCpuMips) {
                 upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);
                 logger()->info("Texture {} uses alpha-weighted CPU albedo mips to avoid transparent texel bleed", upload.path.string());
             } else if (upload.gpuMipGeneration || requestedMipLevels == 1U) {
                 upload.mipLevels = std::vector<LoadedImageRgba8>{std::move(baseLevel)};
-            } else {
+            } else if (isAlbedo) {
                 upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);
                 logger()->warn("Texture format {} lacks linear blit/filter support; generated {} CPU albedo mips for {}",
+                               static_cast<int>(upload.format), upload.mipLevels.size(), upload.path.string());
+            } else {
+                upload.mipLevels = buildLinearMipChainRgba8(std::move(baseLevel));
+                logger()->warn("Texture format {} lacks linear blit/filter support; generated {} straight RGBA mips for {}",
                                static_cast<int>(upload.format), upload.mipLevels.size(), upload.path.string());
             }
             const std::uint32_t imageMipLevels = upload.gpuMipGeneration ? requestedMipLevels : static_cast<std::uint32_t>(upload.mipLevels.size());

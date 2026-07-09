@@ -69,10 +69,10 @@ Current texture path (`VulkanRenderer.Resources.cpp`):
 - uploads albedo as `VK_FORMAT_R8G8B8A8_SRGB`.
 - uploads normal maps as linear `VK_FORMAT_R8G8B8A8_UNORM`; shader code remaps sampled normals from `[0, 1]` to `[-1, 1]` before TBN transform.
 - uploads packed ORM material maps as linear `VK_FORMAT_R8G8B8A8_UNORM`; `scene.frag` reads R as ambient occlusion, G as roughness multiplier, and B as metallic multiplier.
-- generates opaque albedo mip levels with checked linear blits when supported; if the image has non-opaque alpha or the selected format/device cannot linearly blit the sRGB texture, the CPU builds a gamma-correct albedo mip chain by alpha-weighting RGB in linear space and averaging alpha coverage linearly so transparent texel colors do not bleed into lower mips.
+- uses explicit mip policies: albedo may use GPU blit mips for opaque textures and falls back to gamma-correct alpha-weighted CPU mips when alpha coverage or sRGB blit support requires it; packed linear scalar maps such as ORM use straight RGBA averaging for CPU fallback so scalar RGB channels never get alpha-weighted; normal maps always use CPU vector-renormalized mips.
 - builds normal-map mip chains on the CPU by decoding each proportional source footprint to tangent-space vectors, averaging, renormalizing, preserving averaged alpha, and uploading explicit mip copy regions; this avoids color-style byte averaging that flattens high-frequency normals and covers odd-size edge texels.
 - records albedo, normal, and ORM texture copies/mip generation from one shared staging buffer into one startup graphics upload command buffer and one submit, then binds them through one fixed material texture descriptor array.
-- uses separate descriptor samplers for color/scalar maps and normal maps: albedo/ORM can enable device anisotropy and use the albedo mip range, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.
+- uses separate descriptor samplers for color/scalar maps and normal maps: albedo/ORM can enable device anisotropy and use generated material mip ranges, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.
 
 Current geometry path (`VulkanRenderer.Meshes.cpp`):
 

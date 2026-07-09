@@ -399,6 +399,30 @@ int main() {
             2U,
             2U,
             std::vector<std::uint8_t>{
+                10U, 20U, 30U, 0U,
+                110U, 120U, 130U, 64U,
+                210U, 220U, 230U, 128U,
+                250U, 240U, 230U, 255U}};
+        std::vector<ve::LoadedImageRgba8> mipChain;
+        expectNoThrow("buildLinearMipChainRgba8 keeps scalar RGB independent from alpha", [&] {
+            mipChain = ve::buildLinearMipChainRgba8(baseLevel);
+        });
+        expectEqual("linear scalar chain has base and one mip level", mipChain.size(), static_cast<std::size_t>(2));
+        if (mipChain.size() == 2U) {
+            expectEqual("linear scalar mip width", mipChain[1U].width, 1U);
+            expectEqual("linear scalar mip height", mipChain[1U].height, 1U);
+            expectEqual("linear scalar mip red straight average", mipChain[1U].pixels.at(0U), 145U);
+            expectEqual("linear scalar mip green straight average", mipChain[1U].pixels.at(1U), 150U);
+            expectEqual("linear scalar mip blue straight average", mipChain[1U].pixels.at(2U), 155U);
+            expectEqual("linear scalar mip alpha straight average", mipChain[1U].pixels.at(3U), 112U);
+        }
+    }
+
+    {
+        const ve::LoadedImageRgba8 baseLevel{
+            2U,
+            2U,
+            std::vector<std::uint8_t>{
                 128U, 128U, 255U, 255U,
                 128U, 128U, 255U, 255U,
                 128U, 128U, 255U, 255U,

@@ -278,6 +278,39 @@ void validateRgba8Image(const LoadedImageRgba8& image, const char* context) {
     return mip;
 }
 
+[[nodiscard]] LoadedImageRgba8 buildNextLinearMipLevel(const LoadedImageRgba8& source) {
+    LoadedImageRgba8 mip{};
+    mip.width = std::max(1U, source.width / 2U);
+    mip.height = std::max(1U, source.height / 2U);
+    mip.pixels.resize(static_cast<std::size_t>(mip.width) * mip.height * 4U);
+    for (std::uint32_t y = 0; y < mip.height; ++y) {
+        for (std::uint32_t x = 0; x < mip.width; ++x) {
+            std::uint32_t sum[4]{};
+            std::uint32_t sampleCount = 0;
+            const std::uint32_t xBegin = static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * source.width) / mip.width);
+            const std::uint32_t yBegin = static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * source.height) / mip.height);
+            const std::uint32_t xEnd = static_cast<std::uint32_t>((static_cast<std::uint64_t>(x + 1U) * source.width) / mip.width);
+            const std::uint32_t yEnd = static_cast<std::uint32_t>((static_cast<std::uint64_t>(y + 1U) * source.height) / mip.height);
+            for (std::uint32_t sy = yBegin; sy < yEnd; ++sy) {
+                for (std::uint32_t sx = xBegin; sx < xEnd; ++sx) {
+                    const std::size_t offset = (static_cast<std::size_t>(sy) * source.width + sx) * 4U;
+                    sum[0] += source.pixels[offset + 0U];
+                    sum[1] += source.pixels[offset + 1U];
+                    sum[2] += source.pixels[offset + 2U];
+                    sum[3] += source.pixels[offset + 3U];
+                    ++sampleCount;
+                }
+            }
+            const std::size_t offset = (static_cast<std::size_t>(y) * mip.width + x) * 4U;
+            mip.pixels[offset + 0U] = static_cast<std::uint8_t>((sum[0] + sampleCount / 2U) / sampleCount);
+            mip.pixels[offset + 1U] = static_cast<std::uint8_t>((sum[1] + sampleCount / 2U) / sampleCount);
+            mip.pixels[offset + 2U] = static_cast<std::uint8_t>((sum[2] + sampleCount / 2U) / sampleCount);
+            mip.pixels[offset + 3U] = static_cast<std::uint8_t>((sum[3] + sampleCount / 2U) / sampleCount);
+        }
+    }
+    return mip;
+}
+
 } // namespace
 
 LoadedImageRgba8 loadPpmRgba8(const std::filesystem::path& path) {
@@ -348,7 +381,6 @@ LoadedImageRgba8 loadImageRgba8(const std::filesystem::path& path) {
     return loadStbImageRgba8(path);
 }
 
-
 std::vector<LoadedImageRgba8> buildAlbedoMipChainRgba8(LoadedImageRgba8 baseLevel, const bool isSrgb) {
     validateRgba8Image(baseLevel, "Albedo");
     std::vector<LoadedImageRgba8> levels;
@@ -360,6 +392,16 @@ std::vector<LoadedImageRgba8> buildAlbedoMipChainRgba8(LoadedImageRgba8 baseLeve
     return levels;
 }
 
+std::vector<LoadedImageRgba8> buildLinearMipChainRgba8(LoadedImageRgba8 baseLevel) {
+    validateRgba8Image(baseLevel, "Linear image");
+    std::vector<LoadedImageRgba8> levels;
+    levels.reserve(mipLevelCountForExtent(baseLevel.width, baseLevel.height));
+    levels.push_back(std::move(baseLevel));
+    while (levels.back().width > 1U || levels.back().height > 1U) {
+        levels.push_back(buildNextLinearMipLevel(levels.back()));
+    }
+    return levels;
+}
 
 std::vector<LoadedImageRgba8> buildNormalMapMipChainRgba8(LoadedImageRgba8 baseLevel) {
     validateRgba8Image(baseLevel, "Normal map");
