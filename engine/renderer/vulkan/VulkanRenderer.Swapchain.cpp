@@ -225,12 +225,8 @@ void VulkanRenderer::Impl::recreateSwapchain() {
 
     const bool pipelineFormatsChanged = previousSwapchainFormat != swapchainFormat_ || previousHdrFormat != hdr_.format || previousDepthFormat != depth_.format;
     if (pipelineFormatsChanged || depthPrepassPipeline_ == VK_NULL_HANDLE || scenePipeline_ == VK_NULL_HANDLE || sceneNoPrepassPipeline_ == VK_NULL_HANDLE || tonemapPipeline_ == VK_NULL_HANDLE) {
-        if (tonemapPipeline_ != VK_NULL_HANDLE) { vkDestroyPipeline(device_, tonemapPipeline_, nullptr); tonemapPipeline_ = VK_NULL_HANDLE; }
-        if (tonemapPipelineLayout_ != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device_, tonemapPipelineLayout_, nullptr); tonemapPipelineLayout_ = VK_NULL_HANDLE; }
-        if (depthPrepassPipeline_ != VK_NULL_HANDLE) { vkDestroyPipeline(device_, depthPrepassPipeline_, nullptr); depthPrepassPipeline_ = VK_NULL_HANDLE; }
-        if (scenePipeline_ != VK_NULL_HANDLE) { vkDestroyPipeline(device_, scenePipeline_, nullptr); scenePipeline_ = VK_NULL_HANDLE; }
-        if (sceneNoPrepassPipeline_ != VK_NULL_HANDLE) { vkDestroyPipeline(device_, sceneNoPrepassPipeline_, nullptr); sceneNoPrepassPipeline_ = VK_NULL_HANDLE; }
-        if (scenePipelineLayout_ != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device_, scenePipelineLayout_, nullptr); scenePipelineLayout_ = VK_NULL_HANDLE; }
+        PipelineSet oldPipelines = detachActivePipelineSet();
+        destroyPipelineSet(oldPipelines);
         createPipelines();
     }
     createTonemapDescriptorSet();

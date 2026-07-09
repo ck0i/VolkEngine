@@ -637,6 +637,7 @@ private:
     void createPipelines();
     [[nodiscard]] PipelineSet buildPipelineSet();
     void destroyPipelineSet(PipelineSet& pipelines) const;
+    [[nodiscard]] PipelineSet detachActivePipelineSet() noexcept;
     void retireDeferredPipelineSets();
     void installPipelineSet(const PipelineSet& pipelines);
     void refreshShaderWriteTimes();

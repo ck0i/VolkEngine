@@ -360,6 +360,24 @@ void VulkanRenderer::Impl::destroyPipelineSet(PipelineSet& pipelines) const {
     if (pipelines.sceneLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device_, pipelines.sceneLayout, nullptr); pipelines.sceneLayout = VK_NULL_HANDLE; }
 }
 
+VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet() noexcept {
+    PipelineSet pipelines{};
+    pipelines.sceneLayout = scenePipelineLayout_;
+    pipelines.depthPrepass = depthPrepassPipeline_;
+    pipelines.scene = scenePipeline_;
+    pipelines.sceneNoPrepass = sceneNoPrepassPipeline_;
+    pipelines.tonemapLayout = tonemapPipelineLayout_;
+    pipelines.tonemap = tonemapPipeline_;
+
+    scenePipelineLayout_ = VK_NULL_HANDLE;
+    depthPrepassPipeline_ = VK_NULL_HANDLE;
+    scenePipeline_ = VK_NULL_HANDLE;
+    sceneNoPrepassPipeline_ = VK_NULL_HANDLE;
+    tonemapPipelineLayout_ = VK_NULL_HANDLE;
+    tonemapPipeline_ = VK_NULL_HANDLE;
+    return pipelines;
+}
+
 void VulkanRenderer::Impl::retireDeferredPipelineSets() {
     for (auto it = retiredPipelineSets_.begin(); it != retiredPipelineSets_.end();) {
         bool ready = true;

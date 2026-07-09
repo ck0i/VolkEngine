@@ -96,7 +96,7 @@ Swapchain images are preferred as UNORM because `tonemap.frag` normally applies 
 - `--no-vsync` prefers immediate, then mailbox, then FIFO.
 - Resize/minimize waits for a non-zero framebuffer extent and returns if the window closes while minimized.
 - Swapchain recreation rebuilds image views, per-image render-finished semaphores, depth/HDR images, and tonemap/ImGui state.
-- Pipelines are recreated when dependent formats change; otherwise existing pipelines are reused.
+- Pipelines are recreated when dependent formats change; otherwise existing pipelines are reused. Recreate/teardown paths detach active pipeline handles into a `PipelineSet` before destruction so member handles are nulled before any cleanup or error path can observe them.
 
 ## Screenshot path
 
