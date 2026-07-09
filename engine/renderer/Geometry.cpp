@@ -265,15 +265,13 @@ void appendObjVector(std::vector<Vec>& values, std::string_view fields, const st
     return normalizeOr(axis - normal * dot(axis, normal), {1.0f, 0.0f, 0.0f});
 }
 
-void calculateMeshTangents(MeshData& mesh, const bool triangleIndexed) {
-    if (triangleIndexed) {
-        if ((mesh.indices.size() % 3U) != 0U) {
-            throw std::runtime_error("Triangle-indexed mesh has incomplete triangles");
-        }
-        for (const std::uint32_t index : mesh.indices) {
-            if (index >= mesh.vertices.size()) {
-                throw std::runtime_error("Triangle-indexed mesh references a vertex outside the mesh");
-            }
+void calculateMeshTangents(MeshData& mesh) {
+    if ((mesh.indices.size() % 3U) != 0U) {
+        throw std::runtime_error("Triangle-indexed mesh has incomplete triangles");
+    }
+    for (const std::uint32_t index : mesh.indices) {
+        if (index >= mesh.vertices.size()) {
+            throw std::runtime_error("Triangle-indexed mesh references a vertex outside the mesh");
         }
     }
 
@@ -303,10 +301,8 @@ void calculateMeshTangents(MeshData& mesh, const bool triangleIndexed) {
         }
     };
 
-    if (triangleIndexed) {
-        for (std::size_t index = 0; index + 2U < mesh.indices.size(); index += 3U) {
-            accumulateTriangle(mesh.indices[index], mesh.indices[index + 1U], mesh.indices[index + 2U]);
-        }
+    for (std::size_t index = 0; index + 2U < mesh.indices.size(); index += 3U) {
+        accumulateTriangle(mesh.indices[index], mesh.indices[index + 1U], mesh.indices[index + 2U]);
     }
     for (std::size_t index = 0; index < mesh.vertices.size(); ++index) {
         Vertex& vertex = mesh.vertices[index];
@@ -354,11 +350,9 @@ void compactMeshToReferencedVertices(MeshData& mesh) {
     mesh.vertices.resize(compactVertexCount);
 }
 
-void finalizeMesh(MeshData& mesh, const bool triangleIndexed = true) {
-    if (triangleIndexed) {
-        compactMeshToReferencedVertices(mesh);
-    }
-    calculateMeshTangents(mesh, triangleIndexed);
+void finalizeMesh(MeshData& mesh) {
+    compactMeshToReferencedVertices(mesh);
+    calculateMeshTangents(mesh);
     mesh.bounds = calculateMeshBounds(mesh.vertices);
 }
 
@@ -545,35 +539,6 @@ MeshData createPlaneMesh(const float halfExtent, const float uvScale) {
     };
     mesh.indices = {0, 2, 1, 0, 3, 2};
     finalizeMesh(mesh);
-    return mesh;
-}
-
-MeshData createGridMesh(const float halfExtent, const std::uint32_t divisions) {
-    if (divisions == 0U) {
-        throw std::runtime_error("Grid divisions must be positive");
-    }
-    MeshData mesh{};
-    const std::uint64_t vertexCount64 = (static_cast<std::uint64_t>(divisions) + 1ULL) * 4ULL;
-    if (vertexCount64 > std::numeric_limits<std::uint32_t>::max()) {
-        throw std::runtime_error("Grid mesh exceeds renderer 32-bit mesh range");
-    }
-    mesh.vertices.reserve(static_cast<std::size_t>(vertexCount64));
-    mesh.indices.reserve(static_cast<std::size_t>(vertexCount64));
-    const float step = (halfExtent * 2.0f) / static_cast<float>(divisions);
-    for (std::uint32_t i = 0; i <= divisions; ++i) {
-        const float x = -halfExtent + step * static_cast<float>(i);
-        const float z = -halfExtent + step * static_cast<float>(i);
-        const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
-        mesh.vertices.push_back({{x, 0.0f, -halfExtent}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-        mesh.vertices.push_back({{x, 0.0f, halfExtent}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-        mesh.vertices.push_back({{-halfExtent, 0.0f, z}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-        mesh.vertices.push_back({{halfExtent, 0.0f, z}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-        mesh.indices.push_back(base);
-        mesh.indices.push_back(base + 1U);
-        mesh.indices.push_back(base + 2U);
-        mesh.indices.push_back(base + 3U);
-    }
-    finalizeMesh(mesh, false);
     return mesh;
 }
 

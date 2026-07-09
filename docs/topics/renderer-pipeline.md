@@ -81,7 +81,7 @@ Swapchain images are preferred as UNORM because `tonemap.frag` normally applies 
 
 ## Scene submission
 
-- Generated and imported CPU meshes keep full-float position/normal/uv/tangent data for import and tangent generation, then write compact Vulkan `GpuVertex` records directly into one mapped staging buffer: full-float position/UV plus SNORM16 normal/tangent attributes. All batches share one vertex buffer and one index buffer; triangle-list indices are reordered during upload for post-transform vertex-cache locality while `loadObjMesh()` keeps source OBJ fan order.
+- Generated and imported CPU meshes are triangle lists that keep full-float position/normal/uv/tangent data for import and tangent generation, then write compact Vulkan `GpuVertex` records directly into one mapped staging buffer: full-float position/UV plus SNORM16 normal/tangent attributes. All batches share one vertex buffer and one index buffer; indices are reordered during upload for post-transform vertex-cache locality while `loadObjMesh()` keeps source OBJ fan order.
 - `GpuMesh` records carry offset/count values only.
 - `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds; command recording expands each visible item into GPU instance data with model and CPU-precomputed normal-matrix columns.
 - Scene descriptors bind per-frame uniforms, one fixed combined-sampler material texture array (`albedo`, `normal`, `ORM`), and per-frame instance data.

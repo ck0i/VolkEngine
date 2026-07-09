@@ -36,7 +36,6 @@ struct MeshData {
 [[nodiscard]] MeshData createCubeMesh();
 [[nodiscard]] MeshData createUvSphereMesh(std::uint32_t rings, std::uint32_t segments);
 [[nodiscard]] MeshData createPlaneMesh(float halfExtent, float uvScale);
-[[nodiscard]] MeshData createGridMesh(float halfExtent, std::uint32_t divisions);
 void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indices, std::size_t vertexCount, std::uint32_t cacheSize = 32);
 [[nodiscard]] MeshData loadObjMesh(const std::filesystem::path& path);
 

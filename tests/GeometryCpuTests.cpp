@@ -496,26 +496,8 @@ int main() {
             expectTangentIsPositiveXWithNegativeHandedness(std::string("createPlaneMesh vertex ") + std::to_string(i) + " tangent", mesh.vertices.at(i).tangent, mesh.vertices.at(i).normal);
         }
     }
-    {
-        ve::MeshData mesh;
-        constexpr float gridHalfExtent = 3.0f;
-        constexpr std::uint32_t gridDivisions = 8U;
-        expectNoThrow("createGridMesh computes bounds from vertex positions", [&] {
-            mesh = ve::createGridMesh(gridHalfExtent, gridDivisions);
-        });
-        expectMeshBoundsFromVertices("createGridMesh bounds", mesh);
-        expectEqual("createGridMesh uses line-list-like index count", mesh.indices.size(), static_cast<std::size_t>(4U) * static_cast<std::size_t>(gridDivisions + 1U));
-        for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-            expectTangentIsPositiveXWithPositiveHandedness(std::string("createGridMesh vertex ") + std::to_string(i) + " tangent", mesh.vertices.at(i).tangent, mesh.vertices.at(i).normal);
-        }
-    }
     expectThrowsRuntimeError("createUvSphereMesh rejects meshes outside 32-bit range", [] {
         (void)ve::createUvSphereMesh(65536U, 65536U);
-    });
-
-    expectThrowsRuntimeError("createGridMesh rejects meshes outside 32-bit range", [] {
-        constexpr std::uint32_t overflowingDivisions = (std::numeric_limits<std::uint32_t>::max() / 4U) + 1U;
-        (void)ve::createGridMesh(1.0f, overflowingDivisions);
     });
 
     {
