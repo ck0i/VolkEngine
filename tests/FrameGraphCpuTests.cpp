@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -200,71 +201,32 @@ int main() {
 
     {
         FrameGraph graph;
-        const auto firstPass = graph.addPass({"Edge Writer"});
-        const auto overflowPass = graph.addPass({"Overflowing Pass"});
+        constexpr std::size_t kLargeGraphCount = 300;
+        std::vector<FrameGraph::ResourceHandle> resources;
+        std::vector<FrameGraph::PassHandle> passes;
+        resources.reserve(kLargeGraphCount);
+        passes.reserve(kLargeGraphCount);
 
-        const auto edgeResource0 = graph.addResource({"Edge Resource 0", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource1 = graph.addResource({"Edge Resource 1", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource2 = graph.addResource({"Edge Resource 2", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource3 = graph.addResource({"Edge Resource 3", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource4 = graph.addResource({"Edge Resource 4", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource5 = graph.addResource({"Edge Resource 5", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource6 = graph.addResource({"Edge Resource 6", ve::FrameGraphResourceKind::Image, false});
-        const auto edgeResource7 = graph.addResource({"Edge Resource 7", ve::FrameGraphResourceKind::Image, false});
-
-        const FrameGraph::ResourceHandle resources[FrameGraph::kMaxResources] = {
-            edgeResource0,
-            edgeResource1,
-            edgeResource2,
-            edgeResource3,
-            edgeResource4,
-            edgeResource5,
-            edgeResource6,
-            edgeResource7,
-        };
-
-        const FrameGraphUsage usages[] = {
-            FrameGraphUsage::ColorAttachment,
-            FrameGraphUsage::DepthAttachment,
-            FrameGraphUsage::SampledImage,
-        };
-
-        expectNoThrow("write() fills capacity with unique edge tuples", [&] {
-            for (std::size_t edgeIndex = 0; edgeIndex < FrameGraph::kMaxEdges; ++edgeIndex) {
-                graph.write(
-                    firstPass,
-                    resources[edgeIndex % FrameGraph::kMaxResources],
-                    usages[edgeIndex % 3]);
+        expectNoThrow("adding resources and passes beyond old fixed caps succeeds", [&] {
+            for (std::size_t index = 0; index < kLargeGraphCount; ++index) {
+                resources.push_back(graph.addResource({"Scalable Resource", ve::FrameGraphResourceKind::Image, false}));
+                passes.push_back(graph.addPass({"Scalable Pass"}));
+                graph.write(passes.back(), resources.back(), FrameGraphUsage::ColorAttachment);
+                if (index > 0) {
+                    graph.read(passes.back(), resources[index - 1U], FrameGraphUsage::SampledImage);
+                }
             }
         });
 
-        expectThrowsRuntimeError("write() rejects edge capacity overflow", [&] {
-            graph.write(overflowPass, edgeResource0, FrameGraphUsage::ColorAttachment);
+        expectEqual("large graph resource count", graph.resourceCount(), kLargeGraphCount);
+        expectEqual("large graph pass count", graph.passCount(), kLargeGraphCount);
+        expectEqual("large graph edge count", graph.edgeCount(), (kLargeGraphCount * 2U) - 1U);
+        expectEqual("wide resource handle keeps index above uint8 range", resources.back().index, static_cast<FrameGraph::Index>(kLargeGraphCount - 1U));
+        expectEqual("wide pass handle keeps index above uint8 range", passes.back().index, static_cast<FrameGraph::Index>(kLargeGraphCount - 1U));
+        expectNoThrow("large graph compiles beyond old fixed caps", [&] {
+            graph.compile();
         });
-    }
-
-    {
-        FrameGraph graph;
-        expectNoThrow("adding resource exactly at capacity succeeds", [&] {
-            for (std::size_t resourceIndex = 0; resourceIndex < FrameGraph::kMaxResources; ++resourceIndex) {
-                (void)graph.addResource({"Extra", ve::FrameGraphResourceKind::Image, false});
-            }
-        });
-        expectThrowsRuntimeError("addResource() rejects resource overflow after capacity", [&] {
-            (void)graph.addResource({"Overflow", ve::FrameGraphResourceKind::Image, false});
-        });
-    }
-
-    {
-        FrameGraph graph;
-        expectNoThrow("adding pass exactly at capacity succeeds", [&] {
-            for (std::size_t passIndex = 0; passIndex < FrameGraph::kMaxPasses; ++passIndex) {
-                (void)graph.addPass({"Pass"});
-            }
-        });
-        expectThrowsRuntimeError("addPass() rejects pass overflow after capacity", [&] {
-            (void)graph.addPass({"Overflow"});
-        });
+        expectEqual("large graph read edge survives", graph.hasEdge(passes.back(), resources[kLargeGraphCount - 2U], FrameGraphAccess::Read, FrameGraphUsage::SampledImage), true);
     }
 
     if (gFailureCount == 0) {

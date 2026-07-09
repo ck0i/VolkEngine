@@ -99,6 +99,7 @@ add_library(VolkEngine STATIC
     engine/platform/Window.cpp
     engine/renderer/Geometry.cpp
     engine/renderer/ImageLoader.cpp
+    engine/renderer/StbImageUsage.cpp
     engine/renderer/vulkan/VmaUsage.cpp
     engine/renderer/vulkan/VulkanRenderer.cpp
     engine/renderer/vulkan/VulkanRenderer.Device.cpp
@@ -116,9 +117,9 @@ add_library(VolkEngine STATIC
     engine/renderer/vulkan/VulkanRenderer.Visibility.cpp)
 
 if(MSVC)
-    set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp PROPERTIES COMPILE_OPTIONS /w)
+    set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp engine/renderer/StbImageUsage.cpp PROPERTIES COMPILE_OPTIONS /w)
 else()
-    set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp PROPERTIES COMPILE_OPTIONS -w)
+    set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp engine/renderer/StbImageUsage.cpp PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
 add_dependencies(VolkEngine VolkEngineShaders VolkEngineAssets)
@@ -134,6 +135,9 @@ target_link_libraries(VolkEngine
         ${VOLKENGINE_GLFW_TARGET}
         ${VOLKENGINE_SPDLOG_TARGET}
         $<$<BOOL:${VOLKENGINE_ENABLE_IMGUI}>:VolkEngineImGui>)
+target_link_libraries(VolkEngine
+    PRIVATE
+        ${VOLKENGINE_STB_TARGET})
 
 target_compile_definitions(VolkEngine
     PUBLIC
@@ -183,10 +187,14 @@ add_test(NAME FrameGraphCpu
     COMMAND VolkEngineFrameGraphCpuTest)
 add_executable(VolkEngineImageLoaderCpuTest
     tests/ImageLoaderCpuTests.cpp
-    engine/renderer/ImageLoader.cpp)
+    engine/renderer/ImageLoader.cpp
+    engine/renderer/StbImageUsage.cpp)
 target_include_directories(VolkEngineImageLoaderCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_link_libraries(VolkEngineImageLoaderCpuTest
+    PRIVATE
+        ${VOLKENGINE_STB_TARGET})
 volkengine_target_warnings(VolkEngineImageLoaderCpuTest)
 add_test(NAME ImageLoaderCpu
     COMMAND VolkEngineImageLoaderCpuTest)
@@ -199,3 +207,19 @@ target_include_directories(VolkEngineGeometryCpuTest
 volkengine_target_warnings(VolkEngineGeometryCpuTest)
 add_test(NAME GeometryCpu
     COMMAND VolkEngineGeometryCpuTest)
+add_executable(VolkEngineGpuResourceRegistryCpuTest
+    tests/GpuResourceRegistryCpuTests.cpp)
+target_include_directories(VolkEngineGpuResourceRegistryCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineGpuResourceRegistryCpuTest)
+add_test(NAME GpuResourceRegistryCpu
+    COMMAND VolkEngineGpuResourceRegistryCpuTest)
+add_executable(VolkEngineMathCpuTest
+    tests/MathCpuTests.cpp)
+target_include_directories(VolkEngineMathCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineMathCpuTest)
+add_test(NAME MathCpu
+    COMMAND VolkEngineMathCpuTest)

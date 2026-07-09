@@ -1,6 +1,44 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 namespace ve {
+namespace {
+
+[[nodiscard]] std::vector<std::uint32_t> readSpirvWords(const std::filesystem::path& path) {
+    constexpr std::uint32_t kSpirvMagic = 0x07230203U;
+    constexpr std::uint32_t kByteSwappedSpirvMagic = 0x03022307U;
+    constexpr std::size_t kSpirvHeaderWordCount = 5;
+
+    std::ifstream file(path, std::ios::ate | std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Failed to open SPIR-V file: " + path.string());
+    }
+    const std::streamsize byteSize = file.tellg();
+    if (byteSize < 0) {
+        throw std::runtime_error("Failed to determine SPIR-V file size: " + path.string());
+    }
+    if (static_cast<std::uint64_t>(byteSize) < kSpirvHeaderWordCount * sizeof(std::uint32_t)) {
+        throw std::runtime_error("SPIR-V file is too small to contain a valid header: " + path.string());
+    }
+    if ((byteSize % static_cast<std::streamsize>(sizeof(std::uint32_t))) != 0) {
+        throw std::runtime_error("SPIR-V file has invalid byte size: " + path.string());
+    }
+
+    std::vector<std::uint32_t> words(static_cast<std::size_t>(byteSize) / sizeof(std::uint32_t));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(words.data()), byteSize)) {
+        throw std::runtime_error("Failed to read SPIR-V file: " + path.string());
+    }
+    if (words[0] == kByteSwappedSpirvMagic) {
+        throw std::runtime_error("SPIR-V file appears byte-swapped instead of native little-endian words: " + path.string());
+    }
+    if (words[0] != kSpirvMagic) {
+        throw std::runtime_error("SPIR-V file has invalid magic number: " + path.string());
+    }
+    return words;
+}
+
+} // namespace
+
 
 std::filesystem::path VulkanRenderer::Impl::pipelineCachePath() const {
     return config_.cacheDirectory / "pipeline_cache.bin";
@@ -135,27 +173,32 @@ void VulkanRenderer::Impl::savePipelineCache() const {
 
 VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     PipelineSet pipelines{};
-    const std::array<std::filesystem::path, 4> shaderPaths = shaderSpirvPaths(config_.shaderDirectory);
+    const auto shaderPaths = shaderSpirvPaths(config_.shaderDirectory);
     VkShaderModule sceneVert = VK_NULL_HANDLE;
     VkShaderModule sceneFrag = VK_NULL_HANDLE;
     VkShaderModule tonemapVert = VK_NULL_HANDLE;
     VkShaderModule tonemapFrag = VK_NULL_HANDLE;
+    VkShaderModule depthPrepassVert = VK_NULL_HANDLE;
 
     try {
         sceneVert = createShaderModule(shaderPaths[0]);
         sceneFrag = createShaderModule(shaderPaths[1]);
         tonemapVert = createShaderModule(shaderPaths[2]);
         tonemapFrag = createShaderModule(shaderPaths[3]);
+        depthPrepassVert = createShaderModule(shaderPaths[4]);
 
         std::array<VkPipelineShaderStageCreateInfo, 2> sceneStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, sceneVert), shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, sceneFrag)};
         std::array<VkVertexInputBindingDescription, 1> bindings{};
         bindings[0].binding = 0;
-        bindings[0].stride = sizeof(Vertex);
+        bindings[0].stride = sizeof(GpuVertex);
         bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        std::array<VkVertexInputAttributeDescription, 3> attributes{};
-        attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)};
-        attributes[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)};
-        attributes[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)};
+        std::array<VkVertexInputAttributeDescription, 4> attributes{};
+        attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuVertex, position)};
+        attributes[1] = {1, 0, VK_FORMAT_R16G16B16A16_SNORM, offsetof(GpuVertex, normal)};
+        attributes[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuVertex, uv)};
+        attributes[3] = {3, 0, VK_FORMAT_R16G16B16A16_SNORM, offsetof(GpuVertex, tangent)};
+        std::array<VkVertexInputAttributeDescription, 1> depthAttributes{};
+        depthAttributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuVertex, position)};
 
         VkPipelineVertexInputStateCreateInfo vertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         vertexInput.vertexBindingDescriptionCount = static_cast<std::uint32_t>(bindings.size());
@@ -163,6 +206,9 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
         vertexInput.pVertexAttributeDescriptions = attributes.data();
 
+        VkPipelineVertexInputStateCreateInfo depthVertexInput = vertexInput;
+        depthVertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(depthAttributes.size());
+        depthVertexInput.pVertexAttributeDescriptions = depthAttributes.data();
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
@@ -201,6 +247,29 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         dynamic.dynamicStateCount = static_cast<std::uint32_t>(dynamicStates.size());
         dynamic.pDynamicStates = dynamicStates.data();
 
+        const auto makeGraphicsPipelineInfo = [&](const VkPipelineRenderingCreateInfo& rendering,
+                                                  const auto& stages,
+                                                  const VkPipelineVertexInputStateCreateInfo& vertexInputState,
+                                                  const VkPipelineRasterizationStateCreateInfo& rasterizerState,
+                                                  const VkPipelineDepthStencilStateCreateInfo& depthState,
+                                                  const VkPipelineColorBlendStateCreateInfo& blendState,
+                                                  const VkPipelineLayout layout) {
+            VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            info.pNext = &rendering;
+            info.stageCount = static_cast<std::uint32_t>(stages.size());
+            info.pStages = stages.data();
+            info.pVertexInputState = &vertexInputState;
+            info.pInputAssemblyState = &inputAssembly;
+            info.pViewportState = &viewportState;
+            info.pRasterizationState = &rasterizerState;
+            info.pMultisampleState = &multisample;
+            info.pDepthStencilState = &depthState;
+            info.pColorBlendState = &blendState;
+            info.pDynamicState = &dynamic;
+            info.layout = layout;
+            return info;
+        };
+
         VkPipelineLayoutCreateInfo sceneLayoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         sceneLayoutInfo.setLayoutCount = 1;
         sceneLayoutInfo.pSetLayouts = &sceneSetLayout_;
@@ -212,44 +281,24 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         sceneRendering.pColorAttachmentFormats = &hdr_.format;
         sceneRendering.depthAttachmentFormat = depth_.format;
 
-        std::array<VkPipelineShaderStageCreateInfo, 1> depthPrepassStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, sceneVert)};
+        std::array<VkPipelineShaderStageCreateInfo, 1> depthPrepassStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, depthPrepassVert)};
         VkPipelineRenderingCreateInfo depthPrepassRendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
         depthPrepassRendering.colorAttachmentCount = 0;
         depthPrepassRendering.depthAttachmentFormat = depth_.format;
-        VkGraphicsPipelineCreateInfo depthPrepassInfo{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        depthPrepassInfo.pNext = &depthPrepassRendering;
-        depthPrepassInfo.stageCount = static_cast<std::uint32_t>(depthPrepassStages.size());
-        depthPrepassInfo.pStages = depthPrepassStages.data();
-        depthPrepassInfo.pVertexInputState = &vertexInput;
-        depthPrepassInfo.pInputAssemblyState = &inputAssembly;
-        depthPrepassInfo.pViewportState = &viewportState;
-        depthPrepassInfo.pRasterizationState = &rasterizer;
-        depthPrepassInfo.pMultisampleState = &multisample;
-        depthPrepassInfo.pDepthStencilState = &depthPrepassDepth;
-        depthPrepassInfo.pColorBlendState = &noColorBlend;
-        depthPrepassInfo.pDynamicState = &dynamic;
-        depthPrepassInfo.layout = pipelines.sceneLayout;
-        checkVk(vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &depthPrepassInfo, nullptr, &pipelines.depthPrepass), "vkCreateGraphicsPipelines depth prepass");
+        VkGraphicsPipelineCreateInfo depthPrepassInfo = makeGraphicsPipelineInfo(depthPrepassRendering, depthPrepassStages, depthVertexInput, rasterizer, depthPrepassDepth, noColorBlend, pipelines.sceneLayout);
+        VkGraphicsPipelineCreateInfo sceneInfo = makeGraphicsPipelineInfo(sceneRendering, sceneStages, vertexInput, rasterizer, sceneDepth, blend, pipelines.sceneLayout);
+        VkGraphicsPipelineCreateInfo sceneNoPrepassInfo = sceneInfo;
+        sceneNoPrepassInfo.pDepthStencilState = &depthPrepassDepth;
+        std::array<VkGraphicsPipelineCreateInfo, 3> scenePipelineInfos{depthPrepassInfo, sceneInfo, sceneNoPrepassInfo};
+        std::array<VkPipeline, 3> scenePipelineHandles{};
+        const VkResult scenePipelineResult = vkCreateGraphicsPipelines(device_, pipelineCache_, static_cast<std::uint32_t>(scenePipelineInfos.size()),
+                                                                       scenePipelineInfos.data(), nullptr, scenePipelineHandles.data());
+        pipelines.depthPrepass = scenePipelineHandles[0];
+        pipelines.scene = scenePipelineHandles[1];
+        pipelines.sceneNoPrepass = scenePipelineHandles[2];
+        checkVk(scenePipelineResult, "vkCreateGraphicsPipelines scene set");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.depthPrepass), "Depth Prepass Pipeline");
-
-        VkGraphicsPipelineCreateInfo sceneInfo{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        sceneInfo.pNext = &sceneRendering;
-        sceneInfo.stageCount = static_cast<std::uint32_t>(sceneStages.size());
-        sceneInfo.pStages = sceneStages.data();
-        sceneInfo.pVertexInputState = &vertexInput;
-        sceneInfo.pInputAssemblyState = &inputAssembly;
-        sceneInfo.pViewportState = &viewportState;
-        sceneInfo.pRasterizationState = &rasterizer;
-        sceneInfo.pMultisampleState = &multisample;
-        sceneInfo.pDepthStencilState = &sceneDepth;
-        sceneInfo.pColorBlendState = &blend;
-        sceneInfo.pDynamicState = &dynamic;
-        sceneInfo.layout = pipelines.sceneLayout;
-        checkVk(vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &sceneInfo, nullptr, &pipelines.scene), "vkCreateGraphicsPipelines scene");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.scene), "HDR Scene Pipeline");
-
-        sceneInfo.pDepthStencilState = &depthPrepassDepth;
-        checkVk(vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &sceneInfo, nullptr, &pipelines.sceneNoPrepass), "vkCreateGraphicsPipelines scene no prepass");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.sceneNoPrepass), "HDR Scene Pipeline No Prepass");
 
         std::array<VkPipelineShaderStageCreateInfo, 2> tonemapStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, tonemapVert), shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, tonemapFrag)};
@@ -275,22 +324,11 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         tonemapRendering.colorAttachmentCount = 1;
         tonemapRendering.pColorAttachmentFormats = &swapchainFormat_;
 
-        VkGraphicsPipelineCreateInfo tonemapInfo{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        tonemapInfo.pNext = &tonemapRendering;
-        tonemapInfo.stageCount = static_cast<std::uint32_t>(tonemapStages.size());
-        tonemapInfo.pStages = tonemapStages.data();
-        tonemapInfo.pVertexInputState = &emptyVertexInput;
-        tonemapInfo.pInputAssemblyState = &inputAssembly;
-        tonemapInfo.pViewportState = &viewportState;
-        tonemapInfo.pRasterizationState = &noCullRasterizer;
-        tonemapInfo.pMultisampleState = &multisample;
-        tonemapInfo.pDepthStencilState = &noDepth;
-        tonemapInfo.pColorBlendState = &blend;
-        tonemapInfo.pDynamicState = &dynamic;
-        tonemapInfo.layout = pipelines.tonemapLayout;
+        VkGraphicsPipelineCreateInfo tonemapInfo = makeGraphicsPipelineInfo(tonemapRendering, tonemapStages, emptyVertexInput, noCullRasterizer, noDepth, blend, pipelines.tonemapLayout);
         checkVk(vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &tonemapInfo, nullptr, &pipelines.tonemap), "vkCreateGraphicsPipelines tonemap");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.tonemap), "Tonemap Pipeline");
     } catch (...) {
+        if (depthPrepassVert != VK_NULL_HANDLE) { vkDestroyShaderModule(device_, depthPrepassVert, nullptr); }
         if (tonemapFrag != VK_NULL_HANDLE) { vkDestroyShaderModule(device_, tonemapFrag, nullptr); }
         if (tonemapVert != VK_NULL_HANDLE) { vkDestroyShaderModule(device_, tonemapVert, nullptr); }
         if (sceneFrag != VK_NULL_HANDLE) { vkDestroyShaderModule(device_, sceneFrag, nullptr); }
@@ -299,6 +337,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         throw;
     }
 
+    vkDestroyShaderModule(device_, depthPrepassVert, nullptr);
     vkDestroyShaderModule(device_, tonemapFrag, nullptr);
     vkDestroyShaderModule(device_, tonemapVert, nullptr);
     vkDestroyShaderModule(device_, sceneFrag, nullptr);
@@ -354,7 +393,7 @@ void VulkanRenderer::Impl::installPipelineSet(const PipelineSet& pipelines) {
 }
 
 void VulkanRenderer::Impl::refreshShaderWriteTimes() {
-    const std::array<std::filesystem::path, 4> shaderPaths = shaderSpirvPaths(config_.shaderDirectory);
+    const auto shaderPaths = shaderSpirvPaths(config_.shaderDirectory);
     for (std::size_t i = 0; i < shaderPaths.size(); ++i) {
         std::error_code error;
         shaderWriteTimes_[i] = std::filesystem::last_write_time(shaderPaths[i], error);
@@ -365,7 +404,7 @@ void VulkanRenderer::Impl::refreshShaderWriteTimes() {
 }
 
 bool VulkanRenderer::Impl::shaderFilesChanged() const {
-    const std::array<std::filesystem::path, 4> shaderPaths = shaderSpirvPaths(config_.shaderDirectory);
+    const auto shaderPaths = shaderSpirvPaths(config_.shaderDirectory);
     for (std::size_t i = 0; i < shaderPaths.size(); ++i) {
         std::error_code error;
         const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(shaderPaths[i], error);
@@ -423,28 +462,10 @@ void VulkanRenderer::Impl::pollShaderHotReload(const double elapsedSeconds) {
 }
 
 VkShaderModule VulkanRenderer::Impl::createShaderModule(const std::filesystem::path& path) const {
-    const std::vector<std::byte> bytes = readBinaryFile(path);
-    constexpr std::uint32_t kSpirvMagic = 0x07230203U;
-    constexpr std::uint32_t kByteSwappedSpirvMagic = 0x03022307U;
-    constexpr std::size_t kSpirvHeaderWordCount = 5;
-    if (bytes.size() < kSpirvHeaderWordCount * sizeof(std::uint32_t)) {
-        throw std::runtime_error("SPIR-V file is too small to contain a valid header: " + path.string());
-    }
-    if (bytes.size() % sizeof(std::uint32_t) != 0U) {
-        throw std::runtime_error("SPIR-V file has invalid byte size: " + path.string());
-    }
-
-    std::vector<std::uint32_t> words(bytes.size() / sizeof(std::uint32_t));
-    std::memcpy(words.data(), bytes.data(), bytes.size());
-    if (words[0] == kByteSwappedSpirvMagic) {
-        throw std::runtime_error("SPIR-V file appears byte-swapped instead of native little-endian words: " + path.string());
-    }
-    if (words[0] != kSpirvMagic) {
-        throw std::runtime_error("SPIR-V file has invalid magic number: " + path.string());
-    }
+    const std::vector<std::uint32_t> words = readSpirvWords(path);
 
     VkShaderModuleCreateInfo createInfo{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    createInfo.codeSize = bytes.size();
+    createInfo.codeSize = words.size() * sizeof(std::uint32_t);
     createInfo.pCode = words.data();
     VkShaderModule module = VK_NULL_HANDLE;
     const std::string operation = "vkCreateShaderModule " + path.string();

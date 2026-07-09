@@ -91,29 +91,37 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSecond
     const auto cpuPrepareEnd = std::chrono::steady_clock::now();
     auto cpuRecordEnd = cpuPrepareEnd;
     auto cpuEnd = cpuPrepareEnd;
-    pendingUploadWaitSemaphores_.clear();
     VkSemaphore renderFinished = swapchainRenderFinishedSemaphores_[imageIndex];
     const FrameImageSyncSnapshot imageSyncSnapshot = captureFrameImageSyncState(imageIndex);
     bool frameCommandsSubmitted = false;
     try {
-        recordCommandBuffer(frame, imageIndex, renderItems, visibility, screenshotThisFrame ? &screenshotReadback_ : nullptr);
+        const bool useDepthPrepass = resolveDepthPrepassForFrame(visibility);
+        recordCommandBuffer(frame, imageIndex, renderItems, visibility, useDepthPrepass, screenshotThisFrame ? &screenshotReadback_ : nullptr);
         cpuRecordEnd = std::chrono::steady_clock::now();
 
         collectPendingUploadWaitSemaphores(pendingUploadWaitSemaphores_);
-        submitWaitSemaphores_.clear();
-        submitWaitSemaphores_.reserve(pendingUploadWaitSemaphores_.size() + 1U);
-        submitWaitSemaphores_.push_back(frame.imageAvailable);
-        submitWaitSemaphores_.insert(submitWaitSemaphores_.end(), pendingUploadWaitSemaphores_.begin(), pendingUploadWaitSemaphores_.end());
-
-        submitWaitStages_.clear();
-        submitWaitStages_.reserve(submitWaitSemaphores_.size());
-        submitWaitStages_.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-        submitWaitStages_.insert(submitWaitStages_.end(), pendingUploadWaitSemaphores_.size(), VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
-
         VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        submitInfo.waitSemaphoreCount = static_cast<std::uint32_t>(submitWaitSemaphores_.size());
-        submitInfo.pWaitSemaphores = submitWaitSemaphores_.data();
-        submitInfo.pWaitDstStageMask = submitWaitStages_.data();
+        const VkPipelineStageFlags imageAvailableStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        if (pendingUploadWaitSemaphores_.empty()) {
+            submitInfo.waitSemaphoreCount = 1;
+            submitInfo.pWaitSemaphores = &frame.imageAvailable;
+            submitInfo.pWaitDstStageMask = &imageAvailableStage;
+        } else {
+            submitWaitSemaphores_.clear();
+            submitWaitSemaphores_.reserve(pendingUploadWaitSemaphores_.size() + 1U);
+            submitWaitSemaphores_.push_back(frame.imageAvailable);
+            submitWaitSemaphores_.insert(submitWaitSemaphores_.end(), pendingUploadWaitSemaphores_.begin(), pendingUploadWaitSemaphores_.end());
+
+            submitWaitStages_.clear();
+            submitWaitStages_.reserve(submitWaitSemaphores_.size());
+            submitWaitStages_.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+            submitWaitStages_.insert(submitWaitStages_.end(), pendingUploadWaitSemaphores_.size(), VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
+
+            submitInfo.waitSemaphoreCount = static_cast<std::uint32_t>(submitWaitSemaphores_.size());
+            submitInfo.pWaitSemaphores = submitWaitSemaphores_.data();
+            submitInfo.pWaitDstStageMask = submitWaitStages_.data();
+        }
+        frame.uploadWaitSemaphores.reserve(frame.uploadWaitSemaphores.size() + pendingUploadWaitSemaphores_.size());
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &frame.commandBuffer;
         submitInfo.signalSemaphoreCount = 1;
@@ -174,7 +182,32 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSecond
     frameIndex_ = (frameIndex_ + 1U) % kMaxFramesInFlight;
 }
 
-void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, const Buffer* screenshotReadback) {
+bool VulkanRenderer::Impl::resolveDepthPrepassForFrame(const SceneVisibilityPlan& visibility) {
+    switch (config_.depthPrepassMode) {
+    case DepthPrepassMode::ForceOn:
+        return true;
+    case DepthPrepassMode::ForceOff:
+        return false;
+    case DepthPrepassMode::Auto: {
+        constexpr std::uint64_t kEnableTriangleThreshold = 75000;
+        constexpr std::uint64_t kDisableTriangleThreshold = 45000;
+        constexpr std::uint32_t kEnableItemThreshold = 24;
+        constexpr std::uint32_t kDisableItemThreshold = 12;
+        const bool enabled = autoDepthPrepassEnabled_
+            ? (visibility.sceneTriangleCount >= kDisableTriangleThreshold || visibility.visibleItemCount >= kDisableItemThreshold)
+            : (visibility.sceneTriangleCount >= kEnableTriangleThreshold || visibility.visibleItemCount >= kEnableItemThreshold);
+        if (enabled != autoDepthPrepassEnabled_) {
+            logger()->info("Auto depth prepass {} (visible {}, triangles {})",
+                           enabled ? "enabled" : "disabled", visibility.visibleItemCount, visibility.sceneTriangleCount);
+        }
+        autoDepthPrepassEnabled_ = enabled;
+        return enabled;
+    }
+    }
+    return false;
+}
+
+void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, const bool useDepthPrepass, const Buffer* screenshotReadback) {
     static_assert(kSceneMeshBatchOrder.size() == kSceneMeshBatchCount);
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -208,7 +241,6 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     };
     std::array<MeshBatch, kSceneMeshBatchOrder.size()> meshBatches{};
     std::array<std::uint32_t, kSceneMeshBatchOrder.size()> meshFirstInstances{};
-    std::array<std::uint32_t, kSceneMeshBatchOrder.size()> meshWriteCursors{};
     const SceneGridRange& gridRange = visibility.gridRange;
     const std::vector<SceneGridTile>& gridTiles = renderItems.materialGridTiles();
     const bool useGridTiles = visibility.useGridTiles;
@@ -218,62 +250,101 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     std::uint32_t visibleInstanceCount = 0;
     for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
         meshFirstInstances[meshIndex] = visibleInstanceCount;
-        meshWriteCursors[meshIndex] = visibleInstanceCount;
         visibleInstanceCount += visibility.meshInstanceCounts[meshIndex];
     }
     if (visibleInstanceCount > frame.instanceCapacity) {
         throw std::runtime_error("Scene visibility plan exceeds frame instance capacity");
     }
+    for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
+        std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
+        instances.clear();
+        instances.reserve(visibility.meshInstanceCounts[meshIndex]);
+        std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
+        sortKeys.clear();
+        sortKeys.reserve(visibility.meshInstanceCounts[meshIndex]);
+    }
 
     const auto makeInstanceData = [](const SceneRenderItem& item) {
-        return InstanceData{item.model, item.material.albedoRoughness, item.material.emissiveMetallic, item.material.flags};
+        const std::array<Vec4, 3> normalMatrix = normalMatrixColumns(item.model);
+        return InstanceData{item.model,
+                            normalMatrix[0],
+                            normalMatrix[1],
+                            normalMatrix[2],
+                            item.material.albedoRoughness,
+                            item.material.emissiveMetallic,
+                            item.material.flags};
+    };
+    const auto instanceDepth = [&](const InstanceData& instance) {
+        const Vec3 position{instance.model.m[12], instance.model.m[13], instance.model.m[14]};
+        return dot(position - visibility.cameraPosition, visibility.cameraForward);
+    };
+    const auto writeInstanceData = [&](const std::size_t meshIndex, const InstanceData& data) {
+        std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
+        std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
+        sortKeys.push_back(InstanceSortKey{instanceDepth(data), static_cast<std::uint32_t>(instances.size())});
+        instances.push_back(data);
     };
     const auto writeCachedGridInstances = [&](const std::size_t meshIndex) {
-        const std::vector<InstanceData>& cachedInstances = gridVisibilityCache_.instanceDataByMesh[meshIndex];
-        if (!cachedInstances.empty()) {
-            std::memcpy(instanceData + meshWriteCursors[meshIndex], cachedInstances.data(), sizeof(InstanceData) * cachedInstances.size());
-            meshWriteCursors[meshIndex] += static_cast<std::uint32_t>(cachedInstances.size());
+        for (const InstanceData& data : gridVisibilityCache_.instanceDataByMesh[meshIndex]) {
+            writeInstanceData(meshIndex, data);
         }
     };
     const auto writeVisibleItem = [&](const std::size_t itemIndex, const std::size_t meshIndex, const bool cacheGridInstance) {
         const InstanceData data = makeInstanceData(renderItems[itemIndex]);
-        instanceData[meshWriteCursors[meshIndex]++] = data;
+        writeInstanceData(meshIndex, data);
         if (cacheGridInstance) {
             gridVisibilityCache_.instanceDataByMesh[meshIndex].push_back(data);
         }
     };
-    const auto materializeWorkRange = [&](const std::size_t begin, const std::size_t end) {
+    const auto materializeWorkRange = [&](const std::size_t begin, const std::size_t end, const bool cacheGridInstances) {
         for (std::size_t workIndex = begin; workIndex < end; ++workIndex) {
             const VisibleSceneWork& work = visibleSceneWork[workIndex];
             const std::size_t meshIndex = work.meshIndex;
-            const bool cacheGridInstance = useGridTiles && !gridVisibilityCacheHit && workIndex >= gridWorkBegin && workIndex < gridWorkEnd;
             if (work.kind == VisibleSceneWork::Kind::Item) {
-                writeVisibleItem(work.index, meshIndex, cacheGridInstance);
+                writeVisibleItem(work.index, meshIndex, cacheGridInstances);
                 continue;
             }
             const SceneGridTile& tile = gridTiles[work.index];
             for (std::uint32_t row = tile.rowBegin; row < tile.rowEnd; ++row) {
                 const std::size_t rowBase = gridRange.firstItem + (static_cast<std::size_t>(row) * gridRange.columns);
                 for (std::uint32_t column = tile.columnBegin; column < tile.columnEnd; ++column) {
-                    writeVisibleItem(rowBase + column, meshIndex, cacheGridInstance);
+                    writeVisibleItem(rowBase + column, meshIndex, cacheGridInstances);
                 }
             }
         }
     };
 
     if (gridVisibilityCacheHit) {
-        materializeWorkRange(0, gridWorkBegin);
+        materializeWorkRange(0, gridWorkBegin, false);
         for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
             writeCachedGridInstances(meshIndex);
         }
-        materializeWorkRange(gridWorkBegin, visibleSceneWork.size());
+        materializeWorkRange(gridWorkEnd, visibleSceneWork.size(), false);
     } else {
-        materializeWorkRange(0, visibleSceneWork.size());
+        materializeWorkRange(0, gridWorkBegin, false);
+        materializeWorkRange(gridWorkBegin, gridWorkEnd, useGridTiles);
+        materializeWorkRange(gridWorkEnd, visibleSceneWork.size(), false);
     }
     if (useGridTiles && !gridVisibilityCacheHit) {
         gridVisibilityCache_.valid = true;
     }
-
+    for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
+        std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
+        if (instances.size() != visibility.meshInstanceCounts[meshIndex] ||
+            instanceSortKeyScratch_[meshIndex].size() != visibility.meshInstanceCounts[meshIndex]) {
+            throw std::runtime_error("Scene instance materialization did not match visibility counts");
+        }
+        std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
+        if (sortKeys.size() > 1U) {
+            std::sort(sortKeys.begin(), sortKeys.end(), [](const InstanceSortKey& lhs, const InstanceSortKey& rhs) {
+                return lhs.depth < rhs.depth;
+            });
+        }
+        InstanceData* output = instanceData + meshFirstInstances[meshIndex];
+        for (std::size_t outputIndex = 0; outputIndex < sortKeys.size(); ++outputIndex) {
+            output[outputIndex] = instances[sortKeys[outputIndex].index];
+        }
+    }
 
     std::uint32_t sceneDrawCalls = 0;
     for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
@@ -297,13 +368,10 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         }
     }
 
-    const VkDeviceSize offset = 0;
     const auto drawSceneBatches = [&] {
         if (sceneDrawCalls == 0U) {
             return;
         }
-        vkCmdBindVertexBuffers(frame.commandBuffer, 0, 1, &sceneVertexBuffer_.buffer, &offset);
-        vkCmdBindIndexBuffer(frame.commandBuffer, sceneIndexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
         if (indirectSceneDrawsEnabled_) {
             vkCmdDrawIndexedIndirect(frame.commandBuffer, frame.indirectCommands.buffer, 0, sceneDrawCalls, sizeof(VkDrawIndexedIndirectCommand));
             return;
@@ -314,13 +382,20 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
                              batch.mesh->firstIndex, batch.mesh->vertexOffset, batch.firstInstance);
         }
     };
-
-    const VkDescriptorSet sceneSet = sceneDescriptorSets_[frameIndex_];
-    const bool useDepthPrepass = resolveDepthPrepass(config_.depthPrepassMode);
+    if (useDepthPrepass && !depthPrepassGraphIncludesPrepass(config_.depthPrepassMode)) {
+        throw std::runtime_error("Depth prepass selected without a compiled frame-graph pass");
+    }
     const FrameGraph::PassDesc* depthPass = useDepthPrepass ? &frameGraph_.pass(frameGraphPasses_.depthPrepass) : nullptr;
     const FrameGraph::PassDesc& hdrPass = frameGraph_.pass(frameGraphPasses_.hdrScene);
     const FrameGraph::PassDesc& tonemapPass = frameGraph_.pass(frameGraphPasses_.tonemap);
     const FrameGraph::PassDesc& screenshotPass = frameGraph_.pass(frameGraphPasses_.screenshotReadback);
+    const VkDescriptorSet sceneSet = sceneDescriptorSets_[frameIndex_];
+    const VkDeviceSize offset = 0;
+    if (sceneDrawCalls > 0U) {
+        vkCmdBindVertexBuffers(frame.commandBuffer, 0, 1, &sceneVertexBuffer_.buffer, &offset);
+        vkCmdBindIndexBuffer(frame.commandBuffer, sceneIndexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipelineLayout_, 0, 1, &sceneSet, 0, nullptr);
+    }
 
 
     if (useDepthPrepass) {
@@ -343,7 +418,6 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
             depthPrepassInfo.pDepthAttachment = &depthPrepassAttachment;
             vkCmdBeginRendering(frame.commandBuffer, &depthPrepassInfo);
             vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline_);
-            vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipelineLayout_, 0, 1, &sceneSet, 0, nullptr);
             drawSceneBatches();
             vkCmdEndRendering(frame.commandBuffer);
         }
@@ -391,7 +465,6 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         vkCmdBeginRendering(frame.commandBuffer, &renderInfo);
 
         vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, useDepthPrepass ? scenePipeline_ : sceneNoPrepassPipeline_);
-        vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipelineLayout_, 0, 1, &sceneSet, 0, nullptr);
         drawSceneBatches();
         vkCmdEndRendering(frame.commandBuffer);
 

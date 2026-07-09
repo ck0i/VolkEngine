@@ -13,5 +13,8 @@ struct LoadedImageRgba8 {
 };
 
 [[nodiscard]] LoadedImageRgba8 loadPpmRgba8(const std::filesystem::path& path);
+[[nodiscard]] LoadedImageRgba8 loadImageRgba8(const std::filesystem::path& path);
+[[nodiscard]] std::vector<LoadedImageRgba8> buildNormalMapMipChainRgba8(LoadedImageRgba8 baseLevel);
+[[nodiscard]] std::vector<LoadedImageRgba8> buildAlbedoMipChainRgba8(LoadedImageRgba8 baseLevel, bool isSrgb);
 
 } // namespace ve

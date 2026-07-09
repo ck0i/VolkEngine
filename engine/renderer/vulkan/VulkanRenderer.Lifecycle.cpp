@@ -77,6 +77,7 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     destroyBuffer(sceneIndexBuffer_);
     destroyBuffer(sceneVertexBuffer_);
     destroyImage(groundAlbedoTexture_);
+    destroyImage(groundNormalTexture_);
 
     for (FrameResources& frame : frames_) {
         destroyFrameUploadWaitSemaphores(frame);
@@ -166,6 +167,10 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     if (textureSampler_ != VK_NULL_HANDLE) {
         vkDestroySampler(device_, textureSampler_, nullptr);
         textureSampler_ = VK_NULL_HANDLE;
+    }
+    if (normalTextureSampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, normalTextureSampler_, nullptr);
+        normalTextureSampler_ = VK_NULL_HANDLE;
     }
     if (graphicsCommandPool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(device_, graphicsCommandPool_, nullptr);

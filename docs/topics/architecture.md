@@ -8,7 +8,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | --- | --- | --- |
 | `engine/core` | Application lifecycle, config, clock, camera, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW window, input, framebuffer resize state, Vulkan surface creation. | `Window`. |
-| `engine/renderer` | Renderer contracts, scene submission data, generated geometry, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
+| `engine/renderer` | Renderer contracts, scene submission data, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for all non-public renderer internals: state structs, helper utilities, private methods, members. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
@@ -41,7 +41,7 @@ graph TD
   - Internal Vulkan resources (`VkInstance`, device/queues, descriptor state, swapchain state, uploads, etc.) stay private.
 - Buffers/images use explicit structs containing Vulkan handles plus VMA allocations; VMA picks memory types and suballocates.
 - Swapchain-owned image views, render targets, and per-image present semaphores are recreated with swapchain recreation.
-- Per-frame uniform, instance, and indirect buffers are frame-slot resources; the renderer grows instance storage only after that frame's fence signals.
+- Per-frame uniform and instance buffers are frame-slot resources; indirect command buffers are frame-slot resources only when indirect submission is active; the renderer grows instance storage only after that frame's fence signals.
 
 ## Renderer split summary
 

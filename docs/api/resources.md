@@ -16,7 +16,8 @@ Callers do not own registry entries; IDs are renderer-internal accounting handle
 
 ## Capacity and names
 
-- `kMaxResources = 128`
+- No fixed live-resource cap; records grow as renderer resource accounting grows.
+- Unregistered records are erased; the vector's underlying capacity may be reused by later registrations, but IDs remain monotonic opaque handles.
 - `kMaxNameLength = 64`
 - `kInvalidId = 0xffffffffU`
 
@@ -29,16 +30,15 @@ Names are copied into fixed-size storage. Empty names become `"Unnamed GPU Resou
 
 ## `Record`
 
-Internal fixed-size record:
+Internal record:
 
 - `id`
 - `name`
 - `kind`
 - `bytes`
 - `imported`
-- `live`
 
-A resource can be renderer-owned or imported. Swapchain images are the current imported-image use case.
+A resource can be renderer-owned or imported. Swapchain images are the current imported-image use case. Unregistered resources are erased from the private record store; opaque ids stay monotonic and are never reused within one registry instance.
 
 ## `registerResource`
 
@@ -50,7 +50,7 @@ std::uint32_t id = registry.registerResource(
     false);
 ```
 
-Returns a stable ID until unregistered. Throws when capacity is exhausted.
+Returns a stable ID until unregistered. Throws only if the opaque ID range is exhausted.
 
 ## `unregisterResource`
 
@@ -59,7 +59,7 @@ registry.unregisterResource(id);
 ```
 
 - Ignores `kInvalidId`.
-- Clears the matching live record if found.
+- Erases the matching record if found.
 - Silently ignores unknown IDs.
 
 ## `stats()`

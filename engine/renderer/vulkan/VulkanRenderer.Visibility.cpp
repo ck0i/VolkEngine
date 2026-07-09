@@ -12,7 +12,29 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
 
     const Vec3 cameraPosition = camera.position();
     const Vec3 cameraForward = camera.forward();
+    plan.cameraPosition = cameraPosition;
+    plan.cameraForward = cameraForward;
     const float projectionScaleY = projection.m[5] < 0.0f ? -projection.m[5] : projection.m[5];
+    if (renderItems.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+        throw std::runtime_error("Scene visibility exceeds renderer instance-count range");
+    }
+    plan.gridRange = renderItems.materialGridRange();
+    const std::vector<SceneGridTile>& gridTiles = renderItems.materialGridTiles();
+    plan.gridItemCount = static_cast<std::size_t>(plan.gridRange.rows) * static_cast<std::size_t>(plan.gridRange.columns);
+    const bool gridTilesCoverRange = renderItems.materialGridTilesCoverRange();
+    plan.useGridTiles = plan.gridRange.valid &&
+                        gridTilesCoverRange &&
+                        plan.gridRange.firstItem <= renderItems.size() &&
+                        plan.gridItemCount <= (renderItems.size() - plan.gridRange.firstItem);
+    std::size_t visibilityWorkCapacity = renderItems.size();
+    if (plan.useGridTiles) {
+        const std::size_t nonGridItemCount = renderItems.size() - plan.gridItemCount;
+        if (gridTiles.size() > std::numeric_limits<std::size_t>::max() - nonGridItemCount) {
+            throw std::runtime_error("Scene visibility work list exceeds host size range");
+        }
+        visibilityWorkCapacity = nonGridItemCount + gridTiles.size();
+    }
+    visibleSceneWork.reserve(visibilityWorkCapacity);
     const std::size_t sphereHighBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh);
     const std::size_t sphereMediumBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium);
     const std::size_t sphereLowBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereLow);
@@ -62,7 +84,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
     };
     const auto cullItem = [&](const std::size_t itemIndex) {
         const SceneRenderItem& item = renderItems[itemIndex];
-        if (sphereOutsideFrustum(frustum, item.boundsCenter, item.boundsRadius)) {
+        if (classifySphereAgainstFrustum(frustum, item.boundsCenter, item.boundsRadius) == FrustumSphereClassification::Outside) {
             ++plan.culledDrawCalls;
             return;
         }
@@ -74,14 +96,6 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
         }
     };
 
-    plan.gridRange = renderItems.materialGridRange();
-    const std::vector<SceneGridTile>& gridTiles = renderItems.materialGridTiles();
-    plan.gridItemCount = static_cast<std::size_t>(plan.gridRange.rows) * static_cast<std::size_t>(plan.gridRange.columns);
-    const bool gridTilesCoverRange = renderItems.materialGridTilesCoverRange();
-    plan.useGridTiles = plan.gridRange.valid &&
-                        gridTilesCoverRange &&
-                        plan.gridRange.firstItem <= renderItems.size() &&
-                        plan.gridItemCount <= (renderItems.size() - plan.gridRange.firstItem);
     if (plan.useGridTiles) {
         cullRange(0, plan.gridRange.firstItem);
         plan.gridWorkBegin = visibleSceneWork.size();

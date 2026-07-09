@@ -54,63 +54,133 @@ void VulkanRenderer::Impl::destroyImage(ImageResource& image) {
 }
 
 void VulkanRenderer::Impl::createTextureResources() {
-    const std::filesystem::path texturePath = config_.assetDirectory / "textures" / "ground_albedo.ppm";
-    const LoadedImageRgba8 texture = loadPpmRgba8(texturePath);
-    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(texture.pixels.size());
+    struct TextureUpload {
+        std::filesystem::path path;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        std::string debugName;
+        bool cpuNormalMipChain = false;
+        std::uint32_t baseWidth = 0;
+        std::uint32_t baseHeight = 0;
+        std::vector<LoadedImageRgba8> mipLevels;
+        std::vector<VkBufferImageCopy> copyRegions;
+        bool gpuMipGeneration = false;
+        ImageResource image;
+    };
 
-    Buffer staging{};
-    std::vector<Buffer> stagingBuffers;
-    stagingBuffers.reserve(1);
+    std::array<TextureUpload, 2> uploads{{
+        {.path = config_.assetDirectory / "textures" / "ground_albedo.png", .format = VK_FORMAT_R8G8B8A8_SRGB, .debugName = "Ground Albedo", .cpuNormalMipChain = false},
+        {.path = config_.assetDirectory / "textures" / "ground_normal.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground Normal", .cpuNormalMipChain = true},
+    }};
+    VkCommandBuffer uploadCommands = VK_NULL_HANDLE;
+    VkDeviceSize totalStagingSize = 0;
+    Buffer textureStaging;
+
+    const auto destroyLocalUploads = [&] {
+        destroyBuffer(textureStaging);
+        for (TextureUpload& upload : uploads) {
+            destroyImage(upload.image);
+        }
+    };
+
     try {
-        staging = createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        for (TextureUpload& upload : uploads) {
+            LoadedImageRgba8 baseLevel = loadImageRgba8(upload.path);
+            const VkExtent2D textureExtent{baseLevel.width, baseLevel.height};
+            upload.baseWidth = baseLevel.width;
+            upload.baseHeight = baseLevel.height;
+            const std::uint32_t requestedMipLevels = mipLevelCountForExtent(textureExtent);
+            const bool canGenerateMipmaps = requestedMipLevels > 1U && formatSupportsLinearMipBlit(upload.format);
+            upload.gpuMipGeneration = !upload.cpuNormalMipChain && canGenerateMipmaps;
+            if (upload.cpuNormalMipChain) {
+                upload.mipLevels = buildNormalMapMipChainRgba8(std::move(baseLevel));
+            } else if (canGenerateMipmaps || requestedMipLevels == 1U) {
+                upload.mipLevels = std::vector<LoadedImageRgba8>{std::move(baseLevel)};
+            } else {
+                upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);
+                logger()->warn("Texture format {} lacks linear blit/filter support; generated {} CPU albedo mips for {}",
+                               static_cast<int>(upload.format), upload.mipLevels.size(), upload.path.string());
+            }
+            const std::uint32_t imageMipLevels = upload.gpuMipGeneration ? requestedMipLevels : static_cast<std::uint32_t>(upload.mipLevels.size());
+
+            upload.copyRegions.reserve(upload.mipLevels.size());
+            for (std::uint32_t mipLevel = 0; mipLevel < upload.mipLevels.size(); ++mipLevel) {
+                const LoadedImageRgba8& mip = upload.mipLevels[mipLevel];
+                const VkDeviceSize mipBytes = static_cast<VkDeviceSize>(mip.pixels.size());
+                if (mipBytes > std::numeric_limits<VkDeviceSize>::max() - totalStagingSize) {
+                    throw std::runtime_error("Texture upload staging size exceeds VkDeviceSize range");
+                }
+                VkBufferImageCopy region{};
+                region.bufferOffset = totalStagingSize;
+                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.mipLevel = mipLevel;
+                region.imageSubresource.layerCount = 1;
+                region.imageExtent = {mip.width, mip.height, 1};
+                upload.copyRegions.push_back(region);
+                totalStagingSize += mipBytes;
+            }
+
+            VkImageUsageFlags textureUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            if (upload.gpuMipGeneration) {
+                textureUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            }
+            upload.image = createImage(textureExtent, upload.format, textureUsage, VK_IMAGE_ASPECT_COLOR_BIT, imageMipLevels);
+            const std::string textureName = upload.debugName + " Texture";
+            const std::string allocationName = textureName + " Allocation";
+            const std::string viewName = textureName + " View";
+            setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(upload.image.image), textureName);
+            vmaSetAllocationName(allocator_, upload.image.allocation, allocationName.c_str());
+            setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(upload.image.view), viewName);
+            upload.image.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Image, textureName,
+                                                                         imageByteEstimate(upload.image.extent, upload.image.format, upload.image.mipLevels));
+        }
+
+        textureStaging = createBuffer(totalStagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         {
-            ScopedVmaMap stagingMap{allocator_, staging.allocation, "vmaMapMemory texture staging"};
-            std::memcpy(stagingMap.get(), texture.pixels.data(), texture.pixels.size());
+            ScopedVmaMap stagingMap{allocator_, textureStaging.allocation, "vmaMapMemory texture staging"};
+            auto* dst = static_cast<std::uint8_t*>(stagingMap.get());
+            for (TextureUpload& upload : uploads) {
+                for (const LoadedImageRgba8& mip : upload.mipLevels) {
+                    std::memcpy(dst, mip.pixels.data(), mip.pixels.size());
+                    dst += mip.pixels.size();
+                }
+                upload.mipLevels.clear();
+            }
         }
 
-        const VkExtent2D textureExtent{texture.width, texture.height};
-        const VkFormat textureFormat = VK_FORMAT_R8G8B8A8_SRGB;
-        const std::uint32_t requestedMipLevels = mipLevelCountForExtent(textureExtent);
-        const bool canGenerateMipmaps = requestedMipLevels > 1U && formatSupportsLinearMipBlit(textureFormat);
-        const std::uint32_t mipLevels = canGenerateMipmaps ? requestedMipLevels : 1U;
-        if (requestedMipLevels > 1U && !canGenerateMipmaps) {
-            logger()->warn("Texture format VK_FORMAT_R8G8B8A8_SRGB lacks linear blit/filter support; loading {} with one mip", texturePath.string());
+        uploadCommands = beginGraphicsUploadCommands();
+        for (TextureUpload& upload : uploads) {
+            transitionImageTracked(uploadCommands, upload.image.image, upload.image.syncState,
+                                   ImageSyncState{VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT},
+                                   VK_IMAGE_ASPECT_COLOR_BIT, 0, upload.image.mipLevels);
+            vkCmdCopyBufferToImage(uploadCommands, textureStaging.buffer, upload.image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   static_cast<std::uint32_t>(upload.copyRegions.size()), upload.copyRegions.data());
+            if (upload.gpuMipGeneration) {
+                generateMipmaps(uploadCommands, upload.image);
+            } else {
+                transitionImageTracked(uploadCommands, upload.image.image, upload.image.syncState,
+                                       imageSyncStateFor(FrameGraphAccess::Read, FrameGraphUsage::SampledImage),
+                                       VK_IMAGE_ASPECT_COLOR_BIT, 0, upload.image.mipLevels);
+            }
         }
-        VkImageUsageFlags textureUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        if (mipLevels > 1U) {
-            textureUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        }
-        groundAlbedoTexture_ = createImage(textureExtent, textureFormat, textureUsage, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
-        setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(groundAlbedoTexture_.image), "Ground Albedo Texture");
-        vmaSetAllocationName(allocator_, groundAlbedoTexture_.allocation, "Ground Albedo Texture Allocation");
-        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(groundAlbedoTexture_.view), "Ground Albedo Texture View");
-        groundAlbedoTexture_.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Image, "Ground Albedo Texture",
-                                                                             imageByteEstimate(groundAlbedoTexture_.extent, groundAlbedoTexture_.format, groundAlbedoTexture_.mipLevels));
 
-        VkCommandBuffer uploadCommands = beginGraphicsUploadCommands();
-        transitionImageTracked(uploadCommands, groundAlbedoTexture_.image, groundAlbedoTexture_.syncState,
-                               ImageSyncState{VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT},
-                               VK_IMAGE_ASPECT_COLOR_BIT, 0, groundAlbedoTexture_.mipLevels);
-        VkBufferImageCopy copyRegion{};
-        copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copyRegion.imageSubresource.layerCount = 1;
-        copyRegion.imageExtent = {texture.width, texture.height, 1};
-        vkCmdCopyBufferToImage(uploadCommands, staging.buffer, groundAlbedoTexture_.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-        if (groundAlbedoTexture_.mipLevels > 1U) {
-            generateMipmaps(uploadCommands, groundAlbedoTexture_);
-        } else {
-            transitionImageTracked(uploadCommands, groundAlbedoTexture_.image, groundAlbedoTexture_.syncState,
-                                   imageSyncStateFor(FrameGraphAccess::Read, FrameGraphUsage::SampledImage),
-                                   VK_IMAGE_ASPECT_COLOR_BIT);
-        }
-        stagingBuffers.push_back(staging);
-        staging = {};
-        submitGraphicsUpload(uploadCommands, std::move(stagingBuffers));
-        logger()->info("Loaded texture {} ({}x{} RGBA8, {} mips)", texturePath.string(), texture.width, texture.height, groundAlbedoTexture_.mipLevels);
+        VkCommandBuffer submittedCommands = uploadCommands;
+        uploadCommands = VK_NULL_HANDLE;
+        submitGraphicsUpload(submittedCommands, takeBuffer(textureStaging));
+
+        groundAlbedoTexture_ = takeImage(uploads[0].image);
+        groundNormalTexture_ = takeImage(uploads[1].image);
+        logger()->info("Loaded texture {} ({}x{} RGBA8, {} mips, format {})",
+                       uploads[0].path.string(), uploads[0].baseWidth, uploads[0].baseHeight,
+                       groundAlbedoTexture_.mipLevels, static_cast<int>(uploads[0].format));
+        logger()->info("Loaded texture {} ({}x{} RGBA8, {} CPU-renormalized mips, format {})",
+                       uploads[1].path.string(), uploads[1].baseWidth, uploads[1].baseHeight,
+                       groundNormalTexture_.mipLevels, static_cast<int>(uploads[1].format));
     } catch (...) {
-        destroyBuffer(staging);
-        destroyImage(groundAlbedoTexture_);
+        if (uploadCommands != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(device_, graphicsCommandPool_, 1, &uploadCommands);
+        }
+        destroyLocalUploads();
         throw;
     }
 }
@@ -137,11 +207,21 @@ void VulkanRenderer::Impl::createSampler() {
     textureSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     textureSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     textureSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    textureSamplerInfo.maxLod = groundAlbedoTexture_.mipLevels > 0U ? static_cast<float>(groundAlbedoTexture_.mipLevels - 1U) : 0.0f;
+    const auto samplerMaxLod = [](const std::uint32_t mipLevels) {
+        return mipLevels > 0U ? static_cast<float>(mipLevels - 1U) : 0.0f;
+    };
+    textureSamplerInfo.maxLod = samplerMaxLod(groundAlbedoTexture_.mipLevels);
     textureSamplerInfo.anisotropyEnable = samplerAnisotropyEnabled_ ? VK_TRUE : VK_FALSE;
     textureSamplerInfo.maxAnisotropy = maxSamplerAnisotropy_;
     checkVk(vkCreateSampler(device_, &textureSamplerInfo, nullptr, &textureSampler_), "vkCreateSampler texture");
-    setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(textureSampler_), "Linear Repeat Texture Sampler");
+    setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(textureSampler_), "Linear Repeat Albedo Texture Sampler");
+
+    VkSamplerCreateInfo normalSamplerInfo = textureSamplerInfo;
+    normalSamplerInfo.maxLod = samplerMaxLod(groundNormalTexture_.mipLevels);
+    normalSamplerInfo.anisotropyEnable = VK_FALSE;
+    normalSamplerInfo.maxAnisotropy = 1.0f;
+    checkVk(vkCreateSampler(device_, &normalSamplerInfo, nullptr, &normalTextureSampler_), "vkCreateSampler normal texture");
+    setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(normalTextureSampler_), "Linear Repeat Normal Texture Sampler");
 }
 
 void VulkanRenderer::Impl::createDescriptorLayouts() {
@@ -152,7 +232,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     sceneBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     sceneBindings[1].binding = 1;
     sceneBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    sceneBindings[1].descriptorCount = 1;
+    sceneBindings[1].descriptorCount = 2;
     sceneBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     sceneBindings[2].binding = 2;
     sceneBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -184,7 +264,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     constexpr std::uint32_t rendererSetCount = sceneSetCount + tonemapSetCount;
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sceneSetCount};
-    poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sceneSetCount + tonemapSetCount};
+    poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, (sceneSetCount * 2U) + tonemapSetCount};
     poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sceneSetCount};
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets = rendererSetCount;

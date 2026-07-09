@@ -16,7 +16,7 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 - `engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp` — swapchain capability queries, format/present-mode/extents choice, swapchain/image-view creation, and swapchain resize/recreate lifecycle for depth/HDR attachments.
 - `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — per-frame resources (uniform and instance buffers, descriptor sets), mapped per-frame state, per-frame fences/semaphores, timestamp queries, and frame-graph construction metadata.
 - `engine/renderer/vulkan/VulkanRenderer.Resources.cpp` — long-lived GPU buffers/images, texture loading/sampling state, descriptor layouts/pools/sets, tonemap descriptor setup, and resource-registry metadata.
-- `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp` — generated geometry construction, geometry buffer uploads, and `GpuMesh` offset/count helpers.
+- `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp` — procedural mesh construction, imported OBJ mesh loading, geometry buffer uploads, mesh-batch arrays, and `GpuMesh` offset/count helpers.
 - `engine/renderer/vulkan/VulkanRenderer.Pipelines.cpp` — shader modules, pipeline layouts/pipelines, pipeline cache load/save/validation, and hot-reload path.
 - `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — image layout/access state helpers, image transition barriers, and sync-state bookkeeping for frame-graph usage.
 - `engine/renderer/vulkan/VulkanRenderer.Uploads.cpp` — staging uploads and transfer-queue vs same-queue synchronization (including one-shot upload fences/semaphores).
@@ -58,35 +58,34 @@ Normal rendering does not call `vkDeviceWaitIdle`.
 
 ## Render passes
 
-Default path (`--no-depth-prepass`):
+Default adaptive path (`--auto-depth-prepass`, also `EngineConfig` default):
 
 ```mermaid
 flowchart LR
-    Scene[HDR scene pass\ncolor + depth write] --> Tonemap[Tonemap final pass]
-    Tonemap --> ImGui[Optional ImGui overlay]
-    ImGui --> Present[Present]
-```
-
-Depth-prepass path (`--depth-prepass`):
-
-```mermaid
-flowchart LR
-    Depth[Depth prepass] --> Scene[HDR scene pass\ndepth read + color write]
+    Decide[Runtime visible-count + triangle-count heuristic] -->|small scene| Scene[HDR scene pass\ncolor + depth write]
+    Decide -->|large scene| Depth[Depth prepass]
+    Depth --> ScenePre[HDR scene pass\ndepth read + color write]
     Scene --> Tonemap[Tonemap final pass]
+    ScenePre --> Tonemap
     Tonemap --> ImGui[Optional ImGui overlay]
     ImGui --> Present[Present]
 ```
+
+Forced no-prepass path (`--no-depth-prepass`) records only the HDR scene pass with depth writes. Forced prepass path (`--depth-prepass`) records a depth-only pass first, using `scene_depth.vert` and a position-only vertex input, then records the HDR scene pass.
+
+The frame graph is compiled in lockstep with the mode: Auto builds a static superset graph with depth-prepass and HDR depth read/write edges, while forced modes compile only the deterministic path they can record.
 
 The renderer uses Vulkan dynamic rendering (`vkCmdBeginRendering` / `vkCmdEndRendering`) rather than render-pass/framebuffer objects.
 Swapchain images are preferred as UNORM because `tonemap.frag` normally applies exposure, ACES, and the standard sRGB OETF manually; if a surface only provides an sRGB swapchain format, the tonemap push constant disables shader-side OETF so Vulkan performs the single required encode.
 
 ## Scene submission
 
-- Generated meshes are packed into one shared vertex buffer and one shared index buffer.
+- Generated and imported CPU meshes keep full-float position/normal/uv/tangent data for import and tangent generation, then write compact Vulkan `GpuVertex` records directly into one mapped staging buffer: full-float position/UV plus SNORM16 normal/tangent attributes. All batches share one vertex buffer and one index buffer; triangle-list indices are reordered during upload for post-transform vertex-cache locality while `loadObjMesh()` keeps source OBJ fan order.
 - `GpuMesh` records carry offset/count values only.
-- `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds.
+- `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds; command recording expands each visible item into GPU instance data with model and CPU-precomputed normal-matrix columns.
+- Scene descriptors bind per-frame uniforms, one fixed combined-sampler material texture array (`albedo`, `normal`), and per-frame instance data.
 - Visibility planning extracts frustum planes from the camera view-projection matrix, culls bounding spheres, applies optional material-grid acceleration, and counts visible mesh work.
-- Command recording writes visible instances into mesh-contiguous ranges of the mapped per-frame storage buffer.
+- Command recording materializes visible instances into per-mesh CPU scratch while emitting compact `{depth,index}` sort keys for opaque early-Z locality, writes the final contiguous instance ranges sequentially into the mapped per-frame storage buffer, and binds shared scene vertex/index/descriptor state once before scene passes.
 - If `multiDrawIndirect`, `drawIndirectFirstInstance`, and `maxDrawIndirectCount` allow it, one `vkCmdDrawIndexedIndirect` submits all visible mesh batches per pass.
 - Otherwise the renderer records direct `vkCmdDrawIndexed` per visible mesh batch.
 

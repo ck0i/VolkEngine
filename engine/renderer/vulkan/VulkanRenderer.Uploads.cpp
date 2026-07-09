@@ -2,39 +2,44 @@
 
 namespace ve {
 
-VkCommandBuffer VulkanRenderer::Impl::beginGraphicsUploadCommands() const {
+VkCommandBuffer VulkanRenderer::Impl::beginOneShotUploadCommands(const VkCommandPool commandPool, const char* operationName) const {
     VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = graphicsCommandPool_;
+    allocInfo.commandPool = commandPool;
     allocInfo.commandBufferCount = 1;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    checkVk(vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer), "vkAllocateCommandBuffers graphics upload");
-
+    const std::string allocateOperation = std::string("vkAllocateCommandBuffers ") + operationName;
+    checkVk(vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer), allocateOperation.c_str());
     try {
         VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        checkVk(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer graphics upload");
+        const std::string beginOperation = std::string("vkBeginCommandBuffer ") + operationName;
+        checkVk(vkBeginCommandBuffer(commandBuffer, &beginInfo), beginOperation.c_str());
     } catch (...) {
-        vkFreeCommandBuffers(device_, graphicsCommandPool_, 1, &commandBuffer);
+        vkFreeCommandBuffers(device_, commandPool, 1, &commandBuffer);
         throw;
     }
     return commandBuffer;
 }
 
-void VulkanRenderer::Impl::submitGraphicsUpload(VkCommandBuffer commandBuffer, std::vector<Buffer> stagingBuffers) {
-    submitUploadBatch(graphicsQueue_, graphicsCommandPool_, commandBuffer, "graphics upload", std::move(stagingBuffers), false);
+VkCommandBuffer VulkanRenderer::Impl::beginGraphicsUploadCommands() const {
+    return beginOneShotUploadCommands(graphicsCommandPool_, "graphics upload");
+}
+
+void VulkanRenderer::Impl::submitGraphicsUpload(VkCommandBuffer commandBuffer, Buffer staging) {
+    submitUploadBatch(graphicsQueue_, graphicsCommandPool_, commandBuffer, "graphics upload", staging, false);
 }
 
 void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
                                        const VkCommandPool commandPool,
                                        const VkCommandBuffer commandBuffer,
                                        const char* operationName,
-                                       std::vector<Buffer> stagingBuffers,
+                                       Buffer staging,
                                        const bool signalSemaphore) {
     PendingUploadBatch upload{};
     upload.commandPool = commandPool;
     upload.commandBuffer = commandBuffer;
-    upload.stagingBuffers = std::move(stagingBuffers);
+    upload.staging = staging;
     bool queued = false;
     try {
         const std::string endOperation = std::string("vkEndCommandBuffer ") + operationName;
@@ -78,10 +83,7 @@ void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
 }
 
 void VulkanRenderer::Impl::retirePendingUploadResources(PendingUploadBatch& upload) {
-    for (Buffer& stagingBuffer : upload.stagingBuffers) {
-        destroyBuffer(stagingBuffer);
-    }
-    upload.stagingBuffers.clear();
+    destroyBuffer(upload.staging);
     if (upload.fence != VK_NULL_HANDLE) {
         vkDestroyFence(device_, upload.fence, nullptr);
         upload.fence = VK_NULL_HANDLE;
@@ -156,8 +158,7 @@ void VulkanRenderer::Impl::collectPendingUploadWaitSemaphores(std::vector<VkSema
 }
 
 void VulkanRenderer::Impl::markUploadWaitSemaphoresQueued(FrameResources& frame,
-                                                    const std::vector<VkSemaphore>& semaphores) {
-    frame.uploadWaitSemaphores.reserve(frame.uploadWaitSemaphores.size() + semaphores.size());
+                                                          const std::vector<VkSemaphore>& semaphores) noexcept {
     for (const VkSemaphore semaphore : semaphores) {
         frame.uploadWaitSemaphores.push_back(semaphore);
         for (PendingUploadBatch& upload : pendingUploads_) {
@@ -210,13 +211,16 @@ void VulkanRenderer::Impl::generateMipmaps(VkCommandBuffer commandBuffer, ImageR
         blitInfo.filter = VK_FILTER_LINEAR;
         vkCmdBlitImage2(commandBuffer, &blitInfo);
 
-        transitionImage(commandBuffer, image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
-                        VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                        mipLevel - 1U, 1);
 
         mipWidth = std::max(1, mipWidth / 2);
         mipHeight = std::max(1, mipHeight / 2);
+    }
+
+    if (image.mipLevels > 1U) {
+        transitionImage(commandBuffer, image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+                        VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                        0, image.mipLevels - 1U);
     }
 
     transitionImage(commandBuffer, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -227,26 +231,12 @@ void VulkanRenderer::Impl::generateMipmaps(VkCommandBuffer commandBuffer, ImageR
 }
 
 VkCommandBuffer VulkanRenderer::Impl::beginUploadCommands() const {
-    VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = transferCommandPool_;
-    allocInfo.commandBufferCount = 1;
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    checkVk(vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer), "vkAllocateCommandBuffers upload");
-    try {
-        VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        checkVk(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer upload");
-    } catch (...) {
-        vkFreeCommandBuffers(device_, transferCommandPool_, 1, &commandBuffer);
-        throw;
-    }
-    return commandBuffer;
+    return beginOneShotUploadCommands(transferCommandPool_, "transfer upload");
 }
 
-void VulkanRenderer::Impl::submitTransferUpload(VkCommandBuffer commandBuffer, std::vector<Buffer> stagingBuffers) {
+void VulkanRenderer::Impl::submitTransferUpload(VkCommandBuffer commandBuffer, Buffer staging) {
     const bool needsQueueSemaphore = transferQueue_ != graphicsQueue_;
-    submitUploadBatch(transferQueue_, transferCommandPool_, commandBuffer, "transfer upload", std::move(stagingBuffers), needsQueueSemaphore);
+    submitUploadBatch(transferQueue_, transferCommandPool_, commandBuffer, "transfer upload", staging, needsQueueSemaphore);
 }
 
 } // namespace ve

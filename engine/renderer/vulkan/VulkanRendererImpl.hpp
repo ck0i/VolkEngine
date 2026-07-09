@@ -27,7 +27,6 @@
 #include <random>
 #include <filesystem>
 #include <mutex>
-#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -56,6 +55,18 @@ inline double bytesToMiB(const std::uint64_t bytes) {
     return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
 
+struct GpuVertex {
+    Vec3 position;
+    Vec2 uv;
+    std::array<std::int16_t, 4> normal;
+    std::array<std::int16_t, 4> tangent;
+};
+static_assert(sizeof(GpuVertex) == 36, "GpuVertex layout is part of the Vulkan vertex input contract");
+static_assert(offsetof(GpuVertex, position) == 0, "GpuVertex position offset changed");
+static_assert(offsetof(GpuVertex, uv) == 12, "GpuVertex uv offset changed");
+static_assert(offsetof(GpuVertex, normal) == 20, "GpuVertex normal offset changed");
+static_assert(offsetof(GpuVertex, tangent) == 28, "GpuVertex tangent offset changed");
+
 struct PipelineCacheHeader {
     std::uint32_t headerSize = 0;
     std::uint32_t headerVersion = 0;
@@ -82,15 +93,17 @@ enum class SceneMeshBatchId : std::uint8_t {
     SphereHigh,
     SphereMedium,
     SphereLow,
-    GroundPlane
+    GroundPlane,
+    ImportedModel
 };
 
-inline constexpr std::array<SceneMeshBatchId, 5> kSceneMeshBatchOrder{
+inline constexpr std::array<SceneMeshBatchId, 6> kSceneMeshBatchOrder{
     SceneMeshBatchId::Cube,
     SceneMeshBatchId::SphereHigh,
     SceneMeshBatchId::SphereMedium,
     SceneMeshBatchId::SphereLow,
     SceneMeshBatchId::GroundPlane,
+    SceneMeshBatchId::ImportedModel,
 };
 
 inline std::size_t sceneMeshBatchIndex(const SceneMeshBatchId batch) {
@@ -110,6 +123,8 @@ inline std::size_t sceneMeshBatchIndex(const SceneMeshId mesh) {
         return sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh);
     case SceneMeshId::GroundPlane:
         return sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane);
+    case SceneMeshId::ImportedModel:
+        return sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel);
     }
     throw std::runtime_error("Unknown scene mesh id");
 }
@@ -171,24 +186,10 @@ inline FrustumSphereClassification classifySphereAgainstFrustum(const Frustum& f
     return fullyInside ? FrustumSphereClassification::Inside : FrustumSphereClassification::Intersects;
 }
 
+inline bool depthPrepassGraphIncludesPrepass(const DepthPrepassMode mode) {
+    return mode != DepthPrepassMode::ForceOff;
+}
 
-inline bool sphereOutsideFrustum(const Frustum& frustum, const Vec3 center, const float radius) {
-    for (const FrustumPlane& plane : frustum) {
-        if (dot(plane.normal, center) + plane.distance < -radius) {
-            return true;
-        }
-    }
-    return false;
-}
-inline bool resolveDepthPrepass(const DepthPrepassMode mode) {
-    switch (mode) {
-    case DepthPrepassMode::ForceOn:
-        return true;
-    case DepthPrepassMode::ForceOff:
-        return false;
-    }
-    return false;
-}
 
 inline const char* capabilityName(const bool available) noexcept {
     return available ? "yes" : "no";
@@ -208,9 +209,10 @@ inline const char* gpuClassName(const bool discrete) noexcept {
     return discrete ? "discrete" : "integrated/other";
 }
 
-#if VOLKENGINE_ENABLE_IMGUI
 inline const char* depthPrepassModeName(const DepthPrepassMode mode) {
     switch (mode) {
+    case DepthPrepassMode::Auto:
+        return "auto";
     case DepthPrepassMode::ForceOn:
         return "force-on";
     case DepthPrepassMode::ForceOff:
@@ -218,7 +220,6 @@ inline const char* depthPrepassModeName(const DepthPrepassMode mode) {
     }
     return "unknown";
 }
-#endif
 
 
 inline VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -363,12 +364,13 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
     }
 }
 
-inline std::array<std::filesystem::path, 4> shaderSpirvPaths(const std::filesystem::path& shaderDirectory) {
+inline std::array<std::filesystem::path, 5> shaderSpirvPaths(const std::filesystem::path& shaderDirectory) {
     return {
         shaderDirectory / "scene.vert.spv",
         shaderDirectory / "scene.frag.spv",
         shaderDirectory / "tonemap.vert.spv",
         shaderDirectory / "tonemap.frag.spv",
+        shaderDirectory / "scene_depth.vert.spv",
     };
 }
 
@@ -404,7 +406,7 @@ public:
 
 private:
     static constexpr std::size_t kMaxFramesInFlight = 2;
-    static constexpr std::size_t kSceneMeshBatchCount = 5;
+    static constexpr std::size_t kSceneMeshBatchCount = kSceneMeshBatchOrder.size();
     static constexpr std::uint32_t kTimestampFrameStart = 0;
     static constexpr std::uint32_t kTimestampDepthEnd = 1;
     static constexpr std::uint32_t kTimestampHdrEnd = 2;
@@ -436,6 +438,11 @@ private:
         void* mapped = nullptr;
         std::uint32_t resourceId = GpuResourceRegistry::kInvalidId;
     };
+    [[nodiscard]] static Buffer takeBuffer(Buffer& buffer) noexcept {
+        Buffer taken = buffer;
+        buffer = {};
+        return taken;
+    }
 
     struct ImageSyncState {
         VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -459,6 +466,12 @@ private:
         std::uint32_t resourceId = GpuResourceRegistry::kInvalidId;
         ImageSyncState syncState{};
     };
+    [[nodiscard]] static ImageResource takeImage(ImageResource& image) noexcept {
+        ImageResource taken = image;
+        image = {};
+        return taken;
+    }
+
 
     struct GpuMesh {
         std::uint32_t indexCount = 0;
@@ -470,15 +483,11 @@ private:
     struct MeshUpload {
         Buffer vertices;
         Buffer indices;
-        Buffer vertexStaging;
-        Buffer indexStaging;
+        Buffer staging;
+        VkDeviceSize indexStagingOffset = 0;
         VkDeviceSize vertexSize = 0;
         VkDeviceSize indexSize = 0;
-        GpuMesh cube;
-        GpuMesh sphere;
-        GpuMesh sphereMedium;
-        GpuMesh sphereLow;
-        GpuMesh plane;
+        std::array<GpuMesh, kSceneMeshBatchCount> meshes{};
     };
 
     struct FrameResources {
@@ -501,7 +510,7 @@ private:
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
         VkSemaphore signalSemaphore = VK_NULL_HANDLE;
-        std::vector<Buffer> stagingBuffers;
+        Buffer staging;
     };
     struct FrameGraphResources {
         FrameGraph::ResourceHandle depth;
@@ -526,6 +535,9 @@ private:
 
     struct alignas(16) InstanceData {
         Mat4 model;
+        Vec4 normalMatrix0;
+        Vec4 normalMatrix1;
+        Vec4 normalMatrix2;
         Vec4 albedoRoughness;
         Vec4 emissiveMetallic;
         Vec4 materialFlags;
@@ -551,11 +563,14 @@ private:
     static_assert(offsetof(SceneUniforms, lightColor) == 96, "SceneUniforms.lightColor offset mismatch");
     static_assert(offsetof(SceneUniforms, ambientSkyColor) == 112, "SceneUniforms.ambientSkyColor offset mismatch");
     static_assert(offsetof(SceneUniforms, ambientGroundColor) == 128, "SceneUniforms.ambientGroundColor offset mismatch");
-    static_assert(sizeof(InstanceData) == 112, "InstanceData must match GLSL SceneInstance layout");
+    static_assert(sizeof(InstanceData) == 160, "InstanceData must match GLSL SceneInstance layout");
     static_assert(offsetof(InstanceData, model) == 0, "InstanceData.model offset mismatch");
-    static_assert(offsetof(InstanceData, albedoRoughness) == 64, "InstanceData.albedoRoughness offset mismatch");
-    static_assert(offsetof(InstanceData, emissiveMetallic) == 80, "InstanceData.emissiveMetallic offset mismatch");
-    static_assert(offsetof(InstanceData, materialFlags) == 96, "InstanceData.materialFlags offset mismatch");
+    static_assert(offsetof(InstanceData, normalMatrix0) == 64, "InstanceData.normalMatrix0 offset mismatch");
+    static_assert(offsetof(InstanceData, normalMatrix1) == 80, "InstanceData.normalMatrix1 offset mismatch");
+    static_assert(offsetof(InstanceData, normalMatrix2) == 96, "InstanceData.normalMatrix2 offset mismatch");
+    static_assert(offsetof(InstanceData, albedoRoughness) == 112, "InstanceData.albedoRoughness offset mismatch");
+    static_assert(offsetof(InstanceData, emissiveMetallic) == 128, "InstanceData.emissiveMetallic offset mismatch");
+    static_assert(offsetof(InstanceData, materialFlags) == 144, "InstanceData.materialFlags offset mismatch");
 
     void createInstance();
     void createDebugMessenger();
@@ -599,7 +614,8 @@ private:
     void cleanupSwapchain();
     void recreateSwapchain();
     [[nodiscard]] SceneVisibilityPlan planSceneVisibility(const Camera& camera, const Mat4& projection, const Mat4& viewProjection, const SceneRenderList& renderItems);
-    void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, const Buffer* screenshotReadback);
+    [[nodiscard]] bool resolveDepthPrepassForFrame(const SceneVisibilityPlan& visibility);
+    void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback);
     void restoreFrameFenceAfterSubmitFailure(FrameResources& frame, std::size_t frameIndex, VkResult submitResult);
     [[nodiscard]] VkDeviceSize checkedSceneInstanceBufferSize(std::size_t capacity) const;
     void createFrameInstanceDataBuffer(FrameResources& frame, std::size_t frameIndex, std::size_t capacity);
@@ -632,20 +648,21 @@ private:
     void destroyImage(ImageResource& image);
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, std::uint32_t mipLevels = 1) const;
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
+    [[nodiscard]] VkCommandBuffer beginOneShotUploadCommands(VkCommandPool commandPool, const char* operationName) const;
     [[nodiscard]] VkCommandBuffer beginGraphicsUploadCommands() const;
-    void submitGraphicsUpload(VkCommandBuffer commandBuffer, std::vector<Buffer> stagingBuffers);
-    void submitTransferUpload(VkCommandBuffer commandBuffer, std::vector<Buffer> stagingBuffers);
-    void submitUploadBatch(VkQueue queue, VkCommandPool commandPool, VkCommandBuffer commandBuffer, const char* operationName, std::vector<Buffer> stagingBuffers, bool signalSemaphore);
+    void submitGraphicsUpload(VkCommandBuffer commandBuffer, Buffer staging);
+    void submitTransferUpload(VkCommandBuffer commandBuffer, Buffer staging);
+    void submitUploadBatch(VkQueue queue, VkCommandPool commandPool, VkCommandBuffer commandBuffer, const char* operationName, Buffer staging, bool signalSemaphore);
     void retireCompletedUploads();
     void destroyPendingUpload(PendingUploadBatch& upload);
     void retirePendingUploadResources(PendingUploadBatch& upload);
     void destroyFrameUploadWaitSemaphores(FrameResources& frame);
     void collectPendingUploadWaitSemaphores(std::vector<VkSemaphore>& semaphores) const;
-    void markUploadWaitSemaphoresQueued(FrameResources& frame, const std::vector<VkSemaphore>& semaphores);
+    void markUploadWaitSemaphoresQueued(FrameResources& frame, const std::vector<VkSemaphore>& semaphores) noexcept;
     [[nodiscard]] bool formatSupportsLinearMipBlit(VkFormat format) const;
     void generateMipmaps(VkCommandBuffer commandBuffer, ImageResource& image) const;
     [[nodiscard]] VkCommandBuffer beginUploadCommands() const;
-    [[nodiscard]] MeshUpload stageMeshUpload(const MeshData& cubeMesh, const MeshData& sphereMesh, const MeshData& sphereMediumMesh, const MeshData& sphereLowMesh, const MeshData& planeMesh);
+    [[nodiscard]] MeshUpload stageMeshUpload(std::array<MeshData, kSceneMeshBatchCount>& meshes);
     void recordMeshUpload(VkCommandBuffer commandBuffer, const MeshUpload& upload) const;
     [[nodiscard]] const GpuMesh& meshFor(SceneMeshId mesh) const;
     class DebugLabelScope final {
@@ -725,8 +742,10 @@ private:
     ImageResource depth_;
     ImageResource hdr_;
     ImageResource groundAlbedoTexture_;
+    ImageResource groundNormalTexture_;
     VkSampler linearSampler_ = VK_NULL_HANDLE;
     VkSampler textureSampler_ = VK_NULL_HANDLE;
+    VkSampler normalTextureSampler_ = VK_NULL_HANDLE;
     bool samplerAnisotropyEnabled_ = false;
     float maxSamplerAnisotropy_ = 1.0f;
 
@@ -744,6 +763,7 @@ private:
     VkPipelineLayout tonemapPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline tonemapPipeline_ = VK_NULL_HANDLE;
     std::vector<RetiredPipelineSet> retiredPipelineSets_;
+    bool autoDepthPrepassEnabled_ = false;
     bool imguiInitialized_ = false;
     std::uint32_t imguiMinImageCount_ = 0;
     std::uint32_t imguiImageCount_ = 0;
@@ -756,16 +776,12 @@ private:
 
     Buffer sceneVertexBuffer_;
     Buffer sceneIndexBuffer_;
-    GpuMesh cube_;
-    GpuMesh sphere_;
-    GpuMesh sphereMedium_;
-    GpuMesh sphereLow_;
-    GpuMesh plane_;
+    std::array<GpuMesh, kSceneMeshBatchCount> sceneMeshes_{};
     std::array<std::uint32_t, kSceneMeshBatchCount> sceneMeshTriangleCounts_{};
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     bool timestampsEnabled_ = false;
     std::uint32_t timestampValidBits_ = 0;
-    std::array<std::filesystem::file_time_type, 4> shaderWriteTimes_{};
+    std::array<std::filesystem::file_time_type, 5> shaderWriteTimes_{};
     double shaderHotReloadLastCheckSeconds_ = 0.0;
     RenderStats stats_{};
     RenderDeviceInfo deviceInfo_{};
@@ -789,6 +805,8 @@ private:
         std::array<std::uint32_t, kSceneMeshBatchCount> meshInstanceCounts{};
         std::uint32_t visibleItemCount = 0;
         std::uint64_t sceneTriangleCount = 0;
+        Vec3 cameraPosition{};
+        Vec3 cameraForward{1.0f, 0.0f, 0.0f};
         std::uint32_t culledDrawCalls = 0;
         std::uint32_t gridTileCount = 0;
         std::uint32_t gridTilesCulled = 0;
@@ -821,7 +839,15 @@ private:
         std::uint32_t gridTilesIntersected = 0;
     };
 
+    struct InstanceSortKey {
+        float depth = 0.0f;
+        std::uint32_t index = 0;
+    };
+    static_assert(sizeof(InstanceSortKey) == 8, "InstanceSortKey should stay compact for per-frame sorting");
+
     std::vector<VisibleSceneWork> visibleSceneWorkScratch_;
+    std::array<std::vector<InstanceData>, kSceneMeshBatchCount> instanceSortScratch_;
+    std::array<std::vector<InstanceSortKey>, kSceneMeshBatchCount> instanceSortKeyScratch_;
     CachedGridVisibility gridVisibilityCache_;
     PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT_ = nullptr;
     PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT_ = nullptr;

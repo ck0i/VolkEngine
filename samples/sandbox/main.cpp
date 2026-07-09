@@ -100,6 +100,8 @@ SandboxArgs parseArguments(int argc, char** argv) {
             args.config.materialGridTileRows = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--grid-tile-columns") {
             args.config.materialGridTileColumns = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
+        } else if (arg == "--auto-depth-prepass") {
+            args.config.depthPrepassMode = ve::DepthPrepassMode::Auto;
         } else if (arg == "--depth-prepass") {
             args.config.depthPrepassMode = ve::DepthPrepassMode::ForceOn;
         } else if (arg == "--no-depth-prepass") {
@@ -138,7 +140,7 @@ SandboxArgs parseArguments(int argc, char** argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--resize-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps|--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
+    std::cout << "Usage: VolkEngineSandbox [--frames N] [--resize-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps|--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
 }
 
 } // namespace

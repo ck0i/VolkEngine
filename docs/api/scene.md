@@ -34,7 +34,10 @@ Current packing:
 - `albedoRoughness.a`: roughness.
 - `emissiveMetallic.rgb`: emissive color.
 - `emissiveMetallic.a`: metallic.
-- `flags`: material flags; the ground path uses flags for texture/grid behavior.
+- `flags.x`: ground grid overlay enabled.
+- `flags.y`: albedo texture sampling enabled.
+- `flags.z`: normal-map sampling enabled.
+- `flags.w`: normal-map strength in `[0, 1]`.
 
 ## `SceneRenderItem`
 
@@ -108,13 +111,14 @@ Sandbox scene builder used by `VulkanRenderer`.
 
 Public API:
 
-- `kFixedItemCount = 6`.
+- `kFixedItemCount = 7`.
 - `requiredItemCount(rows, columns)` — returns `rows * columns + kFixedItemCount` with overflow checks.
 - `validateMaterialGridDimensions(rows, columns)` — throws on invalid/overflowing dimensions.
+- `setImportedModelBounds(bounds)` — supplies local-space imported-model bounds from loaded mesh data and invalidates the cached static layout.
 - `build(elapsedSeconds, rows, columns, tileRows, tileColumns) -> const SceneRenderList&` — returns a reused render list.
 
 Behavior:
 
-- Rebuilds static grid/ground layout only when dimensions or tile size change.
+- Rebuilds static grid/ground/imported-model layout only when dimensions, tile size, or imported-model bounds change.
 - Rewrites only the animated foreground items on stable layouts.
 - Keeps material-grid tile metadata cached for renderer visibility acceleration.

@@ -4,21 +4,33 @@
 #include "common/scene_uniforms.glsl"
 #include "common/pbr.glsl"
 
-layout(set = 0, binding = 1) uniform sampler2D materialAlbedoTexture;
+layout(set = 0, binding = 1) uniform sampler2D materialTextures[2];
+
+const int kMaterialAlbedoTexture = 0;
+const int kMaterialNormalTexture = 1;
 
 
 layout(location = 0) in vec3 vWorldPosition;
 layout(location = 1) in vec3 vWorldNormal;
 layout(location = 2) in vec2 vUv;
-layout(location = 3) in vec4 vAlbedoRoughness;
-layout(location = 4) in vec4 vEmissiveMetallic;
+layout(location = 3) flat in vec4 vAlbedoRoughness;
+layout(location = 4) flat in vec4 vEmissiveMetallic;
 layout(location = 5) flat in vec4 vMaterialFlags;
+layout(location = 6) in vec4 vWorldTangent;
 
 layout(location = 0) out vec4 outColor;
 
 
 void main() {
     vec3 n = normalize(vWorldNormal);
+    if (vMaterialFlags.z > 0.5) {
+        vec3 t = normalize(vWorldTangent.xyz - n * dot(n, vWorldTangent.xyz));
+        vec3 b = cross(n, t) * vWorldTangent.w;
+        vec3 tangentNormal = texture(materialTextures[kMaterialNormalTexture], vUv).xyz * 2.0 - 1.0;
+        tangentNormal.xy *= clamp(vMaterialFlags.w, 0.0, 1.0);
+        tangentNormal = normalize(tangentNormal);
+        n = normalize(mat3(t, b, n) * tangentNormal);
+    }
     vec3 v = normalize(scene.cameraPositionTime.xyz - vWorldPosition);
     vec3 l = normalize(-scene.lightDirection.xyz);
     vec3 h = normalize(v + l);
@@ -27,14 +39,14 @@ void main() {
     float roughness = clamp(vAlbedoRoughness.a, 0.04, 1.0);
     float metallic = clamp(vEmissiveMetallic.a, 0.0, 1.0);
     if (vMaterialFlags.y > 0.5) {
-        albedo *= texture(materialAlbedoTexture, vUv).rgb;
+        albedo *= texture(materialTextures[kMaterialAlbedoTexture], vUv).rgb;
     }
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
 
     float ndotl = max(dot(n, l), 0.0);
     float ndotv = max(dot(n, v), 0.0);
     float d = distributionGGX(n, h, roughness);
-    float g = geometrySmith(n, v, l, roughness);
+    float g = geometrySmith(ndotv, ndotl, roughness);
     vec3 f = fresnelSchlick(max(dot(h, v), 0.0), f0);
     vec3 specular = (d * g * f) / max(4.0 * ndotv * ndotl, 0.0001);
     vec3 kd = (1.0 - f) * (1.0 - metallic);

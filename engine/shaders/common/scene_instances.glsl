@@ -1,5 +1,8 @@
 struct SceneInstance {
     mat4 model;
+    vec4 normalMatrix0;
+    vec4 normalMatrix1;
+    vec4 normalMatrix2;
     vec4 albedoRoughness;
     vec4 emissiveMetallic;
     vec4 materialFlags;

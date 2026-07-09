@@ -153,7 +153,8 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devices(deviceCount);
     checkVk(vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices data");
 
-    std::multimap<int, VkPhysicalDevice, std::greater<>> ranked;
+    VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+    int bestScore = std::numeric_limits<int>::min();
     std::vector<std::string> rejectionMessages;
     for (VkPhysicalDevice device : devices) {
         VkPhysicalDeviceProperties properties{};
@@ -172,10 +173,13 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
         int score = 0;
         if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { score += 1000; }
         score += static_cast<int>(properties.limits.maxImageDimension2D);
-        ranked.emplace(score, device);
+        if (bestDevice == VK_NULL_HANDLE || score > bestScore) {
+            bestDevice = device;
+            bestScore = score;
+        }
     }
 
-    if (ranked.empty()) {
+    if (bestDevice == VK_NULL_HANDLE) {
         std::string message = "No suitable Vulkan physical device found";
         if (!rejectionMessages.empty()) {
             message += ":";
@@ -187,7 +191,7 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
         throw std::runtime_error(message);
     }
 
-    physicalDevice_ = ranked.begin()->second;
+    physicalDevice_ = bestDevice;
     queueFamilies_ = findQueueFamilies(physicalDevice_);
     vkGetPhysicalDeviceProperties(physicalDevice_, &physicalDeviceProperties_);
     vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &physicalDeviceMemoryProperties_);
@@ -287,24 +291,49 @@ VulkanRenderer::Impl::QueueFamilies VulkanRenderer::Impl::findQueueFamilies(VkPh
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, families.data());
 
     QueueFamilies result{};
+    std::optional<std::uint32_t> firstGraphics;
+    std::optional<std::uint32_t> firstPresent;
+    std::optional<std::uint32_t> firstTransfer;
+    std::optional<std::uint32_t> nonGraphicsTransfer;
+    std::optional<std::uint32_t> transferOnly;
     for (std::uint32_t i = 0; i < queueFamilyCount; ++i) {
         const VkQueueFamilyProperties& family = families[i];
-        if ((family.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0U) {
-            result.graphics = i;
-        }
+        const bool supportsGraphics = (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0U;
+        const bool supportsTransfer = (family.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0U;
 
         VkBool32 presentSupport = VK_FALSE;
         checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &presentSupport), "vkGetPhysicalDeviceSurfaceSupportKHR");
-        if (presentSupport == VK_TRUE) {
+        const bool supportsPresent = presentSupport == VK_TRUE;
+
+        if (supportsGraphics && !firstGraphics.has_value()) {
+            firstGraphics = i;
+        }
+        if (supportsPresent && !firstPresent.has_value()) {
+            firstPresent = i;
+        }
+        if (supportsGraphics && supportsPresent && !result.graphics.has_value()) {
+            result.graphics = i;
             result.present = i;
         }
-
-        if ((family.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0U) {
-            if (!result.transfer.has_value() || ((family.queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0U)) {
-                result.transfer = i;
+        if (supportsTransfer) {
+            if (!firstTransfer.has_value()) {
+                firstTransfer = i;
+            }
+            if ((family.queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0U && !nonGraphicsTransfer.has_value()) {
+                nonGraphicsTransfer = i;
+            }
+            if ((family.queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == 0U && !transferOnly.has_value()) {
+                transferOnly = i;
             }
         }
     }
+    if (!result.graphics.has_value()) {
+        result.graphics = firstGraphics;
+    }
+    if (!result.present.has_value()) {
+        result.present = firstPresent;
+    }
+    result.transfer = transferOnly.has_value() ? transferOnly : (nonGraphicsTransfer.has_value() ? nonGraphicsTransfer : firstTransfer);
     return result;
 }
 
@@ -323,9 +352,25 @@ void VulkanRenderer::Impl::createLogicalDevice() {
     VkPhysicalDeviceVulkan13Features features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
+    VkPhysicalDeviceVulkan12Features features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    features12.pNext = &features13;
 
+
+    VkPhysicalDeviceVulkan12Features supportedFeatures12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceFeatures2 supportedFeatures2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    supportedFeatures2.pNext = &supportedFeatures12;
     vkGetPhysicalDeviceFeatures2(physicalDevice_, &supportedFeatures2);
+    const bool descriptorIndexingEnabled = supportedFeatures12.descriptorIndexing == VK_TRUE;
+    const bool bindlessSampledImagesEnabled = supportsBindlessSampledImages(supportedFeatures12);
+    if (descriptorIndexingEnabled) {
+        features12.descriptorIndexing = VK_TRUE;
+    }
+    if (bindlessSampledImagesEnabled) {
+        features12.runtimeDescriptorArray = VK_TRUE;
+        features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
+        features12.descriptorBindingPartiallyBound = VK_TRUE;
+        features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    }
     VkPhysicalDeviceFeatures deviceFeatures{};
     const float deviceMaxSamplerAnisotropy = std::max(1.0f, physicalDeviceProperties_.limits.maxSamplerAnisotropy);
     samplerAnisotropyEnabled_ = supportedFeatures2.features.samplerAnisotropy == VK_TRUE && deviceMaxSamplerAnisotropy > 1.0f;
@@ -370,6 +415,8 @@ void VulkanRenderer::Impl::createLogicalDevice() {
     deviceInfo_.samplerAnisotropy = samplerAnisotropyEnabled_;
     deviceInfo_.maxSamplerAnisotropy = maxSamplerAnisotropy_;
 
+    deviceInfo_.descriptorIndexing = descriptorIndexingEnabled;
+    deviceInfo_.bindlessSampledImagesSupported = bindlessSampledImagesEnabled;
     std::vector<const char*> enabledExtensions(kDeviceExtensions.begin(), kDeviceExtensions.end());
     if (deviceExtensionAvailable(physicalDevice_, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
         enabledExtensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
@@ -378,7 +425,7 @@ void VulkanRenderer::Impl::createLogicalDevice() {
     }
 
     VkDeviceCreateInfo createInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    createInfo.pNext = &features13;
+    createInfo.pNext = &features12;
     createInfo.queueCreateInfoCount = static_cast<std::uint32_t>(queueInfos.size());
     createInfo.pQueueCreateInfos = queueInfos.data();
     createInfo.enabledExtensionCount = static_cast<std::uint32_t>(enabledExtensions.size());

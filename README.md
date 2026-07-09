@@ -76,7 +76,7 @@ Automated Linux smoke run:
 ./out/build/linux-debug/VolkEngineSandbox --frames 120 --resize-smoke
 ```
 
-Common flags: `--frames N`, `--resize-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
+Common flags: `--frames N`, `--resize-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
 
 Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold right mouse button for captured mouse-look.
 
@@ -84,4 +84,4 @@ Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold 
 
 - clangd support becomes useful after configuring a CMake preset, because CMake writes `compile_commands.json` under `out/build/<preset>/`. The tracked `.clangd` defaults to `out/build/linux-debug`; if you use another preset, adjust your local clangd config or keep an ignored root `compile_commands.json` symlink/copy.
 - Generated build trees, screenshots, and caches are ignored.
-- Source assets such as `assets/textures/ground_albedo.ppm` and GLSL shader sources under `engine/shaders/` are tracked.
+- Source assets such as `assets/textures/ground_albedo.png`, `assets/textures/ground_normal.png`, OBJ meshes under `assets/models/`, and GLSL shader sources under `engine/shaders/` are tracked.

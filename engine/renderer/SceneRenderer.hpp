@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Math.hpp"
+#include "renderer/Geometry.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -14,7 +15,8 @@ namespace ve {
 enum class SceneMeshId : std::uint8_t {
     Cube,
     Sphere,
-    GroundPlane
+    GroundPlane,
+    ImportedModel
 };
 
 struct alignas(16) RenderMaterial {
@@ -209,7 +211,7 @@ private:
 
 class DemoSceneRenderer {
 public:
-    static constexpr std::uint64_t kFixedItemCount = 6;
+    static constexpr std::uint64_t kFixedItemCount = 7;
 
     [[nodiscard]] static std::size_t requiredItemCount(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns) {
         const std::uint64_t materialGridItems = static_cast<std::uint64_t>(materialGridRows) * static_cast<std::uint64_t>(materialGridColumns);
@@ -229,6 +231,14 @@ public:
         (void)requiredItemCount(materialGridRows, materialGridColumns);
     }
 
+    void setImportedModelBounds(const MeshBounds& bounds) noexcept {
+        if (!bounds.valid) {
+            return;
+        }
+        importedModelLocalBounds_ = bounds;
+        invalidateStaticSceneLayout();
+    }
+
     [[nodiscard]] const SceneRenderList& build(const double elapsedSeconds, const std::uint32_t materialGridRows = 4, const std::uint32_t materialGridColumns = 5, const std::uint32_t materialGridTileRows = kDefaultMaterialGridTileRows, const std::uint32_t materialGridTileColumns = kDefaultMaterialGridTileColumns) {
         const std::size_t requiredItems = requiredItemCount(materialGridRows, materialGridColumns);
         ensureStaticSceneLayout(materialGridRows, materialGridColumns, materialGridTileRows, materialGridTileColumns, requiredItems);
@@ -240,6 +250,39 @@ private:
     static constexpr std::size_t kAnimatedItemCount = 5;
     static constexpr std::uint32_t kDefaultMaterialGridTileRows = 16;
     static constexpr std::uint32_t kDefaultMaterialGridTileColumns = 16;
+    static constexpr Vec3 kImportedModelTranslation{0.0f, 1.0f, -3.35f};
+    static constexpr float kImportedModelRotationY = -0.35f;
+    static constexpr float kImportedModelScale = 0.78f;
+    static constexpr MeshBounds kFallbackImportedModelBounds{{}, 1.0f, true};
+
+    [[nodiscard]] static Mat4 importedModelMatrix() {
+        return translate(kImportedModelTranslation) * rotateY(kImportedModelRotationY) *
+               scale({kImportedModelScale, kImportedModelScale, kImportedModelScale});
+    }
+
+    [[nodiscard]] static Vec3 transformPoint(const Mat4& matrix, const Vec3 point) noexcept {
+        return Vec3{matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
+                    matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
+                    matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]};
+    }
+
+    [[nodiscard]] SceneRenderItem importedModelItem() const {
+        const Mat4 model = importedModelMatrix();
+        const MeshBounds& bounds = importedModelLocalBounds_.valid ? importedModelLocalBounds_ : kFallbackImportedModelBounds;
+        return SceneRenderItem{transformPoint(model, bounds.center),
+                               bounds.radius * kImportedModelScale,
+                               SceneMeshId::ImportedModel,
+                               model,
+                               {{0.72f, 0.66f, 0.54f, 0.42f}, {0.0f, 0.0f, 0.0f, 0.65f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
+    }
+
+    void invalidateStaticSceneLayout() noexcept {
+        renderList_.clear();
+        cachedMaterialGridRows_ = 0;
+        cachedMaterialGridColumns_ = 0;
+        cachedMaterialGridTileRows_ = 0;
+        cachedMaterialGridTileColumns_ = 0;
+    }
 
 
     void ensureStaticSceneLayout(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns, const std::uint32_t materialGridTileRows, const std::uint32_t materialGridTileColumns, const std::size_t requiredItems) {
@@ -280,7 +323,8 @@ private:
                                          17.0f,
                                          SceneMeshId::GroundPlane,
                                          Mat4::identity(),
-                                         {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 0.0f}}});
+                                         {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.55f}}});
+        renderList_.push(importedModelItem());
         cachedMaterialGridRows_ = materialGridRows;
         cachedMaterialGridColumns_ = materialGridColumns;
         cachedMaterialGridTileRows_ = materialGridTileRows;
@@ -316,6 +360,7 @@ private:
                                          {{0.88f, 0.82f, 0.68f, 0.08f}, {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
     }
 
+    MeshBounds importedModelLocalBounds_ = kFallbackImportedModelBounds;
     SceneRenderList renderList_;
     std::uint32_t cachedMaterialGridRows_ = 0;
     std::uint32_t cachedMaterialGridColumns_ = 0;

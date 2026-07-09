@@ -19,7 +19,7 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `gpuTimestamps` | `true` | Requests timestamp queries; unsupported/disabled results keep `gpuTimestampsValid = false`. |
 | `materialGridRows`, `materialGridColumns` | `4`, `5` | Demo material-grid dimensions. |
 | `materialGridTileRows`, `materialGridTileColumns` | `16`, `16` | Demo grid tile dimensions for culling acceleration. |
-| `depthPrepassMode` | `DepthPrepassMode::ForceOff` | Explicit prepass switch; no adaptive mode yet. |
+| `depthPrepassMode` | `DepthPrepassMode::Auto` | Adaptive prepass selection by visible scene complexity; `ForceOn` and `ForceOff` are deterministic overrides. |
 | `shaderDirectory`, `assetDirectory`, `cacheDirectory` | CMake-defined build paths | Runtime shader, asset, and pipeline-cache locations. |
 
 ## `RunOptions`
@@ -32,7 +32,8 @@ Execution controls used by `Application::run()`.
 
 ## `DepthPrepassMode`
 
-- `ForceOff`: default depth-writing HDR scene pass.
+- `Auto`: default mode; compiles a frame-graph superset and records the depth prepass only when visible item/triangle counts cross hysteresis thresholds.
+- `ForceOff`: depth-writing HDR scene pass.
 - `ForceOn`: depth-only prepass followed by HDR scene pass reading depth.
 
 ## `Application`

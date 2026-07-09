@@ -1,25 +1,40 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
+#include <cmath>
+#include <cstring>
+
 namespace ve {
+namespace {
+
+[[nodiscard]] std::int16_t packSnorm16(const float value) {
+    return static_cast<std::int16_t>(std::lround(std::clamp(value, -1.0f, 1.0f) * 32767.0f));
+}
+
+[[nodiscard]] GpuVertex packVertex(const Vertex& vertex) {
+    return GpuVertex{{vertex.position.x, vertex.position.y, vertex.position.z},
+                     {vertex.uv.x, vertex.uv.y},
+                     {packSnorm16(vertex.normal.x), packSnorm16(vertex.normal.y), packSnorm16(vertex.normal.z), 0},
+                     {packSnorm16(vertex.tangent.x), packSnorm16(vertex.tangent.y), packSnorm16(vertex.tangent.z), packSnorm16(vertex.tangent.w)}};
+}
+
+} // namespace
 
 void VulkanRenderer::Impl::destroyMeshUpload(MeshUpload& upload) {
-    destroyBuffer(upload.indexStaging);
-    destroyBuffer(upload.vertexStaging);
+    destroyBuffer(upload.staging);
     destroyBuffer(upload.indices);
     destroyBuffer(upload.vertices);
-    upload.cube = {};
-    upload.sphere = {};
-    upload.plane = {};
+    upload.meshes = {};
 }
 
 void VulkanRenderer::Impl::recordMeshUpload(VkCommandBuffer commandBuffer, const MeshUpload& upload) const {
     VkBufferCopy vertexCopy{};
     vertexCopy.size = upload.vertexSize;
-    vkCmdCopyBuffer(commandBuffer, upload.vertexStaging.buffer, upload.vertices.buffer, 1, &vertexCopy);
+    vkCmdCopyBuffer(commandBuffer, upload.staging.buffer, upload.vertices.buffer, 1, &vertexCopy);
 
     VkBufferCopy indexCopy{};
+    indexCopy.srcOffset = upload.indexStagingOffset;
     indexCopy.size = upload.indexSize;
-    vkCmdCopyBuffer(commandBuffer, upload.indexStaging.buffer, upload.indices.buffer, 1, &indexCopy);
+    vkCmdCopyBuffer(commandBuffer, upload.staging.buffer, upload.indices.buffer, 1, &indexCopy);
 
     if (transferQueue_ == graphicsQueue_) {
         std::array<VkBufferMemoryBarrier2, 2> barriers{};
@@ -47,88 +62,85 @@ void VulkanRenderer::Impl::recordMeshUpload(VkCommandBuffer commandBuffer, const
 }
 
 const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshFor(const SceneMeshId mesh) const {
-    switch (mesh) {
-    case SceneMeshId::Cube:
-        return cube_;
-    case SceneMeshId::Sphere:
-        return sphere_;
-    case SceneMeshId::GroundPlane:
-        return plane_;
-    }
-    throw std::runtime_error("Unknown scene mesh id");
+    return meshForBatch(sceneMeshBatchIndex(mesh));
 }
 
 const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshForBatch(const std::size_t meshIndex) const {
-    if (meshIndex >= kSceneMeshBatchOrder.size()) {
+    if (meshIndex >= sceneMeshes_.size()) {
         throw std::runtime_error("Scene mesh batch index out of range");
     }
-    switch (kSceneMeshBatchOrder[meshIndex]) {
-    case SceneMeshBatchId::Cube:
-        return cube_;
-    case SceneMeshBatchId::SphereHigh:
-        return sphere_;
-    case SceneMeshBatchId::SphereMedium:
-        return sphereMedium_;
-    case SceneMeshBatchId::SphereLow:
-        return sphereLow_;
-    case SceneMeshBatchId::GroundPlane:
-        return plane_;
-    }
-    throw std::runtime_error("Unknown scene mesh batch id");
+    return sceneMeshes_[meshIndex];
 }
 
-VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(const MeshData& cubeMesh, const MeshData& sphereMesh, const MeshData& sphereMediumMesh, const MeshData& sphereLowMesh, const MeshData& planeMesh) {
+VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::array<MeshData, kSceneMeshBatchCount>& meshes) {
     MeshUpload upload{};
-    std::vector<Vertex> vertices;
-    std::vector<std::uint32_t> indices;
-    vertices.reserve(cubeMesh.vertices.size() + sphereMesh.vertices.size() + sphereMediumMesh.vertices.size() + sphereLowMesh.vertices.size() + planeMesh.vertices.size());
-    indices.reserve(cubeMesh.indices.size() + sphereMesh.indices.size() + sphereMediumMesh.indices.size() + sphereLowMesh.indices.size() + planeMesh.indices.size());
-
-    const auto appendMesh = [&](const MeshData& mesh) -> GpuMesh {
-        if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
-            throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
+    std::size_t vertexCount = 0;
+    std::size_t indexCount = 0;
+    for (const MeshData& mesh : meshes) {
+        if (mesh.vertices.size() > std::numeric_limits<std::size_t>::max() - vertexCount ||
+            mesh.indices.size() > std::numeric_limits<std::size_t>::max() - indexCount) {
+            throw std::runtime_error("Scene geometry exceeds host size range");
         }
-        if (mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
-            throw std::runtime_error("Scene mesh index count exceeds uint32 range");
-        }
-        if (indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) - mesh.indices.size()) {
-            throw std::runtime_error("Scene geometry index buffer exceeds uint32 range");
-        }
-        const std::size_t firstVertex = vertices.size();
-        if (firstVertex > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
-            throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
-        }
-        const std::size_t firstIndex = indices.size();
-        vertices.insert(vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
-        indices.insert(indices.end(), mesh.indices.begin(), mesh.indices.end());
-        return GpuMesh{
-            static_cast<std::uint32_t>(mesh.indices.size()),
-            static_cast<std::uint32_t>(firstIndex),
-            static_cast<std::int32_t>(firstVertex),
-        };
-    };
-
-    upload.cube = appendMesh(cubeMesh);
-    upload.sphere = appendMesh(sphereMesh);
-    upload.sphereMedium = appendMesh(sphereMediumMesh);
-    upload.sphereLow = appendMesh(sphereLowMesh);
-    upload.plane = appendMesh(planeMesh);
-    upload.vertexSize = static_cast<VkDeviceSize>(vertices.size() * sizeof(Vertex));
-    upload.indexSize = static_cast<VkDeviceSize>(indices.size() * sizeof(std::uint32_t));
+        vertexCount += mesh.vertices.size();
+        indexCount += mesh.indices.size();
+    }
+    if (vertexCount > static_cast<std::size_t>(std::numeric_limits<VkDeviceSize>::max() / sizeof(GpuVertex)) ||
+        indexCount > static_cast<std::size_t>(std::numeric_limits<VkDeviceSize>::max() / sizeof(std::uint32_t))) {
+        throw std::runtime_error("Scene geometry upload exceeds VkDeviceSize range");
+    }
+    upload.vertexSize = static_cast<VkDeviceSize>(vertexCount * sizeof(GpuVertex));
+    upload.indexSize = static_cast<VkDeviceSize>(indexCount * sizeof(std::uint32_t));
+    if (upload.indexSize > std::numeric_limits<VkDeviceSize>::max() - upload.vertexSize) {
+        throw std::runtime_error("Scene geometry staging size exceeds VkDeviceSize range");
+    }
+    upload.indexStagingOffset = upload.vertexSize;
+    const VkDeviceSize stagingSize = upload.vertexSize + upload.indexSize;
 
     try {
-        upload.vertexStaging = createBuffer(upload.vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        upload.staging = createBuffer(stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         {
-            ScopedVmaMap vertexMap{allocator_, upload.vertexStaging.allocation, "vmaMapMemory vertex staging"};
-            std::memcpy(vertexMap.get(), vertices.data(), static_cast<std::size_t>(upload.vertexSize));
-        }
+            ScopedVmaMap stagingMap{allocator_, upload.staging.allocation, "vmaMapMemory mesh staging"};
+            auto* stagingBytes = static_cast<std::uint8_t*>(stagingMap.get());
+            auto* vertexDst = reinterpret_cast<GpuVertex*>(stagingBytes);
+            auto* indexDst = reinterpret_cast<std::uint32_t*>(stagingBytes + static_cast<std::size_t>(upload.indexStagingOffset));
+            std::size_t vertexCursor = 0;
+            std::size_t indexCursor = 0;
+            const auto appendMesh = [&](MeshData& mesh) -> GpuMesh {
+                if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+                    throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
+                }
+                if (mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+                    throw std::runtime_error("Scene mesh index count exceeds uint32 range");
+                }
+                if (indexCursor > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) - mesh.indices.size()) {
+                    throw std::runtime_error("Scene geometry index buffer exceeds uint32 range");
+                }
+                const std::size_t firstVertex = vertexCursor;
+                if (firstVertex > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+                    throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
+                }
+                const std::size_t firstIndex = indexCursor;
+                optimizeTriangleIndexOrderForVertexCache(mesh.indices, mesh.vertices.size());
+                const std::size_t meshVertexCount = mesh.vertices.size();
+                const std::size_t meshIndexCount = mesh.indices.size();
+                GpuVertex* meshVertexDst = vertexDst + vertexCursor;
+                for (std::size_t vertexIndex = 0; vertexIndex < meshVertexCount; ++vertexIndex) {
+                    meshVertexDst[vertexIndex] = packVertex(mesh.vertices[vertexIndex]);
+                }
+                vertexCursor += meshVertexCount;
+                if (meshIndexCount > 0U) {
+                    std::memcpy(indexDst + indexCursor, mesh.indices.data(), meshIndexCount * sizeof(std::uint32_t));
+                }
+                indexCursor += meshIndexCount;
+                return GpuMesh{static_cast<std::uint32_t>(meshIndexCount),
+                               static_cast<std::uint32_t>(firstIndex),
+                               static_cast<std::int32_t>(firstVertex)};
+            };
 
-        upload.indexStaging = createBuffer(upload.indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        {
-            ScopedVmaMap indexMap{allocator_, upload.indexStaging.allocation, "vmaMapMemory index staging"};
-            std::memcpy(indexMap.get(), indices.data(), static_cast<std::size_t>(upload.indexSize));
+            for (std::size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex) {
+                upload.meshes[meshIndex] = appendMesh(meshes[meshIndex]);
+            }
         }
 
         upload.vertices = createBuffer(upload.vertexSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -143,41 +155,35 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(const Mes
 }
 
 void VulkanRenderer::Impl::createMeshes() {
-    std::vector<Buffer> stagingBuffers;
-    stagingBuffers.reserve(2);
     MeshUpload meshUpload{};
     try {
-        meshUpload = stageMeshUpload(createCubeMesh(), createUvSphereMesh(32, 64), createUvSphereMesh(16, 32), createUvSphereMesh(8, 16), createPlaneMesh(12.0f, 12.0f));
+        std::array<MeshData, kSceneMeshBatchCount> meshes{};
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::Cube)] = createCubeMesh();
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh)] = createUvSphereMesh(32, 64);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(16, 32);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(8, 16);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = createPlaneMesh(12.0f, 12.0f);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)] = loadObjMesh(config_.assetDirectory / "models" / "imported_showcase.obj");
+        sceneRenderer_.setImportedModelBounds(meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)].bounds);
+        meshUpload = stageMeshUpload(meshes);
+        for (MeshData& mesh : meshes) {
+            mesh = {};
+        }
 
         VkCommandBuffer uploadCommands = beginUploadCommands();
         recordMeshUpload(uploadCommands, meshUpload);
-        stagingBuffers.push_back(meshUpload.indexStaging);
-        meshUpload.indexStaging = {};
-        stagingBuffers.push_back(meshUpload.vertexStaging);
-        meshUpload.vertexStaging = {};
-        submitTransferUpload(uploadCommands, std::move(stagingBuffers));
+        submitTransferUpload(uploadCommands, takeBuffer(meshUpload.staging));
     } catch (...) {
         destroyMeshUpload(meshUpload);
         throw;
     }
 
-    sceneVertexBuffer_ = meshUpload.vertices;
-    sceneIndexBuffer_ = meshUpload.indices;
-    cube_ = meshUpload.cube;
-    sphere_ = meshUpload.sphere;
-    sphereMedium_ = meshUpload.sphereMedium;
-    sphereLow_ = meshUpload.sphereLow;
-    plane_ = meshUpload.plane;
-    sceneMeshTriangleCounts_[sceneMeshBatchIndex(SceneMeshBatchId::Cube)] = cube_.indexCount / 3U;
-    sceneMeshTriangleCounts_[sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh)] = sphere_.indexCount / 3U;
-    sceneMeshTriangleCounts_[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = sphereMedium_.indexCount / 3U;
-    sceneMeshTriangleCounts_[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = sphereLow_.indexCount / 3U;
-    sceneMeshTriangleCounts_[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = plane_.indexCount / 3U;
-    meshUpload.vertices = {};
-    meshUpload.indices = {};
-    meshUpload.cube = {};
-    meshUpload.sphere = {};
-    meshUpload.plane = {};
+    sceneVertexBuffer_ = takeBuffer(meshUpload.vertices);
+    sceneIndexBuffer_ = takeBuffer(meshUpload.indices);
+    sceneMeshes_ = meshUpload.meshes;
+    for (std::size_t meshIndex = 0; meshIndex < sceneMeshes_.size(); ++meshIndex) {
+        sceneMeshTriangleCounts_[meshIndex] = sceneMeshes_[meshIndex].indexCount / 3U;
+    }
 
     setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(sceneVertexBuffer_.buffer), "Scene Geometry Vertex Buffer");
     vmaSetAllocationName(allocator_, sceneVertexBuffer_.allocation, "Scene Geometry Vertex Allocation");

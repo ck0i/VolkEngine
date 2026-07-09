@@ -9,6 +9,7 @@
 namespace ve {
 
 enum class DepthPrepassMode : std::uint8_t {
+    Auto,
     ForceOff,
     ForceOn
 };
@@ -28,7 +29,7 @@ struct EngineConfig {
     std::uint32_t materialGridColumns = 5;
     std::uint32_t materialGridTileRows = 16;
     std::uint32_t materialGridTileColumns = 16;
-    DepthPrepassMode depthPrepassMode = DepthPrepassMode::ForceOff;
+    DepthPrepassMode depthPrepassMode = DepthPrepassMode::Auto;
     std::filesystem::path shaderDirectory = executableDirectory() / "shaders";
     std::filesystem::path assetDirectory = executableDirectory() / "assets";
     std::filesystem::path cacheDirectory = executableDirectory() / "cache";

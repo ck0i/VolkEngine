@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 namespace {
 
@@ -63,6 +64,38 @@ void expectGreaterOrEqual(std::string_view context, const T& actual, const U& mi
         ++gFailureCount;
     }
 }
+template <typename T, typename U>
+void expectNearly(std::string_view context, const T& actual, const U& expected, const float epsilon = 1.0e-5f) {
+    const auto delta = std::fabs(static_cast<float>(actual) - static_cast<float>(expected));
+    if (delta > epsilon) {
+        std::cerr << "[FAILED] " << context << ": expected nearly " << expected << ", got " << actual << '\n';
+        ++gFailureCount;
+    }
+}
+
+void expectVec3Nearly(std::string_view context, const ve::Vec3& actual, const ve::Vec3 expected, const float epsilon = 1.0e-5f) {
+    const std::string label = std::string(context);
+    expectNearly(label + " x", actual.x, expected.x, epsilon);
+    expectNearly(label + " y", actual.y, expected.y, epsilon);
+    expectNearly(label + " z", actual.z, expected.z, epsilon);
+}
+
+[[nodiscard]] ve::Vec3 transformImportedModelCenter(const ve::MeshBounds& localBounds) {
+    constexpr float importedModelYawRadians = -0.35f;
+    constexpr float importedModelScale = 0.78f;
+    const float yawCos = std::cos(importedModelYawRadians);
+    const float yawSin = std::sin(importedModelYawRadians);
+    return {importedModelScale * (yawCos * localBounds.center.x + yawSin * localBounds.center.z),
+            1.0f + (importedModelScale * localBounds.center.y),
+            importedModelScale * (-yawSin * localBounds.center.x + yawCos * localBounds.center.z) - 3.35f};
+}
+
+
+[[nodiscard]] float transformImportedModelRadius(const ve::MeshBounds& localBounds) {
+    constexpr float importedModelScale = 0.78f;
+    return localBounds.radius * importedModelScale;
+}
+
 
 } // namespace
 
@@ -73,9 +106,24 @@ int main() {
     renderStats.triangleCount = widerTriangleCount;
     expectEqual("RenderStats::triangleCount holds >uint32_t::max() without narrowing", renderStats.triangleCount, widerTriangleCount);
 
-    expectEqual("requiredItemCount(4, 5)", DemoSceneRenderer::requiredItemCount(4, 5), static_cast<std::size_t>(26));
-    expectEqual("requiredItemCount(31, 66)", DemoSceneRenderer::requiredItemCount(31, 66), static_cast<std::size_t>(2052));
+    expectEqual("requiredItemCount(4, 5)", DemoSceneRenderer::requiredItemCount(4U, 5U), static_cast<std::size_t>(4U * 5U + DemoSceneRenderer::kFixedItemCount));
+    expectEqual("requiredItemCount(31, 66)", DemoSceneRenderer::requiredItemCount(31U, 66U), static_cast<std::size_t>(31U * 66U + DemoSceneRenderer::kFixedItemCount));
+ 
+    DemoSceneRenderer renderer;
+    const ve::MeshBounds importedModelLocalBounds = {{1.2f, 0.35f, -0.9f}, 1.45f, true};
+    const auto importedModelCenter = transformImportedModelCenter(importedModelLocalBounds);
+    const auto importedModelRadius = transformImportedModelRadius(importedModelLocalBounds);
+    renderer.setImportedModelBounds(importedModelLocalBounds);
 
+    const auto& first = renderer.build(0.125, 4U, 5U);
+    const auto firstSize = first.size();
+    const auto firstCapacity = first.capacity();
+    const auto firstImportedItemIndex = first.size() - 1U;
+    const auto expectedFirstSize = (4U * 5U) + DemoSceneRenderer::kFixedItemCount;
+    expectEqual("build(4, 5) size", firstSize, expectedFirstSize);
+    expectEqual("build(4, 5) imported model appended", static_cast<int>(first[firstImportedItemIndex].mesh), static_cast<int>(ve::SceneMeshId::ImportedModel));
+    expectVec3Nearly("build(4, 5) imported model transformed center", first[firstImportedItemIndex].boundsCenter, importedModelCenter);
+    expectNearly("build(4, 5) imported model transformed radius", first[firstImportedItemIndex].boundsRadius, importedModelRadius);
     constexpr std::uint32_t largeRows = 65535U;
     constexpr std::uint32_t largeColumns = 65535U;
     constexpr std::uint64_t largeExpected = static_cast<std::uint64_t>(largeRows) * static_cast<std::uint64_t>(largeColumns)
@@ -90,13 +138,6 @@ int main() {
     expectThrowsRuntimeError("validateMaterialGridDimensions overflow", [] {
         DemoSceneRenderer::validateMaterialGridDimensions(65535U, 65537U);
     });
-
-    DemoSceneRenderer renderer;
-    const auto& first = renderer.build(0.125, 4U, 5U);
-    const auto firstSize = first.size();
-    const auto firstCapacity = first.capacity();
-    const auto expectedFirstSize = (4U * 5U) + 6U;
-    expectEqual("build(4, 5) size", firstSize, expectedFirstSize);
 
     const auto firstGridRange = first.materialGridRange();
     expectEqual("build(4, 5) material grid valid", firstGridRange.valid, true);
@@ -127,7 +168,7 @@ int main() {
         const auto defaultTileGridTileCount = defaultTileGridTiles.size();
         const auto defaultTileGridItemCount = defaultTileGrid.size();
         expectEqual("build(17, 17) default tile size materialGridTiles count", defaultTileGridTileCount, static_cast<std::size_t>(4));
-        expectEqual("build(17, 17) default tile size scene size", defaultTileGridItemCount, static_cast<std::size_t>(17U * 17U + 6U));
+        expectEqual("build(17, 17) default tile size scene size", defaultTileGridItemCount, static_cast<std::size_t>(17U * 17U + DemoSceneRenderer::kFixedItemCount));
         if (defaultTileGridTiles.size() == 4U) {
             const auto& tile00 = defaultTileGridTiles[0];
             expectEqual("build(17, 17) default materialGridTile[0] row begin", tile00.rowBegin, 0U);
@@ -217,9 +258,9 @@ int main() {
     expectEqual("build(3, 4) material grid columns", thirdGridRange.columns, 4U);
     const auto thirdGridItemCount = static_cast<std::size_t>(thirdGridRange.rows) * static_cast<std::size_t>(thirdGridRange.columns);
     expectGreaterOrEqual("build(3, 4) trailing item remains outside grid", third.size(), thirdGridRange.firstItem + thirdGridItemCount + 1U);
-    const auto expectedThirdSize = (3U * 4U) + 6U;
+    const auto expectedThirdSize = (3U * 4U) + DemoSceneRenderer::kFixedItemCount;
     expectNotEqual("build(3, 4) changes size from prior layout", third.size(), firstSize);
-    expectEqual("build(3, 4) size follows rows*columns+6", third.size(), expectedThirdSize);
+    expectEqual("build(3, 4) size follows rows*columns+kFixedItemCount", third.size(), expectedThirdSize);
 
     {
         ve::SceneRenderList renderList;

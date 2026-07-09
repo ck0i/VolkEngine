@@ -2,20 +2,19 @@
 
 Header: `engine/renderer/FrameGraph.hpp`.
 
-`FrameGraph` is a backend-agnostic, fixed-capacity metadata and validation layer. It describes pass/resource intent and catches simple ordering mistakes; it does not allocate transient resources or emit Vulkan barriers.
+`FrameGraph` is a backend-agnostic metadata and validation layer. It describes pass/resource intent and catches simple ordering mistakes; it does not allocate transient resources or emit Vulkan barriers.
 
 Backend integration points:
 
 - `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — contains startup graph construction; `VulkanRenderer::Impl` owns the graph state.
 - `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — translates graph intent into Vulkan image layout/stage/access barriers.
 
-## Capacity
+## Scale and handles
 
-- `kMaxResources = 8`
-- `kMaxPasses = 8`
-- `kMaxEdges = 24`
-
-All storage is internal fixed arrays. Capacity overflow throws `std::runtime_error`.
+- Pass/resource handles use wide opaque indices with `kInvalidIndex = 0xffffffff`.
+- Pass, resource, and edge records are vector-backed; there is no fixed small graph cap.
+- Handles remain stable because records are appended and never erased.
+- Adding records throws only if the handle index range is exhausted or allocation fails.
 
 ## Enums
 
@@ -108,9 +107,10 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 
 ## Current renderer use
 
-The Vulkan backend builds one static graph at startup for either:
+The Vulkan backend builds one static graph at startup:
 
-- default path: HDR scene, tonemap/final, screenshot-readback metadata.
-- depth-prepass path: depth prepass, HDR scene, tonemap/final, screenshot-readback metadata.
+- auto/default path: a superset graph containing the depth prepass plus HDR scene depth read/write edges; command recording chooses the runtime path.
+- forced-off path: HDR scene, tonemap/final, screenshot-readback metadata.
+- forced-on path: depth prepass, HDR scene, tonemap/final, screenshot-readback metadata.
 
 The `Screenshot Readback` pass/edge is always present so graph validation can prove the final swapchain image has a transfer-source path. The runtime image copy, fence wait, and PPM write are still conditional on `VulkanRenderer::requestScreenshot(path)`. Vulkan image barriers and transitions remain renderer responsibilities.

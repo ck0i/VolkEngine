@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 namespace ve {
 
@@ -16,7 +17,6 @@ enum class GpuResourceKind : std::uint8_t {
 class GpuResourceRegistry {
 public:
     static constexpr std::uint32_t kInvalidId = 0xffffffffU;
-    static constexpr std::size_t kMaxResources = 128;
     static constexpr std::size_t kMaxNameLength = 64;
 
     struct Record {
@@ -25,7 +25,6 @@ public:
         GpuResourceKind kind = GpuResourceKind::Buffer;
         std::uint64_t bytes = 0;
         bool imported = false;
-        bool live = false;
     };
 
     struct Stats {
@@ -41,30 +40,25 @@ public:
     };
 
     [[nodiscard]] std::uint32_t registerResource(GpuResourceKind kind, std::string_view name, std::uint64_t bytes, bool imported = false) {
-        for (Record& record : records_) {
-            if (record.live) {
-                continue;
-            }
-            const std::uint32_t id = nextId_++;
-            record = Record{};
-            record.id = id;
-            record.kind = kind;
-            record.bytes = bytes;
-            record.imported = imported;
-            record.live = true;
-            copyName(record, name.empty() ? std::string_view{"Unnamed GPU Resource"} : name);
-            return id;
-        }
-        throw std::runtime_error("GPU resource registry capacity exceeded");
+        Record record{};
+        record.id = allocateId();
+        record.kind = kind;
+        record.bytes = bytes;
+        record.imported = imported;
+        copyName(record, name.empty() ? std::string_view{"Unnamed GPU Resource"} : name);
+
+        records_.push_back(record);
+        return record.id;
     }
 
     void unregisterResource(std::uint32_t id) {
         if (id == kInvalidId) {
             return;
         }
-        for (Record& record : records_) {
-            if (record.live && record.id == id) {
-                record.live = false;
+        for (std::size_t i = 0; i < records_.size(); ++i) {
+            if (records_[i].id == id) {
+                records_[i] = records_.back();
+                records_.pop_back();
                 return;
             }
         }
@@ -73,9 +67,6 @@ public:
     [[nodiscard]] Stats stats() const {
         Stats result{};
         for (const Record& record : records_) {
-            if (!record.live) {
-                continue;
-            }
             ++result.liveResources;
             result.bytes += record.bytes;
             if (record.kind == GpuResourceKind::Buffer) {
@@ -96,6 +87,13 @@ public:
     }
 
 private:
+    [[nodiscard]] std::uint32_t allocateId() {
+        if (nextId_ == kInvalidId) {
+            throw std::runtime_error("GPU resource registry id range exhausted");
+        }
+        return nextId_++;
+    }
+
     static void copyName(Record& record, std::string_view name) {
         const std::size_t count = name.size() < (record.name.size() - 1U) ? name.size() : (record.name.size() - 1U);
         for (std::size_t i = 0; i < count; ++i) {
@@ -104,7 +102,7 @@ private:
         record.name[count] = '\0';
     }
 
-    std::array<Record, kMaxResources> records_{};
+    std::vector<Record> records_;
     std::uint32_t nextId_ = 1;
 };
 

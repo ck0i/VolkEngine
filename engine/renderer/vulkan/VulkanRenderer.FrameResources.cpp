@@ -23,15 +23,22 @@ void VulkanRenderer::Impl::createFrameInstanceDataBuffer(FrameResources& frame, 
     }
     const VkDeviceSize instanceBufferSize = checkedSceneInstanceBufferSize(capacity);
 
-    frame.instanceCapacity = 0U;
-    frame.instanceData = createBuffer(instanceBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    const std::string frameName = "Frame " + std::to_string(frameIndex);
-    setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(frame.instanceData.buffer), frameName + " Instance Data Buffer");
-    const std::string instanceAllocationName = frameName + " Instance Data Allocation";
-    vmaSetAllocationName(allocator_, frame.instanceData.allocation, instanceAllocationName.c_str());
-    frame.instanceData.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, instanceAllocationName, frame.instanceData.size);
-    checkVk(vmaMapMemory(allocator_, frame.instanceData.allocation, &frame.instanceData.mapped), "vmaMapMemory instance data");
+    Buffer instanceData;
+    try {
+        instanceData = createBuffer(instanceBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        const std::string frameName = "Frame " + std::to_string(frameIndex);
+        setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(instanceData.buffer), frameName + " Instance Data Buffer");
+        const std::string instanceAllocationName = frameName + " Instance Data Allocation";
+        vmaSetAllocationName(allocator_, instanceData.allocation, instanceAllocationName.c_str());
+        instanceData.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, instanceAllocationName, instanceData.size);
+        checkVk(vmaMapMemory(allocator_, instanceData.allocation, &instanceData.mapped), "vmaMapMemory instance data");
+    } catch (...) {
+        destroyBuffer(instanceData);
+        throw;
+    }
+
+    frame.instanceData = takeBuffer(instanceData);
     frame.instanceCapacity = capacity;
 }
 
@@ -65,9 +72,18 @@ void VulkanRenderer::Impl::ensureSceneInstanceCapacity(FrameResources& frame, co
         newCapacity *= 2U;
     }
 
-    destroyBuffer(frame.instanceData);
-    createFrameInstanceDataBuffer(frame, frameIndex, newCapacity);
-    updateFrameInstanceDataDescriptor(frameIndex);
+    Buffer previousInstanceData = takeBuffer(frame.instanceData);
+    const std::size_t previousCapacity = frame.instanceCapacity;
+    try {
+        createFrameInstanceDataBuffer(frame, frameIndex, newCapacity);
+        updateFrameInstanceDataDescriptor(frameIndex);
+    } catch (...) {
+        destroyBuffer(frame.instanceData);
+        frame.instanceData = takeBuffer(previousInstanceData);
+        frame.instanceCapacity = previousCapacity;
+        throw;
+    }
+    destroyBuffer(previousInstanceData);
     logger()->info("Grew frame {} scene instance capacity to {} items ({:.2f} MiB)", frameIndex, frame.instanceCapacity, bytesToMiB(frame.instanceData.size));
 }
 
@@ -87,6 +103,7 @@ void VulkanRenderer::Impl::createFrameResources() {
         setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, handleToUint64(sceneDescriptorSets_[i]), frameName + " Scene Descriptor Set");
 
         VkCommandPoolCreateInfo framePoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        framePoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
         framePoolInfo.queueFamilyIndex = queueFamilies_.graphics.value();
         checkVk(vkCreateCommandPool(device_, &framePoolInfo, nullptr, &frame.commandPool), "vkCreateCommandPool frame");
         setObjectName(VK_OBJECT_TYPE_COMMAND_POOL, handleToUint64(frame.commandPool), frameName + " Command Pool");
@@ -107,14 +124,16 @@ void VulkanRenderer::Impl::createFrameResources() {
 
         createFrameInstanceDataBuffer(frame, i, initialInstanceCapacity);
 
-        frame.indirectCommands = createBuffer(sizeof(VkDrawIndexedIndirectCommand) * kSceneMeshBatchOrder.size(),
-                                              VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(frame.indirectCommands.buffer), frameName + " Scene Indirect Commands Buffer");
-        const std::string indirectAllocationName = frameName + " Scene Indirect Commands Allocation";
-        vmaSetAllocationName(allocator_, frame.indirectCommands.allocation, indirectAllocationName.c_str());
-        frame.indirectCommands.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, indirectAllocationName, frame.indirectCommands.size);
-        checkVk(vmaMapMemory(allocator_, frame.indirectCommands.allocation, &frame.indirectCommands.mapped), "vmaMapMemory indirect commands");
+        if (indirectSceneDrawsEnabled_) {
+            frame.indirectCommands = createBuffer(sizeof(VkDrawIndexedIndirectCommand) * kSceneMeshBatchOrder.size(),
+                                                  VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(frame.indirectCommands.buffer), frameName + " Scene Indirect Commands Buffer");
+            const std::string indirectAllocationName = frameName + " Scene Indirect Commands Allocation";
+            vmaSetAllocationName(allocator_, frame.indirectCommands.allocation, indirectAllocationName.c_str());
+            frame.indirectCommands.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, indirectAllocationName, frame.indirectCommands.size);
+            checkVk(vmaMapMemory(allocator_, frame.indirectCommands.allocation, &frame.indirectCommands.mapped), "vmaMapMemory indirect commands");
+        }
 
         VkDescriptorBufferInfo sceneBufferInfo{};
         sceneBufferInfo.buffer = frame.sceneUniforms.buffer;
@@ -124,10 +143,13 @@ void VulkanRenderer::Impl::createFrameResources() {
         instanceBufferInfo.buffer = frame.instanceData.buffer;
         instanceBufferInfo.offset = 0;
         instanceBufferInfo.range = frame.instanceData.size;
-        VkDescriptorImageInfo textureInfo{};
-        textureInfo.sampler = textureSampler_;
-        textureInfo.imageView = groundAlbedoTexture_.view;
-        textureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        std::array<VkDescriptorImageInfo, 2> materialTextureInfos{};
+        materialTextureInfos[0].sampler = textureSampler_;
+        materialTextureInfos[0].imageView = groundAlbedoTexture_.view;
+        materialTextureInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        materialTextureInfos[1].sampler = normalTextureSampler_;
+        materialTextureInfos[1].imageView = groundNormalTexture_.view;
+        materialTextureInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         std::array<VkWriteDescriptorSet, 3> writes{};
         writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[0].dstSet = sceneDescriptorSets_[i];
@@ -138,9 +160,9 @@ void VulkanRenderer::Impl::createFrameResources() {
         writes[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[1].dstSet = sceneDescriptorSets_[i];
         writes[1].dstBinding = 1;
-        writes[1].descriptorCount = 1;
+        writes[1].descriptorCount = static_cast<std::uint32_t>(materialTextureInfos.size());
         writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[1].pImageInfo = &textureInfo;
+        writes[1].pImageInfo = materialTextureInfos.data();
         writes[2] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[2].dstSet = sceneDescriptorSets_[i];
         writes[2].dstBinding = 2;
@@ -196,17 +218,19 @@ void VulkanRenderer::Impl::createFrameGraph() {
     const FrameGraph::ResourceHandle hdr = frameGraph_.addResource({"HDR Color Image", FrameGraphResourceKind::Image, false});
     const FrameGraph::ResourceHandle swapchain = frameGraph_.addResource({"Swapchain Image", FrameGraphResourceKind::Image, true});
 
-    const bool useDepthPrepass = resolveDepthPrepass(config_.depthPrepassMode);
+    const bool graphIncludesDepthPrepass = depthPrepassGraphIncludesPrepass(config_.depthPrepassMode);
+    const bool graphAllowsDepthPrepassOff = config_.depthPrepassMode != DepthPrepassMode::ForceOn;
     FrameGraph::PassHandle depthPass{};
-    if (useDepthPrepass) {
+    if (graphIncludesDepthPrepass) {
         depthPass = frameGraph_.addPass({"Depth Prepass", {0.16f, 0.42f, 0.18f, 1.0f}});
         frameGraph_.write(depthPass, depth, FrameGraphUsage::DepthAttachment);
     }
 
     const FrameGraph::PassHandle hdrPass = frameGraph_.addPass({"HDR Scene Pass", {0.18f, 0.32f, 0.95f, 1.0f}});
-    if (useDepthPrepass) {
+    if (graphIncludesDepthPrepass) {
         frameGraph_.read(hdrPass, depth, FrameGraphUsage::DepthAttachment);
-    } else {
+    }
+    if (graphAllowsDepthPrepassOff) {
         frameGraph_.write(hdrPass, depth, FrameGraphUsage::DepthAttachment);
     }
     frameGraph_.write(hdrPass, hdr, FrameGraphUsage::ColorAttachment);
@@ -219,9 +243,10 @@ void VulkanRenderer::Impl::createFrameGraph() {
     frameGraph_.setFinalUsage(swapchain, FrameGraphUsage::Present);
 
     frameGraph_.compile();
-    const bool depthEdgesMatch = useDepthPrepass
+    const bool depthEdgesMatch = graphIncludesDepthPrepass
         ? frameGraph_.hasEdge(depthPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment)
               && frameGraph_.hasEdge(hdrPass, depth, FrameGraphAccess::Read, FrameGraphUsage::DepthAttachment)
+              && (!graphAllowsDepthPrepassOff || frameGraph_.hasEdge(hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment))
         : frameGraph_.hasEdge(hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment);
     if (!depthEdgesMatch) {
         throw std::runtime_error("FrameGraph depth edges do not match configured prepass mode");
@@ -232,7 +257,7 @@ void VulkanRenderer::Impl::createFrameGraph() {
     frameGraphResources_ = {depth, hdr, swapchain};
     frameGraphPasses_ = {depthPass, hdrPass, tonemapPass, screenshotPass};
     logger()->info("Compiled frame graph (depth prepass {}): {} passes, {} resources, {} edges",
-                   useDepthPrepass ? "on" : "off", frameGraph_.passCount(), frameGraph_.resourceCount(), frameGraph_.edgeCount());
+                   depthPrepassModeName(config_.depthPrepassMode), frameGraph_.passCount(), frameGraph_.resourceCount(), frameGraph_.edgeCount());
 }
 
 void VulkanRenderer::Impl::updateUniforms(FrameResources& frame, const Camera& camera, const Mat4& viewProjection, const double elapsedSeconds) {

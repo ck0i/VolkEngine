@@ -56,6 +56,29 @@ struct alignas(16) Mat4 {
     return v / len;
 }
 
+[[nodiscard]] inline std::array<Vec4, 3> normalMatrixColumns(const Mat4& matrix) {
+    const Vec3 c0{matrix.m[0], matrix.m[1], matrix.m[2]};
+    const Vec3 c1{matrix.m[4], matrix.m[5], matrix.m[6]};
+    const Vec3 c2{matrix.m[8], matrix.m[9], matrix.m[10]};
+    Vec3 n0 = cross(c1, c2);
+    Vec3 n1 = cross(c2, c0);
+    Vec3 n2 = cross(c0, c1);
+    const float determinant = dot(c0, n0);
+    if (std::fabs(determinant) <= 0.000001f) {
+        return {Vec4{1.0f, 0.0f, 0.0f, 1.0f},
+                Vec4{0.0f, 1.0f, 0.0f, 0.0f},
+                Vec4{0.0f, 0.0f, 1.0f, 0.0f}};
+    }
+    const float invDeterminant = 1.0f / determinant;
+    const float handedness = determinant < 0.0f ? -1.0f : 1.0f;
+    n0 = n0 * invDeterminant;
+    n1 = n1 * invDeterminant;
+    n2 = n2 * invDeterminant;
+    return {Vec4{n0.x, n0.y, n0.z, handedness},
+            Vec4{n1.x, n1.y, n1.z, 0.0f},
+            Vec4{n2.x, n2.y, n2.z, 0.0f}};
+}
+
 [[nodiscard]] inline Mat4 operator*(const Mat4& a, const Mat4& b) {
     Mat4 r{};
     for (int col = 0; col < 4; ++col) {

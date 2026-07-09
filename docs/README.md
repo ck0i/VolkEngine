@@ -15,7 +15,7 @@ Use this directory as a map, not a novel. The headers are the source of truth fo
 - [Platform API](api/platform.md) — `Window` lifecycle, events, input, surface creation, resize signaling.
 - [Renderer API](api/renderer.md) — `IRenderer`, `RenderDeviceInfo`, `RenderStats`, and backend-facing `VulkanRenderer` notes.
 - [Scene API](api/scene.md) — `SceneRenderItem`, `SceneRenderList`, grid metadata, `DemoSceneRenderer`.
-- [Frame graph API](api/frame-graph.md) — fixed-capacity pass/resource metadata and validation rules.
+- [Frame graph API](api/frame-graph.md) — pass/resource metadata and validation rules.
 - [GPU resource registry API](api/resources.md) — diagnostic allocation accounting.
 
 ## Compatibility pages

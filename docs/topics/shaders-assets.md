@@ -4,7 +4,7 @@ This page covers runtime file flow. Current ownership is split across these back
 
 - `VulkanRenderer.Pipelines.cpp` — SPIR-V validation/loading, pipeline set construction, pipeline cache load/save, and hot-reload rebuild/retire.
 - `VulkanRenderer.Resources.cpp` — texture asset upload/sampler/descriptor setup and texture resource lifetime.
-- `VulkanRenderer.Meshes.cpp` — generated geometry/mesh upload and shared vertex/index buffer ownership.
+- `VulkanRenderer.Meshes.cpp` — procedural geometry, imported OBJ mesh loading, mesh upload, and shared vertex/index buffer ownership.
 - `VulkanRenderer.Screenshot.cpp` — screenshot path and file-publish behavior.
 
 Renderer behavior is in [Renderer pipeline](renderer-pipeline.md).
@@ -33,7 +33,11 @@ Important targets:
 - byte-swapped.
 - missing magic `0x07230203`.
 
-Valid bytes are copied into aligned `std::uint32_t` storage before `vkCreateShaderModule`.
+Valid SPIR-V is read directly into aligned `std::uint32_t` storage before `vkCreateShaderModule`, avoiding a byte-vector load plus copy on startup and hot reload.
+
+## Scene shader data flow
+
+`scene.vert` reads per-instance material constants from the scene instance SSBO and emits them as `flat` fragment inputs, so albedo/roughness, emissive/metallic, and material flags are not perspective-interpolated per fragment. Position, normal, UV, and tangent remain interpolated vertex attributes. Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis instead of reconstructing an equivalent normal with another cross/normalize pair. The depth prepass uses `scene_depth.vert`, which keeps the same model/view-projection transform but declares only the position attribute and emits only `gl_Position`.
 
 ## Shader hot reload
 
@@ -59,18 +63,24 @@ Runtime assets are copied from `assets/` to `EngineConfig::assetDirectory`.
 
 Current texture path (`VulkanRenderer.Resources.cpp`):
 
-- loads `assets/textures/ground_albedo.ppm`.
-- decodes binary PPM/P6 into RGBA8 CPU pixels.
-- accepts 8-bit and 16-bit samples with malformed-sample checks.
-- uploads to a device-local sRGB sampled image on the graphics queue.
-- generates mip levels with checked linear blits when supported.
-- falls back to one mip level otherwise.
-- enables sampler anisotropy only when the selected device exposes it.
+- loads `assets/textures/ground_albedo.png` and `assets/textures/ground_normal.png` through `loadImageRgba8()`.
+- uses stb_image for non-PPM image formats and keeps `loadPpmRgba8()` for PPM fixtures/compatibility.
+- decodes source images to RGBA8 CPU pixels while preserving source alpha.
+- uploads albedo as `VK_FORMAT_R8G8B8A8_SRGB`.
+- uploads normal maps as linear `VK_FORMAT_R8G8B8A8_UNORM`; shader code remaps sampled normals from `[0, 1]` to `[-1, 1]` before TBN transform.
+- generates albedo mip levels with checked linear blits when supported; if the selected format/device cannot linearly blit the sRGB texture, the CPU builds a gamma-correct albedo mip chain by averaging RGB in linear space and alpha linearly.
+- builds normal-map mip chains on the CPU by decoding each proportional source footprint to tangent-space vectors, averaging, renormalizing, preserving averaged alpha, and uploading explicit mip copy regions; this avoids color-style byte averaging that flattens high-frequency normals and covers odd-size edge texels.
+- records albedo and normal texture copies/mip generation from one shared staging buffer into one startup graphics upload command buffer and one submit, then binds them through one fixed material texture descriptor array.
+- uses separate descriptor samplers for albedo and normal maps: albedo can enable device anisotropy and uses the albedo mip range, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.
 
-Current generated geometry path (`VulkanRenderer.Meshes.cpp`):
+Current geometry path (`VulkanRenderer.Meshes.cpp`):
 
 - creates procedural cube/sphere/plane meshes in memory.
-- merges mesh data into shared vertex/index buffers.
-- uploads via staging and transfer/graphics upload commands during startup.
+- loads `assets/models/imported_showcase.obj` through `loadObjMesh()`.
+- supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, and generated normals when faces omit normals.
+- computes `MeshData::bounds` from vertex positions and computes `Vertex::tangent` as `vec4(xyz, handedness)` for normal-map TBN shading; missing/degenerate UVs get deterministic fallback tangents.
+- packs per-instance normal matrices as three `vec4` columns so shaders transform normals with inverse-transpose data while tangents still use the model linear transform and `tangent.w * sign(det(model3x3))`.
+- converts CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes, while uploaded triangle-list indices are reordered for post-transform vertex-cache locality.
+- writes all startup mesh vertex/index payloads directly into one mapped staging buffer, then submits one transfer/graphics upload command during startup.
 
-The PPM loader and generated-geometry paths are narrow by design; production image formats and streaming pipelines are still future work.
+The texture path now accepts common stb_image-backed source formats; material libraries, GPU-native compressed texture formats, and streaming pipelines are future work.
