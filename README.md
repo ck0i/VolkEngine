@@ -82,6 +82,6 @@ Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold 
 
 ## Developer notes
 
-- The tracked `.clangd` points clangd at `out/build/linux-debug/compile_commands.json`. For another preset or build directory, adjust local clangd config or keep a local root `compile_commands.json` symlink/copy; root `compile_commands.json` is ignored.
+- clangd support becomes useful after configuring a CMake preset, because CMake writes `compile_commands.json` under `out/build/<preset>/`. The tracked `.clangd` defaults to `out/build/linux-debug`; if you use another preset, adjust your local clangd config or keep an ignored root `compile_commands.json` symlink/copy.
 - Generated build trees, screenshots, and caches are ignored.
 - Source assets such as `assets/textures/ground_albedo.ppm` and GLSL shader sources under `engine/shaders/` are tracked.
