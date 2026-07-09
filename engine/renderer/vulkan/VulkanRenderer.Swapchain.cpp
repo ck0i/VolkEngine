@@ -1,31 +1,6 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 namespace ve {
-namespace {
-
-[[nodiscard]] bool isSrgbSwapchainFormat(const VkFormat format) noexcept {
-    switch (format) {
-    case VK_FORMAT_B8G8R8A8_SRGB:
-    case VK_FORMAT_R8G8B8A8_SRGB:
-    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
-        return true;
-    default:
-        return false;
-    }
-}
-
-[[nodiscard]] bool isUnormSwapchainFormat(const VkFormat format) noexcept {
-    switch (format) {
-    case VK_FORMAT_B8G8R8A8_UNORM:
-    case VK_FORMAT_R8G8B8A8_UNORM:
-    case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
-        return true;
-    default:
-        return false;
-    }
-}
-
-} // namespace
 
 VulkanRenderer::Impl::SwapchainSupport VulkanRenderer::Impl::querySwapchainSupport(VkPhysicalDevice device) const {
     SwapchainSupport support{};

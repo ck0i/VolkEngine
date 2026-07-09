@@ -55,6 +55,34 @@ inline double bytesToMiB(const std::uint64_t bytes) {
     return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
 
+struct TonemapPushConstants {
+    float exposure = 1.0f;
+    std::uint32_t applySrgbOetf = 1U;
+};
+static_assert(sizeof(TonemapPushConstants) == 8, "Tonemap push constants must match tonemap.frag");
+
+[[nodiscard]] inline bool isSrgbSwapchainFormat(const VkFormat format) noexcept {
+    switch (format) {
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] inline bool isUnormSwapchainFormat(const VkFormat format) noexcept {
+    switch (format) {
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+        return true;
+    default:
+        return false;
+    }
+}
+
 struct GpuVertex {
     Vec3 position;
     Vec2 uv;

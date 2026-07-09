@@ -1,26 +1,6 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 namespace ve {
-namespace {
-
-struct TonemapPushConstants {
-    float exposure = 1.0f;
-    std::uint32_t applySrgbOetf = 1U;
-};
-static_assert(sizeof(TonemapPushConstants) == 8, "Tonemap push constants must match tonemap.frag");
-
-[[nodiscard]] bool shouldApplyShaderSrgbOetf(const VkFormat swapchainFormat) noexcept {
-    switch (swapchainFormat) {
-    case VK_FORMAT_B8G8R8A8_SRGB:
-    case VK_FORMAT_R8G8B8A8_SRGB:
-    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
-        return false;
-    default:
-        return true;
-    }
-}
-
-} // namespace
 
 void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSeconds, const double frameDeltaMs) {
     FrameResources& frame = frames_[frameIndex_];
@@ -498,7 +478,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         vkCmdBeginRendering(frame.commandBuffer, &tonemapRenderInfo);
         vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemapPipeline_);
         vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemapPipelineLayout_, 0, 1, &tonemapDescriptorSet_, 0, nullptr);
-        const TonemapPushConstants tonemapPush{config_.exposure, shouldApplyShaderSrgbOetf(swapchainFormat_) ? 1U : 0U};
+        const TonemapPushConstants tonemapPush{config_.exposure, isSrgbSwapchainFormat(swapchainFormat_) ? 0U : 1U};
         vkCmdPushConstants(frame.commandBuffer, tonemapPipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(tonemapPush), &tonemapPush);
         vkCmdDraw(frame.commandBuffer, 3, 1, 0, 0);
         renderImGui(frame.commandBuffer);
