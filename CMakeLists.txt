@@ -223,3 +223,11 @@ target_include_directories(VolkEngineMathCpuTest
 volkengine_target_warnings(VolkEngineMathCpuTest)
 add_test(NAME MathCpu
     COMMAND VolkEngineMathCpuTest)
+add_executable(VolkEngineVulkanFrustumCpuTest
+    tests/VulkanFrustumCpuTests.cpp)
+target_link_libraries(VolkEngineVulkanFrustumCpuTest
+    PRIVATE
+        VolkEngine)
+volkengine_target_warnings(VolkEngineVulkanFrustumCpuTest)
+add_test(NAME VulkanFrustumCpu
+    COMMAND VolkEngineVulkanFrustumCpuTest)

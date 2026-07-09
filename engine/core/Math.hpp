@@ -125,9 +125,9 @@ struct alignas(16) Mat4 {
     Mat4 r{};
     r.m[0] = f / aspect;
     r.m[5] = -f; // Vulkan clip-space Y is inverted relative to OpenGL-style math.
-    r.m[10] = farPlane / (nearPlane - farPlane);
+    r.m[10] = nearPlane / (farPlane - nearPlane);
     r.m[11] = -1.0f;
-    r.m[14] = (farPlane * nearPlane) / (nearPlane - farPlane);
+    r.m[14] = (farPlane * nearPlane) / (farPlane - nearPlane);
     return r;
 }
 

@@ -228,10 +228,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         VkPipelineDepthStencilStateCreateInfo depthPrepassDepth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         depthPrepassDepth.depthTestEnable = VK_TRUE;
         depthPrepassDepth.depthWriteEnable = VK_TRUE;
-        depthPrepassDepth.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthPrepassDepth.depthCompareOp = VK_COMPARE_OP_GREATER;
         VkPipelineDepthStencilStateCreateInfo sceneDepth = depthPrepassDepth;
         sceneDepth.depthWriteEnable = VK_FALSE;
-        sceneDepth.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        sceneDepth.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 
         VkPipelineColorBlendAttachmentState blendAttachment{};
         blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;

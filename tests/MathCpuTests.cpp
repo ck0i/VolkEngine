@@ -42,6 +42,12 @@ void expectVec3Finite(std::string_view context, const ve::Vec3& actual) {
     };
 }
 
+[[nodiscard]] float projectDepth(const ve::Mat4& projection, const float viewSpaceZ) {
+    const float clipZ = projection.m[10] * viewSpaceZ + projection.m[14];
+    const float clipW = projection.m[11] * viewSpaceZ;
+    return clipZ / clipW;
+}
+
 [[nodiscard]] ve::Vec3 transformByNormalColumns(const std::array<ve::Vec4, 3>& normalColumns, const ve::Vec3& vector) {
     return {
         normalColumns.at(0).x * vector.x + normalColumns.at(1).x * vector.y + normalColumns.at(2).x * vector.z,
@@ -70,6 +76,19 @@ void expectTransformedNormalOrthogonalToTransformedSurfaceAxis(std::string_view 
 } // namespace
 
 int main() {
+    {
+        constexpr float nearPlane = 0.05f;
+        constexpr float farPlane = 500.0f;
+        const ve::Mat4 projection = ve::perspective(ve::radians(65.0f), 16.0f / 9.0f, nearPlane, farPlane);
+        expectNearly("reverse-Z perspective maps near plane to depth 1", projectDepth(projection, -nearPlane), 1.0f, 1.0e-5f);
+        expectNearly("reverse-Z perspective maps far plane to depth 0", projectDepth(projection, -farPlane), 0.0f, 1.0e-5f);
+        const float midDepth = projectDepth(projection, -10.0f);
+        if (!(midDepth > 0.0f && midDepth < 1.0f)) {
+            std::cerr << "[FAILED] reverse-Z perspective keeps mid-depth inside [0,1]: got " << midDepth << '\n';
+            ++gFailureCount;
+        }
+    }
+
     {
         const auto normalColumns = ve::normalMatrixColumns(ve::scale({2.0f, 4.0f, 0.5f}));
         expectVec3Nearly("scale(2,4,0.5) normalMatrix0",

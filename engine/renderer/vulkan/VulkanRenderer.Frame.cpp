@@ -389,7 +389,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
             depthPrepassAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
             depthPrepassAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             depthPrepassAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            depthPrepassAttachment.clearValue.depthStencil = {1.0f, 0};
+            depthPrepassAttachment.clearValue.depthStencil = {0.0f, 0};
             VkRenderingInfo depthPrepassInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
             depthPrepassInfo.renderArea.offset = {0, 0};
             depthPrepassInfo.renderArea.extent = swapchainExtent_;
@@ -433,7 +433,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         sceneDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         sceneDepthAttachment.loadOp = useDepthPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
         sceneDepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        sceneDepthAttachment.clearValue.depthStencil = {1.0f, 0};
+        sceneDepthAttachment.clearValue.depthStencil = {0.0f, 0};
 
         VkRenderingInfo renderInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
         renderInfo.renderArea.offset = {0, 0};

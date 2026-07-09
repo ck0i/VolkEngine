@@ -74,6 +74,7 @@ flowchart LR
 Forced no-prepass path (`--no-depth-prepass`) records only the HDR scene pass with depth writes. Forced prepass path (`--depth-prepass`) records a depth-only pass first, using `scene_depth.vert` and a position-only vertex input, then records the HDR scene pass.
 
 The frame graph is compiled in lockstep with the mode: Auto builds a static superset graph with depth-prepass and HDR depth read/write edges, while forced modes compile only the deterministic path they can record.
+Depth uses reverse-Z: `Math.hpp::perspective` maps near to 1 and far to 0, depth attachments clear to 0, and Vulkan depth tests use `GREATER`/`GREATER_OR_EQUAL`.
 
 The renderer uses Vulkan dynamic rendering (`vkCmdBeginRendering` / `vkCmdEndRendering`) rather than render-pass/framebuffer objects.
 Swapchain images are preferred as UNORM because `tonemap.frag` normally applies exposure, ACES, and the standard sRGB OETF manually; if a surface only provides an sRGB swapchain format, the tonemap push constant disables shader-side OETF so Vulkan performs the single required encode.
