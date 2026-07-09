@@ -79,9 +79,10 @@ void VulkanRenderer::Impl::createTextureResources() {
         ImageResource image;
     };
 
-    std::array<TextureUpload, 2> uploads{{
+    std::array<TextureUpload, 3> uploads{{
         {.path = config_.assetDirectory / "textures" / "ground_albedo.png", .format = VK_FORMAT_R8G8B8A8_SRGB, .debugName = "Ground Albedo", .cpuNormalMipChain = false},
         {.path = config_.assetDirectory / "textures" / "ground_normal.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground Normal", .cpuNormalMipChain = true},
+        {.path = config_.assetDirectory / "textures" / "ground_orm.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground ORM", .cpuNormalMipChain = false},
     }};
     VkCommandBuffer uploadCommands = VK_NULL_HANDLE;
     VkDeviceSize totalStagingSize = 0;
@@ -191,12 +192,16 @@ void VulkanRenderer::Impl::createTextureResources() {
 
         groundAlbedoTexture_ = takeImage(uploads[0].image);
         groundNormalTexture_ = takeImage(uploads[1].image);
+        groundOrmTexture_ = takeImage(uploads[2].image);
         logger()->info("Loaded texture {} ({}x{} RGBA8, {} mips, format {})",
                        uploads[0].path.string(), uploads[0].baseWidth, uploads[0].baseHeight,
                        groundAlbedoTexture_.mipLevels, static_cast<int>(uploads[0].format));
         logger()->info("Loaded texture {} ({}x{} RGBA8, {} CPU-renormalized mips, format {})",
                        uploads[1].path.string(), uploads[1].baseWidth, uploads[1].baseHeight,
                        groundNormalTexture_.mipLevels, static_cast<int>(uploads[1].format));
+        logger()->info("Loaded texture {} ({}x{} RGBA8 ORM, {} mips, format {})",
+                       uploads[2].path.string(), uploads[2].baseWidth, uploads[2].baseHeight,
+                       groundOrmTexture_.mipLevels, static_cast<int>(uploads[2].format));
     } catch (...) {
         if (uploadCommands != VK_NULL_HANDLE) {
             vkFreeCommandBuffers(device_, graphicsCommandPool_, 1, &uploadCommands);
@@ -253,7 +258,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     sceneBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     sceneBindings[1].binding = 1;
     sceneBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    sceneBindings[1].descriptorCount = 2;
+    sceneBindings[1].descriptorCount = vulkan_renderer_detail::kMaterialTextureCount;
     sceneBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     sceneBindings[2].binding = 2;
     sceneBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -285,7 +290,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     constexpr std::uint32_t rendererSetCount = sceneSetCount + tonemapSetCount;
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sceneSetCount};
-    poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, (sceneSetCount * 2U) + tonemapSetCount};
+    poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, (sceneSetCount * vulkan_renderer_detail::kMaterialTextureCount) + tonemapSetCount};
     poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sceneSetCount};
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets = rendererSetCount;

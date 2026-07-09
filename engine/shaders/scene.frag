@@ -4,10 +4,11 @@
 #include "common/scene_uniforms.glsl"
 #include "common/pbr.glsl"
 
-layout(set = 0, binding = 1) uniform sampler2D materialTextures[2];
+layout(set = 0, binding = 1) uniform sampler2D materialTextures[3];
 
 const int kMaterialAlbedoTexture = 0;
 const int kMaterialNormalTexture = 1;
+const int kMaterialOrmTexture = 2;
 
 
 layout(location = 0) in vec3 vWorldPosition;
@@ -38,8 +39,13 @@ void main() {
     vec3 albedo = max(vAlbedoRoughness.rgb, vec3(0.0));
     float roughness = clamp(vAlbedoRoughness.a, 0.04, 1.0);
     float metallic = clamp(vEmissiveMetallic.a, 0.0, 1.0);
+    float ambientOcclusion = 1.0;
     if (vMaterialFlags.y > 0.5) {
         albedo *= texture(materialTextures[kMaterialAlbedoTexture], vUv).rgb;
+        vec3 orm = texture(materialTextures[kMaterialOrmTexture], vUv).rgb;
+        ambientOcclusion = clamp(orm.r, 0.0, 1.0);
+        roughness = clamp(roughness * orm.g, 0.04, 1.0);
+        metallic = clamp(metallic * orm.b, 0.0, 1.0);
     }
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
 
@@ -55,7 +61,7 @@ void main() {
     vec3 direct = (diffuse + specular) * scene.lightColor.rgb * scene.lightColor.a * ndotl;
     vec3 ambientDiffuse = kd * albedo * environmentDiffuse(n);
     vec3 ambientSpecular = f * scene.ambientSkyColor.rgb * scene.ambientSkyColor.a * (1.0 - roughness) * 0.12;
-    vec3 ambient = ambientDiffuse + ambientSpecular;
+    vec3 ambient = (ambientDiffuse + ambientSpecular) * ambientOcclusion;
     float groundGrid = 0.0;
     if (vMaterialFlags.x > 0.5) {
         groundGrid = gridMask(vUv);

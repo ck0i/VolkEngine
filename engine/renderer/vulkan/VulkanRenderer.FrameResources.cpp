@@ -143,13 +143,16 @@ void VulkanRenderer::Impl::createFrameResources() {
         instanceBufferInfo.buffer = frame.instanceData.buffer;
         instanceBufferInfo.offset = 0;
         instanceBufferInfo.range = frame.instanceData.size;
-        std::array<VkDescriptorImageInfo, 2> materialTextureInfos{};
+        std::array<VkDescriptorImageInfo, vulkan_renderer_detail::kMaterialTextureCount> materialTextureInfos{};
         materialTextureInfos[0].sampler = textureSampler_;
         materialTextureInfos[0].imageView = groundAlbedoTexture_.view;
         materialTextureInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         materialTextureInfos[1].sampler = normalTextureSampler_;
         materialTextureInfos[1].imageView = groundNormalTexture_.view;
         materialTextureInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        materialTextureInfos[2].sampler = textureSampler_;
+        materialTextureInfos[2].imageView = groundOrmTexture_.view;
+        materialTextureInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         std::array<VkWriteDescriptorSet, 3> writes{};
         writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[0].dstSet = sceneDescriptorSets_[i];

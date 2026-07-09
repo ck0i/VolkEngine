@@ -47,6 +47,7 @@ namespace vulkan_renderer_detail {
 inline constexpr std::array<const char*, 1> kValidationLayers{"VK_LAYER_KHRONOS_validation"};
 inline constexpr std::array<const char*, 1> kDeviceExtensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 inline constexpr std::size_t kInitialSceneInstanceCapacity = 2048;
+inline constexpr std::uint32_t kMaterialTextureCount = 3;
 #if VOLKENGINE_ENABLE_IMGUI
 inline constexpr double kImGuiDiagnosticsRefreshIntervalSeconds = 0.25;
 #endif
@@ -786,6 +787,7 @@ private:
     ImageResource hdr_;
     ImageResource groundAlbedoTexture_;
     ImageResource groundNormalTexture_;
+    ImageResource groundOrmTexture_;
     VkSampler linearSampler_ = VK_NULL_HANDLE;
     VkSampler textureSampler_ = VK_NULL_HANDLE;
     VkSampler normalTextureSampler_ = VK_NULL_HANDLE;

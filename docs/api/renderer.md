@@ -42,7 +42,7 @@ Returns immutable backend/device metadata selected during initialization.
 | `timestampQueries` | Timestamp path enabled after support/config checks. |
 | `validationEnabled`, `debugMarkers` | Diagnostics state. |
 | `memoryBudget` | VMA memory budget support. |
-| `descriptorIndexing`, `bindlessSampledImagesSupported` | Descriptor-indexing features enabled when supported; the current material path uses a fixed combined-sampler descriptor array for albedo/normal textures, with future resource tables able to grow from that shape. |
+| `descriptorIndexing`, `bindlessSampledImagesSupported` | Descriptor-indexing features enabled when supported; the current material path uses a fixed combined-sampler descriptor array for albedo, normal, and ORM textures, with future resource tables able to grow from that shape. |
 | `multiDrawIndirect`, `drawIndirectFirstInstance` | Feature bits required for the indirect scene path. |
 | `samplerAnisotropy`, `maxSamplerAnisotropy` | Texture sampler capability actually enabled/selected. |
 | `transferUploadSync` | `SameQueueBarrier` or `QueueSemaphore` upload first-use path. |

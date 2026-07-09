@@ -78,6 +78,7 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     destroyBuffer(sceneVertexBuffer_);
     destroyImage(groundAlbedoTexture_);
     destroyImage(groundNormalTexture_);
+    destroyImage(groundOrmTexture_);
 
     for (FrameResources& frame : frames_) {
         destroyFrameUploadWaitSemaphores(frame);
