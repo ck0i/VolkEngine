@@ -4,6 +4,21 @@ Header: `engine/renderer/Renderer.hpp`. Advanced backend entry point: `engine/re
 
 The renderer API is intentionally narrow. Game-facing code should depend on `IRenderer`, `RenderStats`, and `RenderDeviceInfo`; direct `VulkanRenderer` use is backend integration, not a general scene API.
 
+## `GreedyMeshingVolume`
+
+`engine/renderer/GreedyMesher.hpp` exposes a CPU surface mesher for regular
+cell volumes; renderer backends do not invoke it directly. Clients supply
+cells using Y-major indexing (`y + x * height + z * width * height`); zero is
+empty and non-zero values are material IDs. `generateGreedyMesh()` mirrors
+the reference run strategy: it scans heightmap-bounded columns, culls occupied
+neighbors, greedily extends each visible face along two axes, and emits indexed
+four-vertex quads. It also returns contiguous material draw ranges, visible-face/quad counts, bounds, and renderer-compatible normals, UVs, and tangents.
+Boundary planes are supplied in `-X,+X,-Y,+Y,-Z,+Z` order; missing neighbors follow `meshExterior`, while
+`emitBoundaryFaces` explicitly preserves finite-grid boundary faces.
+Optional `minY`/`maxY` spans cache per-column bounds in `x + z*width` order;
+they must enclose every non-zero cell and use `minY=height`, `maxY=0` for
+empty columns. Omit both to build the bounds internally.
+
 ## `IRenderer`
 
 ```cpp

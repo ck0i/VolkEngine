@@ -98,6 +98,7 @@ add_library(VolkEngine STATIC
     engine/core/Time.cpp
     engine/platform/Window.cpp
     engine/renderer/Geometry.cpp
+    engine/renderer/GreedyMesher.cpp
     engine/renderer/ImageLoader.cpp
     engine/renderer/StbImageUsage.cpp
     engine/renderer/SceneRenderer.cpp
@@ -218,6 +219,16 @@ target_include_directories(VolkEngineGeometryCpuTest
 volkengine_target_warnings(VolkEngineGeometryCpuTest)
 add_test(NAME GeometryCpu
     COMMAND VolkEngineGeometryCpuTest)
+add_executable(VolkEngineGreedyMesherCpuTest
+    tests/GreedyMesherCpuTests.cpp
+    engine/renderer/Geometry.cpp
+    engine/renderer/GreedyMesher.cpp)
+target_include_directories(VolkEngineGreedyMesherCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineGreedyMesherCpuTest)
+add_test(NAME GreedyMesherCpu
+    COMMAND VolkEngineGreedyMesherCpuTest)
 add_executable(VolkEngineGpuResourceRegistryCpuTest
     tests/GpuResourceRegistryCpuTests.cpp)
 target_include_directories(VolkEngineGpuResourceRegistryCpuTest
