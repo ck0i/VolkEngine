@@ -1,0 +1,33 @@
+# CMake configure/build output. Presets write under /out/build/*.
+/out/
+/build/
+/_deps/
+/CMakeFiles/
+/Testing/
+/CMakeCache.txt
+/CMakeUserPresets.json
+/cmake_install.cmake
+/install_manifest.txt
+/Makefile
+/build.ninja
+/*.ninja
+/.ninja_deps
+/.ninja_log
+/compile_commands.json
+
+# Local run logs.
+/RUNLOG.md
+
+# Local tooling caches.
+/.cache/
+/.cmake/
+/.vs/
+
+# Editor/OS scratch files.
+*.user
+*.suo
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

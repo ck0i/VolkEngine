@@ -1,0 +1,10 @@
+# Default developer compile database for the Linux Debug preset.
+# CMakePresets exports compile_commands.json for every preset; Windows or
+# alternate-preset users should point this at their matching out/build/<preset>
+# directory or keep a local root compile_commands.json symlink/copy.
+CompileFlags:
+  CompilationDatabase: out/build/linux-debug
+  Remove:
+    - -fmodules-ts
+    - -fmodule-mapper=*
+    - -fdeps-format=*

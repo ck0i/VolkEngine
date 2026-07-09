@@ -1,0 +1,326 @@
+#pragma once
+
+#include "core/Math.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <vector>
+
+namespace ve {
+
+enum class SceneMeshId : std::uint8_t {
+    Cube,
+    Sphere,
+    GroundPlane
+};
+
+struct alignas(16) RenderMaterial {
+    Vec4 albedoRoughness;
+    Vec4 emissiveMetallic;
+    Vec4 flags;
+};
+
+struct SceneRenderItem {
+    Vec3 boundsCenter{};
+    float boundsRadius = 0.0f;
+    SceneMeshId mesh = SceneMeshId::Cube;
+    Mat4 model{};
+    RenderMaterial material{};
+};
+
+static_assert(sizeof(SceneRenderItem) == 144, "SceneRenderItem layout changed; keep cull fields packed before model/material");
+static_assert(offsetof(SceneRenderItem, boundsCenter) == 0, "SceneRenderItem boundsCenter should stay first for culling");
+static_assert(offsetof(SceneRenderItem, boundsRadius) == 12, "SceneRenderItem boundsRadius should stay with boundsCenter");
+static_assert(offsetof(SceneRenderItem, mesh) == 16, "SceneRenderItem mesh should stay in the first cache line");
+static_assert(offsetof(SceneRenderItem, model) == 32, "SceneRenderItem model offset mismatch");
+static_assert(offsetof(SceneRenderItem, material) == 96, "SceneRenderItem material offset mismatch");
+
+struct SceneGridRange {
+    std::size_t firstItem = 0;
+    std::uint32_t rows = 0;
+    std::uint32_t columns = 0;
+    bool valid = false;
+};
+
+struct SceneGridTile {
+    std::uint32_t rowBegin = 0;
+    std::uint32_t rowEnd = 0;
+    std::uint32_t columnBegin = 0;
+    std::uint32_t columnEnd = 0;
+    Vec3 boundsCenter{};
+    float boundsRadius = 0.0f;
+    float maxItemBoundsRadius = 0.0f;
+    std::size_t itemCount = 0;
+    SceneMeshId commonMesh = SceneMeshId::Cube;
+    bool homogeneousMesh = false;
+};
+
+class SceneRenderList {
+public:
+    void clear() noexcept {
+        items_.clear();
+        materialGridRange_ = {};
+        invalidateMaterialGridTiles();
+    }
+
+    void reserve(const std::size_t capacity) {
+        items_.reserve(capacity);
+    }
+
+    void push(const SceneRenderItem& item) {
+        const std::size_t itemIndex = items_.size();
+        items_.push_back(item);
+        if (indexInMaterialGridRange(itemIndex)) {
+            invalidateMaterialGridTiles();
+        }
+    }
+
+    [[nodiscard]] std::size_t size() const { return items_.size(); }
+    [[nodiscard]] std::size_t capacity() const { return items_.capacity(); }
+    [[nodiscard]] bool empty() const { return items_.empty(); }
+
+    [[nodiscard]] const SceneRenderItem& operator[](const std::size_t index) const {
+        return items_[index];
+    }
+    [[nodiscard]] SceneRenderItem& operator[](const std::size_t index) {
+        if (indexInMaterialGridRange(index)) {
+            invalidateMaterialGridTiles();
+        }
+        return items_[index];
+    }
+
+    [[nodiscard]] const SceneRenderItem* begin() const { return items_.data(); }
+    [[nodiscard]] const SceneRenderItem* end() const { return items_.data() + items_.size(); }
+
+    void setMaterialGridRange(const std::size_t firstItem, const std::uint32_t rows, const std::uint32_t columns) noexcept {
+        materialGridRange_ = SceneGridRange{firstItem, rows, columns, rows > 0U && columns > 0U};
+        invalidateMaterialGridTiles();
+    }
+
+    void rebuildMaterialGridTiles(const std::uint32_t tileRows, const std::uint32_t tileColumns) {
+        invalidateMaterialGridTiles();
+        if (!materialGridRange_.valid || tileRows == 0U || tileColumns == 0U || materialGridRange_.firstItem > items_.size()) {
+            return;
+        }
+        const std::size_t gridItemCount = static_cast<std::size_t>(materialGridRange_.rows) * static_cast<std::size_t>(materialGridRange_.columns);
+        if (gridItemCount > items_.size() - materialGridRange_.firstItem) {
+            return;
+        }
+
+        const std::uint32_t tileRowCount = ((materialGridRange_.rows - 1U) / tileRows) + 1U;
+        const std::uint32_t tileColumnCount = ((materialGridRange_.columns - 1U) / tileColumns) + 1U;
+        materialGridTiles_.reserve(static_cast<std::size_t>(tileRowCount) * static_cast<std::size_t>(tileColumnCount));
+        for (std::uint32_t rowBegin = 0; rowBegin < materialGridRange_.rows;) {
+            const std::uint32_t rowCount = std::min(tileRows, materialGridRange_.rows - rowBegin);
+            const std::uint32_t rowEnd = rowBegin + rowCount;
+            for (std::uint32_t columnBegin = 0; columnBegin < materialGridRange_.columns;) {
+                const std::uint32_t columnCount = std::min(tileColumns, materialGridRange_.columns - columnBegin);
+                const std::uint32_t columnEnd = columnBegin + columnCount;
+                float minX = std::numeric_limits<float>::max();
+                float minY = std::numeric_limits<float>::max();
+                float minZ = std::numeric_limits<float>::max();
+                float maxX = std::numeric_limits<float>::lowest();
+                float maxY = std::numeric_limits<float>::lowest();
+                float maxZ = std::numeric_limits<float>::lowest();
+                const std::size_t firstTileItem = materialGridRange_.firstItem +
+                                                  (static_cast<std::size_t>(rowBegin) * materialGridRange_.columns) +
+                                                  columnBegin;
+                const SceneMeshId commonMesh = items_[firstTileItem].mesh;
+                bool homogeneousMesh = true;
+                float maxItemBoundsRadius = 0.0f;
+                for (std::uint32_t row = rowBegin; row < rowEnd; ++row) {
+                    const std::size_t rowBase = materialGridRange_.firstItem + (static_cast<std::size_t>(row) * materialGridRange_.columns);
+                    for (std::uint32_t column = columnBegin; column < columnEnd; ++column) {
+                        const SceneRenderItem& item = items_[rowBase + column];
+                        minX = std::min(minX, item.boundsCenter.x - item.boundsRadius);
+                        minY = std::min(minY, item.boundsCenter.y - item.boundsRadius);
+                        minZ = std::min(minZ, item.boundsCenter.z - item.boundsRadius);
+                        maxX = std::max(maxX, item.boundsCenter.x + item.boundsRadius);
+                        maxY = std::max(maxY, item.boundsCenter.y + item.boundsRadius);
+                        maxZ = std::max(maxZ, item.boundsCenter.z + item.boundsRadius);
+                        homogeneousMesh = homogeneousMesh && item.mesh == commonMesh;
+                        maxItemBoundsRadius = std::max(maxItemBoundsRadius, item.boundsRadius);
+                    }
+                }
+                const Vec3 tileCenter{(minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f};
+                const Vec3 tileExtents{(maxX - minX) * 0.5f, (maxY - minY) * 0.5f, (maxZ - minZ) * 0.5f};
+                materialGridTiles_.push_back(SceneGridTile{rowBegin,
+                                                            rowEnd,
+                                                            columnBegin,
+                                                            columnEnd,
+                                                            tileCenter,
+                                                            length(tileExtents),
+                                                            maxItemBoundsRadius,
+                                                            static_cast<std::size_t>(rowEnd - rowBegin) * static_cast<std::size_t>(columnEnd - columnBegin),
+                                                            commonMesh,
+                                                            homogeneousMesh});
+                columnBegin = columnEnd;
+            }
+            rowBegin = rowEnd;
+        }
+        materialGridTilesCoverRange_ = true;
+    }
+
+    [[nodiscard]] const SceneGridRange& materialGridRange() const noexcept {
+        return materialGridRange_;
+    }
+
+    [[nodiscard]] const std::vector<SceneGridTile>& materialGridTiles() const noexcept {
+        return materialGridTiles_;
+    }
+
+    [[nodiscard]] bool materialGridTilesCoverRange() const noexcept {
+        return materialGridTilesCoverRange_;
+    }
+
+    [[nodiscard]] std::uint64_t materialGridTileRevision() const noexcept {
+        return materialGridTileRevision_;
+    }
+
+
+private:
+    void invalidateMaterialGridTiles() noexcept {
+        materialGridTiles_.clear();
+        materialGridTilesCoverRange_ = false;
+        ++materialGridTileRevision_;
+    }
+    [[nodiscard]] bool indexInMaterialGridRange(const std::size_t index) const noexcept {
+        if (!materialGridRange_.valid || index < materialGridRange_.firstItem) {
+            return false;
+        }
+        const std::size_t rowCount = materialGridRange_.rows;
+        const std::size_t columnCount = materialGridRange_.columns;
+        if (rowCount != 0U && columnCount > std::numeric_limits<std::size_t>::max() / rowCount) {
+            return false;
+        }
+        const std::size_t gridItemCount = rowCount * columnCount;
+        return index - materialGridRange_.firstItem < gridItemCount;
+    }
+
+    std::vector<SceneRenderItem> items_;
+    SceneGridRange materialGridRange_{};
+    bool materialGridTilesCoverRange_ = false;
+    std::uint64_t materialGridTileRevision_ = 0;
+    std::vector<SceneGridTile> materialGridTiles_{};
+};
+
+class DemoSceneRenderer {
+public:
+    static constexpr std::uint64_t kFixedItemCount = 6;
+
+    [[nodiscard]] static std::size_t requiredItemCount(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns) {
+        const std::uint64_t materialGridItems = static_cast<std::uint64_t>(materialGridRows) * static_cast<std::uint64_t>(materialGridColumns);
+        const std::uint64_t totalItems = materialGridItems + kFixedItemCount;
+        if (totalItems > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            throw std::runtime_error("Material grid exceeds renderer instance-count range");
+        }
+        if constexpr (sizeof(std::size_t) < sizeof(std::uint64_t)) {
+            if (totalItems > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+                throw std::runtime_error("Material grid exceeds host addressable scene-list range");
+            }
+        }
+        return static_cast<std::size_t>(totalItems);
+    }
+
+    static void validateMaterialGridDimensions(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns) {
+        (void)requiredItemCount(materialGridRows, materialGridColumns);
+    }
+
+    [[nodiscard]] const SceneRenderList& build(const double elapsedSeconds, const std::uint32_t materialGridRows = 4, const std::uint32_t materialGridColumns = 5, const std::uint32_t materialGridTileRows = kDefaultMaterialGridTileRows, const std::uint32_t materialGridTileColumns = kDefaultMaterialGridTileColumns) {
+        const std::size_t requiredItems = requiredItemCount(materialGridRows, materialGridColumns);
+        ensureStaticSceneLayout(materialGridRows, materialGridColumns, materialGridTileRows, materialGridTileColumns, requiredItems);
+        writeAnimatedItems(elapsedSeconds);
+        return renderList_;
+    }
+
+private:
+    static constexpr std::size_t kAnimatedItemCount = 5;
+    static constexpr std::uint32_t kDefaultMaterialGridTileRows = 16;
+    static constexpr std::uint32_t kDefaultMaterialGridTileColumns = 16;
+
+
+    void ensureStaticSceneLayout(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns, const std::uint32_t materialGridTileRows, const std::uint32_t materialGridTileColumns, const std::size_t requiredItems) {
+        if (cachedMaterialGridRows_ == materialGridRows &&
+            cachedMaterialGridColumns_ == materialGridColumns &&
+            cachedMaterialGridTileRows_ == materialGridTileRows &&
+            cachedMaterialGridTileColumns_ == materialGridTileColumns &&
+            renderList_.size() == requiredItems) {
+            return;
+        }
+
+        renderList_.clear();
+        renderList_.reserve(requiredItems);
+        for (std::size_t itemIndex = 0; itemIndex < kAnimatedItemCount; ++itemIndex) {
+            renderList_.push(SceneRenderItem{});
+        }
+
+        const float gridHalfWidth = (static_cast<float>(materialGridColumns) - 1.0f) * 0.5f;
+        for (std::uint32_t row = 0; row < materialGridRows; ++row) {
+            for (std::uint32_t column = 0; column < materialGridColumns; ++column) {
+                const float x = (static_cast<float>(column) - gridHalfWidth) * 2.0f;
+                const float z = -4.4f - static_cast<float>(row) * 1.25f;
+                const float roughness = materialGridRows > 1U ? 0.18f + (static_cast<float>(row) / static_cast<float>(materialGridRows - 1U)) * 0.60f : 0.48f;
+                const float metallic = materialGridColumns > 1U ? static_cast<float>(column) / static_cast<float>(materialGridColumns - 1U) : 0.0f;
+                const Vec3 center{x, 0.28f, z};
+                renderList_.push(SceneRenderItem{center,
+                                                 0.32f,
+                                                 SceneMeshId::Sphere,
+                                                 translate(center) * scale({0.28f, 0.28f, 0.28f}),
+                                                 {{0.38f + 0.11f * metallic * 4.0f, 0.42f + 0.08f * roughness * 3.0f, 0.82f - 0.08f * metallic * 4.0f, roughness},
+                                                  {0.0f, 0.0f, 0.0f, metallic},
+                                                  {0.0f, 0.0f, 0.0f, 0.0f}}});
+            }
+        }
+        renderList_.setMaterialGridRange(kAnimatedItemCount, materialGridRows, materialGridColumns);
+        renderList_.rebuildMaterialGridTiles(materialGridTileRows, materialGridTileColumns);
+        renderList_.push(SceneRenderItem{{0.0f, 0.0f, 0.0f},
+                                         17.0f,
+                                         SceneMeshId::GroundPlane,
+                                         Mat4::identity(),
+                                         {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 0.0f}}});
+        cachedMaterialGridRows_ = materialGridRows;
+        cachedMaterialGridColumns_ = materialGridColumns;
+        cachedMaterialGridTileRows_ = materialGridTileRows;
+        cachedMaterialGridTileColumns_ = materialGridTileColumns;
+    }
+
+    void writeAnimatedItems(const double elapsedSeconds) {
+        const double rotation = elapsedSeconds * 0.55;
+        renderList_[0] = SceneRenderItem{{-1.55f, 0.9f, 0.0f},
+                                         1.30f,
+                                         SceneMeshId::Cube,
+                                         translate({-1.55f, 0.9f, 0.0f}) * rotateY(static_cast<float>(rotation)) * scale({0.75f, 0.75f, 0.75f}),
+                                         {{0.75f, 0.18f, 0.08f, 0.58f}, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
+        renderList_[1] = SceneRenderItem{{1.35f, 1.05f, 0.0f},
+                                         0.95f,
+                                         SceneMeshId::Sphere,
+                                         translate({1.35f, 1.05f, 0.0f}) * rotateY(static_cast<float>(-rotation * 0.6)) * scale({0.9f, 0.9f, 0.9f}),
+                                         {{0.82f, 0.78f, 0.66f, 0.32f}, {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
+        renderList_[2] = SceneRenderItem{{-2.75f, 0.5f, -2.1f},
+                                         0.50f,
+                                         SceneMeshId::Sphere,
+                                         translate({-2.75f, 0.5f, -2.1f}) * scale({0.45f, 0.45f, 0.45f}),
+                                         {{0.95f, 0.54f, 0.28f, 0.18f}, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
+        renderList_[3] = SceneRenderItem{{0.0f, 0.5f, -2.1f},
+                                         0.50f,
+                                         SceneMeshId::Sphere,
+                                         translate({0.0f, 0.5f, -2.1f}) * scale({0.45f, 0.45f, 0.45f}),
+                                         {{0.62f, 0.68f, 0.78f, 0.52f}, {0.0f, 0.0f, 0.0f, 0.45f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
+        renderList_[4] = SceneRenderItem{{2.75f, 0.5f, -2.1f},
+                                         0.50f,
+                                         SceneMeshId::Sphere,
+                                         translate({2.75f, 0.5f, -2.1f}) * scale({0.45f, 0.45f, 0.45f}),
+                                         {{0.88f, 0.82f, 0.68f, 0.08f}, {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
+    }
+
+    SceneRenderList renderList_;
+    std::uint32_t cachedMaterialGridRows_ = 0;
+    std::uint32_t cachedMaterialGridColumns_ = 0;
+    std::uint32_t cachedMaterialGridTileRows_ = 0;
+    std::uint32_t cachedMaterialGridTileColumns_ = 0;
+};
+
+} // namespace ve

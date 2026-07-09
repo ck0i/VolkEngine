@@ -1,0 +1,114 @@
+#include "core/Application.hpp"
+
+#include "core/Log.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <spdlog/spdlog.h>
+
+namespace ve {
+namespace {
+
+const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
+    switch (mode) {
+    case TransferUploadSyncMode::SameQueueBarrier:
+        return "same-queue-barrier";
+    case TransferUploadSyncMode::QueueSemaphore:
+        return "queue-semaphore";
+    }
+    return "unknown";
+}
+
+
+} // namespace
+
+
+Application::Application(EngineConfig config)
+    : config_(std::move(config)), window_(config_), renderer_(window_, config_) {
+    const VkExtent2D extent = window_.framebufferExtent();
+    if (extent.height > 0) {
+        camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
+    }
+}
+
+int Application::run(const RunOptions& options) {
+    logger()->info("Entering main loop");
+    double titleUpdateSeconds = 0.0;
+    std::uint64_t titleUpdateFrames = 0;
+    bool screenshotRequested = false;
+    while (!window_.shouldClose()) {
+        const FrameTiming timing = clock_.tick();
+        window_.pollEvents();
+
+        if (options.resizeSmoke && timing.frameIndex == 45U) {
+            window_.setSize(1024, 640);
+        }
+        if (options.resizeSmoke && timing.frameIndex == 90U) {
+            window_.setSize(config_.initialWidth, config_.initialHeight);
+        }
+
+        const double clampedDelta = std::min(timing.deltaSeconds, 0.05);
+        window_.updateCamera(camera_, static_cast<float>(clampedDelta));
+        const VkExtent2D extent = window_.framebufferExtent();
+        if (extent.height > 0) {
+            camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
+        }
+
+        if (!screenshotRequested && !options.screenshotPath.empty()) {
+            renderer_.requestScreenshot(options.screenshotPath);
+            screenshotRequested = true;
+        }
+
+        renderer_.draw(camera_, timing.elapsedSeconds, timing.deltaSeconds * 1000.0);
+        titleUpdateSeconds += timing.deltaSeconds;
+        ++titleUpdateFrames;
+        if (titleUpdateSeconds >= 0.5) {
+            const RenderStats stats = renderer_.stats();
+            const double fps = static_cast<double>(titleUpdateFrames) / titleUpdateSeconds;
+            std::array<char, 256> title{};
+            std::array<char, 32> gpuTitle{};
+            if (stats.gpuTimestampsValid) {
+                std::snprintf(gpuTitle.data(), gpuTitle.size(), "%.2f ms", stats.gpuFrameMs);
+            } else {
+                std::snprintf(gpuTitle.data(), gpuTitle.size(), "pending");
+            }
+            std::snprintf(title.data(), title.size(), "%s | %.0f FPS | Frame %.2f ms | CPU %.2f ms | GPU %s | Draws %u | Batches %u | Passes %u | Culled %u",
+                          config_.applicationName.c_str(), fps, stats.frameDeltaMs, stats.cpuFrameMs, gpuTitle.data(),
+                          stats.drawCalls, stats.meshBatchCount, stats.scenePassCount, stats.culledDrawCalls);
+            window_.setTitle(title.data());
+            titleUpdateSeconds = 0.0;
+            titleUpdateFrames = 0;
+        }
+
+        if (options.maxFrames > 0 && timing.frameIndex + 1U >= options.maxFrames) {
+            window_.requestClose();
+        }
+    }
+
+    renderer_.waitIdle();
+    const RenderStats finalStats = renderer_.stats();
+    const RenderDeviceInfo& finalDevice = renderer_.deviceInfo();
+    std::array<char, 128> finalGpu{};
+    if (finalStats.gpuTimestampsValid) {
+        std::snprintf(finalGpu.data(), finalGpu.size(), "%.3f ms (depth %.3f / HDR %.3f / final %.3f)",
+                      finalStats.gpuFrameMs, finalStats.gpuDepthPrepassMs, finalStats.gpuHdrSceneMs, finalStats.gpuFinalPassMs);
+    } else {
+        std::snprintf(finalGpu.data(), finalGpu.size(), "pending/unavailable");
+    }
+    logger()->info("Exited cleanly. Last frame: frame {:.3f} ms, CPU {:.3f} ms (scene {:.3f} / prepare {:.3f} / record {:.3f} / submit {:.3f}), GPU {}, prepass {}, scene passes {}, batches {}, submission {}, upload sync {}, visible {}/{}, draws {}, culled {}, triangles {}, grid tiles {} (accepted {}, culled {}, intersected {}), grid cache {} (work {}), instance cap {} ({:.2f} MiB), sphere LOD instances {}/{}/{}",
+                   finalStats.frameDeltaMs, finalStats.cpuFrameMs,
+                   finalStats.cpuSceneBuildMs, finalStats.cpuPrepareMs, finalStats.cpuCommandRecordMs, finalStats.cpuQueueSubmitMs,
+                   finalGpu.data(),
+                   finalStats.depthPrepassEnabled ? "on" : "off", finalStats.scenePassCount, finalStats.meshBatchCount,
+                   finalStats.indirectSceneDraws ? "multi-draw-indirect" : "direct",
+                   transferUploadSyncName(finalDevice.transferUploadSync), finalStats.visibleItemCount,
+                   finalStats.sceneItemCount, finalStats.drawCalls, finalStats.culledDrawCalls, finalStats.triangleCount,
+                   finalStats.gridTileCount, finalStats.gridTilesAccepted, finalStats.gridTilesCulled, finalStats.gridTilesIntersected,
+                   finalStats.gridVisibilityCacheHit ? "hit" : "miss", finalStats.gridVisibilityWorkItems,
+                   finalStats.sceneInstanceCapacity, finalStats.sceneInstanceBufferMiB,
+                   finalStats.sphereLodHighCount, finalStats.sphereLodMediumCount, finalStats.sphereLodLowCount);
+    return 0;
+}
+
+} // namespace ve
