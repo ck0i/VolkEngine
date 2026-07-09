@@ -74,6 +74,18 @@ const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshForBatch(const st
 
 VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::array<MeshData, kSceneMeshBatchCount>& meshes) {
     MeshUpload upload{};
+    for (const MeshData& mesh : meshes) {
+        if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+            throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
+        }
+        if (mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+            throw std::runtime_error("Scene mesh index count exceeds uint32 range");
+        }
+    }
+    for (MeshData& mesh : meshes) {
+        optimizeTriangleIndexOrderForVertexCache(mesh.indices, mesh.vertices.size());
+        optimizeVertexFetchOrder(mesh);
+    }
     std::size_t vertexCount = 0;
     std::size_t indexCount = 0;
     for (const MeshData& mesh : meshes) {
@@ -107,12 +119,6 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::arra
             std::size_t vertexCursor = 0;
             std::size_t indexCursor = 0;
             const auto appendMesh = [&](MeshData& mesh) -> GpuMesh {
-                if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
-                    throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
-                }
-                if (mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
-                    throw std::runtime_error("Scene mesh index count exceeds uint32 range");
-                }
                 if (indexCursor > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) - mesh.indices.size()) {
                     throw std::runtime_error("Scene geometry index buffer exceeds uint32 range");
                 }
@@ -121,7 +127,6 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::arra
                     throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
                 }
                 const std::size_t firstIndex = indexCursor;
-                optimizeTriangleIndexOrderForVertexCache(mesh.indices, mesh.vertices.size());
                 const std::size_t meshVertexCount = mesh.vertices.size();
                 const std::size_t meshIndexCount = mesh.indices.size();
                 GpuVertex* meshVertexDst = vertexDst + vertexCursor;

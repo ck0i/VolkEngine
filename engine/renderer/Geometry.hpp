@@ -37,6 +37,7 @@ struct MeshData {
 [[nodiscard]] MeshData createUvSphereMesh(std::uint32_t rings, std::uint32_t segments);
 [[nodiscard]] MeshData createPlaneMesh(float halfExtent, float uvScale);
 void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indices, std::size_t vertexCount, std::uint32_t cacheSize = 32);
+void optimizeVertexFetchOrder(MeshData& mesh);
 [[nodiscard]] MeshData loadObjMesh(const std::filesystem::path& path);
 
 } // namespace ve

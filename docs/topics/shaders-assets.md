@@ -85,7 +85,7 @@ Current geometry path (`VulkanRenderer.Meshes.cpp`):
 - supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, generated normals when faces omit normals, and generated-normal fallback when explicit OBJ normals are degenerate.
 - computes `MeshData::bounds` from vertex positions and computes `Vertex::tangent` as `vec4(xyz, handedness)` for normal-map TBN shading; missing/degenerate UVs get deterministic fallback tangents.
 - packs per-instance normal matrices as three `vec4` columns so shaders transform normals with inverse-transpose data while tangents still use the model linear transform and `tangent.w * sign(det(model3x3))`.
-- converts triangle-list CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes, while uploaded indices are reordered for post-transform vertex-cache locality.
+- converts triangle-list CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes; uploaded indices are reordered for post-transform vertex-cache locality, then vertices are remapped to first-use order for vertex-fetch locality.
 - writes all startup mesh vertex/index payloads directly into one mapped staging buffer, then submits one transfer/graphics upload command during startup.
 
 The texture path now accepts common stb_image-backed source formats; material libraries, GPU-native compressed texture formats, and streaming pipelines are future work.

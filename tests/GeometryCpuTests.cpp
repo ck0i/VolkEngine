@@ -584,6 +584,54 @@ int main() {
         }
     }
 
+    {
+        ve::MeshData mesh;
+        mesh.vertices = {
+            {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+            {{1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
+            {{2.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+            {{3.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+            {{4.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.5f, 0.5f}},
+        };
+        mesh.indices = {3U, 1U, 4U, 3U, 4U, 1U};
+        expectNoThrow("optimizeVertexFetchOrder accepts valid indexed mesh", [&] {
+            ve::optimizeVertexFetchOrder(mesh);
+        });
+        expectEqual("vertex-fetch optimizer compacts referenced vertices", mesh.vertices.size(), static_cast<std::size_t>(3));
+        expectEqual("vertex-fetch optimizer preserves index count", mesh.indices.size(), static_cast<std::size_t>(6));
+        const std::array<std::uint32_t, 6> expectedIndices{0U, 1U, 2U, 0U, 2U, 1U};
+        for (std::size_t i = 0; i < expectedIndices.size(); ++i) {
+            expectEqual("vertex-fetch optimizer rewrites dense indices", mesh.indices.at(i), expectedIndices[i]);
+        }
+        expectVec3Nearly("vertex-fetch optimizer vertex 0 follows first index use", mesh.vertices.at(0).position, {3.0f, 0.0f, 0.0f});
+        expectVec3Nearly("vertex-fetch optimizer vertex 1 follows second unique use", mesh.vertices.at(1).position, {1.0f, 0.0f, 0.0f});
+        expectVec3Nearly("vertex-fetch optimizer vertex 2 follows third unique use", mesh.vertices.at(2).position, {4.0f, 0.0f, 0.0f});
+        expectMeshBoundsFromVertices("vertex-fetch optimizer recomputes compacted bounds", mesh);
+    }
+
+    {
+        ve::MeshData mesh;
+        mesh.vertices = {
+            {{-100.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+            {{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+            {{2.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+        };
+        mesh.indices = {2U, 1U, 2U};
+        ve::optimizeVertexFetchOrder(mesh);
+        expectEqual("vertex-fetch optimizer drops unreferenced vertices", mesh.vertices.size(), static_cast<std::size_t>(2));
+        expectVec3Nearly("vertex-fetch optimizer bounds ignore unreferenced vertex", mesh.bounds.center, {1.0f, 0.0f, 0.0f});
+        expectNearly("vertex-fetch optimizer bounds radius ignores unreferenced vertex", mesh.bounds.radius, 1.0f);
+    }
+
+    expectThrowsRuntimeError("vertex-fetch optimizer rejects out-of-range indices", [] {
+        ve::MeshData mesh;
+        mesh.vertices = {
+            {{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+        };
+        mesh.indices = {0U, 1U, 0U};
+        ve::optimizeVertexFetchOrder(mesh);
+    });
+
     expectThrowsRuntimeError("vertex-cache optimizer rejects incomplete triangle lists", [] {
         std::vector<std::uint32_t> indices{0U, 1U, 2U, 0U};
         ve::optimizeTriangleIndexOrderForVertexCache(indices, 3U, 3U);

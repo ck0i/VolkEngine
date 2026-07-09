@@ -466,6 +466,33 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
     std::copy(optimized.begin(), optimized.end(), indices.begin());
 }
 
+void optimizeVertexFetchOrder(MeshData& mesh) {
+    if (mesh.indices.empty()) {
+        mesh.vertices.clear();
+        mesh.bounds = {};
+        return;
+    }
+    if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+        throw std::runtime_error("Mesh vertex count exceeds uint32 range during vertex-fetch optimization");
+    }
+
+    std::vector<std::uint32_t> remap(mesh.vertices.size(), kMissingObjIndex);
+    std::vector<Vertex> reorderedVertices;
+    reorderedVertices.reserve(mesh.vertices.size());
+    for (std::uint32_t& index : mesh.indices) {
+        if (index >= mesh.vertices.size()) {
+            throw std::runtime_error("Mesh index exceeds vertex count during vertex-fetch optimization");
+        }
+        std::uint32_t& remappedIndex = remap[index];
+        if (remappedIndex == kMissingObjIndex) {
+            remappedIndex = static_cast<std::uint32_t>(reorderedVertices.size());
+            reorderedVertices.push_back(mesh.vertices[index]);
+        }
+        index = remappedIndex;
+    }
+    mesh.vertices = std::move(reorderedVertices);
+    mesh.bounds = calculateMeshBounds(mesh.vertices);
+}
 
 MeshData createCubeMesh() {
     MeshData mesh{};
