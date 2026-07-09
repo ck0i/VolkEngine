@@ -84,5 +84,5 @@ Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold 
 ## Developer notes
 
 - The tracked `.clangd` points clangd at `out/build/linux-debug/compile_commands.json`. For another preset or build directory, adjust local clangd config or keep a local root `compile_commands.json` symlink/copy; root `compile_commands.json` is ignored.
-- Generated build trees, screenshots, caches, and `RUNLOG.md` are ignored.
+- Generated build trees, screenshots, and caches are ignored.
 - Source assets such as `assets/textures/ground_albedo.ppm` and GLSL shader sources under `engine/shaders/` are tracked.
