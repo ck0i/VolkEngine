@@ -1,9 +1,119 @@
 #include "renderer/SceneRenderer.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 
 namespace ve {
+
+void SceneRenderList::clear() noexcept {
+    items_.clear();
+    materialGridRange_ = {};
+    invalidateMaterialGridTiles();
+}
+
+void SceneRenderList::push(const SceneRenderItem& item) {
+    const std::size_t itemIndex = items_.size();
+    items_.push_back(item);
+    if (indexInMaterialGridRange(itemIndex)) {
+        invalidateMaterialGridTiles();
+    }
+}
+
+SceneRenderItem& SceneRenderList::operator[](const std::size_t index) {
+    if (indexInMaterialGridRange(index)) {
+        invalidateMaterialGridTiles();
+    }
+    return items_[index];
+}
+
+void SceneRenderList::setMaterialGridRange(const std::size_t firstItem, const std::uint32_t rows, const std::uint32_t columns) noexcept {
+    materialGridRange_ = SceneGridRange{firstItem, rows, columns, rows > 0U && columns > 0U};
+    invalidateMaterialGridTiles();
+}
+
+void SceneRenderList::rebuildMaterialGridTiles(const std::uint32_t tileRows, const std::uint32_t tileColumns) {
+    invalidateMaterialGridTiles();
+    if (!materialGridRange_.valid || tileRows == 0U || tileColumns == 0U || materialGridRange_.firstItem > items_.size()) {
+        return;
+    }
+    const std::size_t gridItemCount = static_cast<std::size_t>(materialGridRange_.rows) * static_cast<std::size_t>(materialGridRange_.columns);
+    if (gridItemCount > items_.size() - materialGridRange_.firstItem) {
+        return;
+    }
+
+    const std::uint32_t tileRowCount = ((materialGridRange_.rows - 1U) / tileRows) + 1U;
+    const std::uint32_t tileColumnCount = ((materialGridRange_.columns - 1U) / tileColumns) + 1U;
+    materialGridTiles_.reserve(static_cast<std::size_t>(tileRowCount) * static_cast<std::size_t>(tileColumnCount));
+    for (std::uint32_t rowBegin = 0; rowBegin < materialGridRange_.rows;) {
+        const std::uint32_t rowCount = std::min(tileRows, materialGridRange_.rows - rowBegin);
+        const std::uint32_t rowEnd = rowBegin + rowCount;
+        for (std::uint32_t columnBegin = 0; columnBegin < materialGridRange_.columns;) {
+            const std::uint32_t columnCount = std::min(tileColumns, materialGridRange_.columns - columnBegin);
+            const std::uint32_t columnEnd = columnBegin + columnCount;
+            float minX = std::numeric_limits<float>::max();
+            float minY = std::numeric_limits<float>::max();
+            float minZ = std::numeric_limits<float>::max();
+            float maxX = std::numeric_limits<float>::lowest();
+            float maxY = std::numeric_limits<float>::lowest();
+            float maxZ = std::numeric_limits<float>::lowest();
+            const std::size_t firstTileItem = materialGridRange_.firstItem +
+                                              (static_cast<std::size_t>(rowBegin) * materialGridRange_.columns) +
+                                              columnBegin;
+            const SceneMeshId commonMesh = items_[firstTileItem].mesh;
+            bool homogeneousMesh = true;
+            float maxItemBoundsRadius = 0.0f;
+            for (std::uint32_t row = rowBegin; row < rowEnd; ++row) {
+                const std::size_t rowBase = materialGridRange_.firstItem + (static_cast<std::size_t>(row) * materialGridRange_.columns);
+                for (std::uint32_t column = columnBegin; column < columnEnd; ++column) {
+                    const SceneRenderItem& item = items_[rowBase + column];
+                    minX = std::min(minX, item.boundsCenter.x - item.boundsRadius);
+                    minY = std::min(minY, item.boundsCenter.y - item.boundsRadius);
+                    minZ = std::min(minZ, item.boundsCenter.z - item.boundsRadius);
+                    maxX = std::max(maxX, item.boundsCenter.x + item.boundsRadius);
+                    maxY = std::max(maxY, item.boundsCenter.y + item.boundsRadius);
+                    maxZ = std::max(maxZ, item.boundsCenter.z + item.boundsRadius);
+                    homogeneousMesh = homogeneousMesh && item.mesh == commonMesh;
+                    maxItemBoundsRadius = std::max(maxItemBoundsRadius, item.boundsRadius);
+                }
+            }
+            const Vec3 tileCenter{(minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f};
+            const Vec3 tileExtents{(maxX - minX) * 0.5f, (maxY - minY) * 0.5f, (maxZ - minZ) * 0.5f};
+            materialGridTiles_.push_back(SceneGridTile{rowBegin,
+                                                        rowEnd,
+                                                        columnBegin,
+                                                        columnEnd,
+                                                        tileCenter,
+                                                        length(tileExtents),
+                                                        maxItemBoundsRadius,
+                                                        static_cast<std::size_t>(rowEnd - rowBegin) * static_cast<std::size_t>(columnEnd - columnBegin),
+                                                        commonMesh,
+                                                        homogeneousMesh});
+            columnBegin = columnEnd;
+        }
+        rowBegin = rowEnd;
+    }
+    materialGridTilesCoverRange_ = true;
+}
+
+void SceneRenderList::invalidateMaterialGridTiles() noexcept {
+    materialGridTiles_.clear();
+    materialGridTilesCoverRange_ = false;
+    ++materialGridTileRevision_;
+}
+
+bool SceneRenderList::indexInMaterialGridRange(const std::size_t index) const noexcept {
+    if (!materialGridRange_.valid || index < materialGridRange_.firstItem) {
+        return false;
+    }
+    const std::size_t rowCount = materialGridRange_.rows;
+    const std::size_t columnCount = materialGridRange_.columns;
+    if (rowCount != 0U && columnCount > std::numeric_limits<std::size_t>::max() / rowCount) {
+        return false;
+    }
+    const std::size_t gridItemCount = rowCount * columnCount;
+    return index - materialGridRange_.firstItem < gridItemCount;
+}
 
 std::size_t DemoSceneRenderer::requiredItemCount(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns) {
     const std::uint64_t materialGridItems = static_cast<std::uint64_t>(materialGridRows) * static_cast<std::uint64_t>(materialGridColumns);

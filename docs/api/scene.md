@@ -83,6 +83,8 @@ Material-grid metadata:
 
 If grid metadata is missing or stale, the renderer falls back to generic per-item visibility scanning.
 
+Hot read-only accessors stay inline in `SceneRenderer.hpp`; heavier mutation and tile-rebuild code lives in `SceneRenderer.cpp` to keep the public header small without adding per-frame visibility access overhead.
+
 ## `SceneGridRange`
 
 Describes a contiguous grid in a `SceneRenderList`:
