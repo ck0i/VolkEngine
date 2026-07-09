@@ -1,6 +1,6 @@
 # Scene API
 
-Header: `engine/renderer/SceneRenderer.hpp`.
+Header: `engine/renderer/SceneRenderer.hpp`; sandbox implementation: `engine/renderer/SceneRenderer.cpp`.
 
 The current scene API is renderer-facing data, not an ECS. It exists to feed the Vulkan backend compact mesh/material/bounds records and to exercise batching/culling in the sandbox.
 
@@ -10,9 +10,9 @@ The current scene API is renderer-facing data, not an ECS. It exists to feed the
 enum class SceneMeshId : std::uint8_t {
     Cube,
     Sphere,
-    GroundPlane
+    GroundPlane,
+    ImportedModel
 };
-```
 
 Logical mesh choices understood by the demo renderer. The Vulkan backend maps these to internal mesh/LOD buckets.
 
@@ -35,7 +35,7 @@ Current packing:
 - `emissiveMetallic.rgb`: emissive color.
 - `emissiveMetallic.a`: metallic.
 - `flags.x`: ground grid overlay enabled.
-- `flags.y`: albedo texture sampling enabled.
+- `flags.y`: albedo/ORM material texture sampling enabled.
 - `flags.z`: normal-map sampling enabled.
 - `flags.w`: normal-map strength in `[0, 1]`.
 

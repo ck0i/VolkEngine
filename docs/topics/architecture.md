@@ -8,7 +8,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | --- | --- | --- |
 | `engine/core` | Application lifecycle, config, clock, camera, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW window, input, framebuffer resize state, Vulkan surface creation. | `Window`. |
-| `engine/renderer` | Renderer contracts, scene submission data, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
+| `engine/renderer` | Renderer contracts, scene submission data, sandbox scene implementation, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `DemoSceneRenderer` declarations, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for all non-public renderer internals: state structs, helper utilities, private methods, members. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |

@@ -100,6 +100,7 @@ add_library(VolkEngine STATIC
     engine/renderer/Geometry.cpp
     engine/renderer/ImageLoader.cpp
     engine/renderer/StbImageUsage.cpp
+    engine/renderer/SceneRenderer.cpp
     engine/renderer/vulkan/VmaUsage.cpp
     engine/renderer/vulkan/VulkanRenderer.cpp
     engine/renderer/vulkan/VulkanRenderer.Device.cpp
@@ -170,7 +171,8 @@ volkengine_target_warnings(VolkEngineSandbox)
 enable_testing()
 
 add_executable(VolkEngineSceneRendererTest
-    tests/SceneRendererCpuTests.cpp)
+    tests/SceneRendererCpuTests.cpp
+    engine/renderer/SceneRenderer.cpp)
 target_include_directories(VolkEngineSceneRendererTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
