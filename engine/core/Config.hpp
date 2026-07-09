@@ -1,12 +1,18 @@
 #pragma once
 #include "core/FileSystem.hpp"
 
-
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <string>
 
 namespace ve {
+
+#if defined(VOLKENGINE_VALIDATION)
+inline constexpr bool kDefaultValidationEnabled = VOLKENGINE_VALIDATION != 0;
+#else
+inline constexpr bool kDefaultValidationEnabled = false;
+#endif
 
 enum class DepthPrepassMode : std::uint8_t {
     Auto,
@@ -18,7 +24,7 @@ struct EngineConfig {
     std::string applicationName = "VolkEngine Sandbox";
     std::uint32_t initialWidth = 1280;
     std::uint32_t initialHeight = 720;
-    bool validation = VOLKENGINE_VALIDATION != 0;
+    bool validation = kDefaultValidationEnabled;
     bool vsync = true;
     float exposure = 1.0f;
     bool shaderHotReload = false;
@@ -34,6 +40,10 @@ struct EngineConfig {
     std::filesystem::path assetDirectory = executableDirectory() / "assets";
     std::filesystem::path cacheDirectory = executableDirectory() / "cache";
 };
+
+[[nodiscard]] inline bool isValidExposure(const float exposure) noexcept {
+    return std::isfinite(exposure) && exposure > 0.0f;
+}
 
 struct RunOptions {
     std::uint64_t maxFrames = 0;

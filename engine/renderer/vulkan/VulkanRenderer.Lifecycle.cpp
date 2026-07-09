@@ -1,9 +1,14 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
+#include <stdexcept>
+
 namespace ve {
 
 VulkanRenderer::Impl::Impl(Window& window, EngineConfig config)
     : window_(window), config_(std::move(config)) {
+    if (!isValidExposure(config_.exposure)) {
+        throw std::runtime_error("Renderer exposure must be positive and finite");
+    }
     try {
     createInstance();
     createDebugMessenger();

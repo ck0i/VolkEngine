@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <exception>
 #include <filesystem>
-#include <cmath>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -53,7 +52,7 @@ std::uint32_t parseWindowDimension(const std::string_view value, const std::stri
 float parseFloat(const std::string_view value, const std::string_view optionName) {
     float parsed = 0.0f;
     const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), parsed);
-    if (ec != std::errc{} || ptr != value.data() + value.size() || !std::isfinite(parsed) || parsed <= 0.0f) {
+    if (ec != std::errc{} || ptr != value.data() + value.size() || !ve::isValidExposure(parsed)) {
         throw std::invalid_argument("Invalid positive value for " + std::string(optionName));
     }
     return parsed;

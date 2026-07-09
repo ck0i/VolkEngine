@@ -12,7 +12,7 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `initialWidth`, `initialHeight` | `1280`, `720` | Validated by the sandbox before crossing GLFW's `int` size API. |
 | `validation` | build-dependent `VOLKENGINE_VALIDATION != 0` | Requests validation layers; startup still depends on system layer availability. |
 | `vsync` | `true` | `true` selects FIFO; `false` asks for immediate-first fallback. |
-| `exposure` | `1.0f` | Positive tonemap exposure push constant. |
+| `exposure` | `1.0f` | Positive finite tonemap exposure; `VulkanRenderer` rejects invalid programmatic configs before backend startup. |
 | `shaderHotReload` | `false` | Poll copied SPIR-V files and atomically swap rebuilt pipelines on success. |
 | `indirectSceneDraws` | `true` | Request multi-draw indirect; backend falls back when features are missing. |
 | `debugOverlay` | `true` | Enables Dear ImGui backend and overlay when compiled in. |
@@ -21,6 +21,8 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `materialGridTileRows`, `materialGridTileColumns` | `16`, `16` | Demo grid tile dimensions for culling acceleration. |
 | `depthPrepassMode` | `DepthPrepassMode::Auto` | Adaptive prepass selection by visible scene complexity; `ForceOn` and `ForceOff` are deterministic overrides. |
 | `shaderDirectory`, `assetDirectory`, `cacheDirectory` | CMake-defined build paths | Runtime shader, asset, and pipeline-cache locations. |
+
+`isValidExposure(float)` is the shared helper for sandbox CLI parsing and programmatic config checks.
 
 ## `RunOptions`
 

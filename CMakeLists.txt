@@ -170,6 +170,15 @@ volkengine_target_warnings(VolkEngineSandbox)
 
 enable_testing()
 
+add_executable(VolkEngineConfigCpuTest
+    tests/ConfigCpuTests.cpp)
+target_include_directories(VolkEngineConfigCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineConfigCpuTest)
+add_test(NAME ConfigCpu
+    COMMAND VolkEngineConfigCpuTest)
+
 add_executable(VolkEngineSceneRendererTest
     tests/SceneRendererCpuTests.cpp
     engine/renderer/SceneRenderer.cpp)
