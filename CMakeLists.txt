@@ -190,3 +190,12 @@ target_include_directories(VolkEngineImageLoaderCpuTest
 volkengine_target_warnings(VolkEngineImageLoaderCpuTest)
 add_test(NAME ImageLoaderCpu
     COMMAND VolkEngineImageLoaderCpuTest)
+add_executable(VolkEngineGeometryCpuTest
+    tests/GeometryCpuTests.cpp
+    engine/renderer/Geometry.cpp)
+target_include_directories(VolkEngineGeometryCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineGeometryCpuTest)
+add_test(NAME GeometryCpu
+    COMMAND VolkEngineGeometryCpuTest)
