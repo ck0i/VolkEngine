@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/VolkEngineBootstrap.cmake")
 project(VolkEngine
     VERSION 0.1.0
     DESCRIPTION "High-fidelity Vulkan renderer foundation"
@@ -14,74 +14,10 @@ option(VOLKENGINE_ENABLE_VALIDATION "Request Vulkan validation layers in debug b
 option(VOLKENGINE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(VOLKENGINE_ENABLE_IMGUI "Enable Dear ImGui debug overlay" ON)
 
-find_package(Vulkan REQUIRED)
-find_program(GLSLC_EXECUTABLE
-    NAMES glslc
-    HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin"
-    REQUIRED)
-
-include(FetchContent)
-set(FETCHCONTENT_QUIET FALSE)
-
-find_package(glfw3 CONFIG QUIET)
-if(TARGET glfw)
-    set(VOLKENGINE_GLFW_TARGET glfw)
-elseif(TARGET glfw3)
-    set(VOLKENGINE_GLFW_TARGET glfw3)
-else()
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(GLFW3 QUIET IMPORTED_TARGET glfw3)
-    endif()
-    if(TARGET PkgConfig::GLFW3)
-        set(VOLKENGINE_GLFW_TARGET PkgConfig::GLFW3)
-    else()
-        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(glfw
-            GIT_REPOSITORY https://github.com/glfw/glfw.git
-            GIT_TAG 3.4
-            GIT_SHALLOW TRUE)
-        FetchContent_MakeAvailable(glfw)
-        set(VOLKENGINE_GLFW_TARGET glfw)
-    endif()
-endif()
-
-find_package(spdlog CONFIG QUIET)
-if(TARGET spdlog::spdlog)
-    set(VOLKENGINE_SPDLOG_TARGET spdlog::spdlog)
-else()
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(SPDLOG QUIET IMPORTED_TARGET spdlog)
-    endif()
-    if(TARGET PkgConfig::SPDLOG)
-        set(VOLKENGINE_SPDLOG_TARGET PkgConfig::SPDLOG)
-    else()
-        set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(spdlog
-            GIT_REPOSITORY https://github.com/gabime/spdlog.git
-            GIT_TAG v1.15.3
-            GIT_SHALLOW TRUE)
-        FetchContent_MakeAvailable(spdlog)
-        set(VOLKENGINE_SPDLOG_TARGET spdlog::spdlog)
-    endif()
-endif()
-
-FetchContent_Declare(VulkanMemoryAllocator
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-    GIT_TAG v3.4.0
-    GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(VulkanMemoryAllocator)
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/VolkEngineDependencies.cmake")
+volkengine_resolve_dependencies()
 
 if(VOLKENGINE_ENABLE_IMGUI)
-    FetchContent_Declare(imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.92.8
-        GIT_SHALLOW TRUE)
-    FetchContent_MakeAvailable(imgui)
     add_library(VolkEngineImGui STATIC
         "${imgui_SOURCE_DIR}/imgui.cpp"
         "${imgui_SOURCE_DIR}/imgui_draw.cpp"

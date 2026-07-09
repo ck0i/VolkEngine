@@ -1,4 +1,6 @@
 #pragma once
+#include "core/FileSystem.hpp"
+
 
 #include <cstdint>
 #include <filesystem>
@@ -27,9 +29,9 @@ struct EngineConfig {
     std::uint32_t materialGridTileRows = 16;
     std::uint32_t materialGridTileColumns = 16;
     DepthPrepassMode depthPrepassMode = DepthPrepassMode::ForceOff;
-    std::filesystem::path shaderDirectory = VOLKENGINE_SHADER_DIR;
-    std::filesystem::path assetDirectory = VOLKENGINE_ASSET_DIR;
-    std::filesystem::path cacheDirectory = std::filesystem::path(VOLKENGINE_SHADER_DIR).parent_path() / "cache";
+    std::filesystem::path shaderDirectory = executableDirectory() / "shaders";
+    std::filesystem::path assetDirectory = executableDirectory() / "assets";
+    std::filesystem::path cacheDirectory = executableDirectory() / "cache";
 };
 
 struct RunOptions {

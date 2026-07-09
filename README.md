@@ -9,19 +9,18 @@ Detailed design notes are kept out of this onboarding README. Start at `docs/REA
 
 ## Requirements
 
-- C++23 compiler
 - CMake 3.28+
-- Ninja
-- Vulkan SDK/runtime with `glslc`
-- GLFW and spdlog, either installed as packages or fetched by CMake
+- A C++23 compiler for the host platform
+- A Vulkan-capable GPU driver/ICD to run the sandbox
 
-On Arch/CachyOS-like systems:
+The CMake presets bootstrap the remaining build dependencies into ignored repo-local directories:
 
-```sh
-sudo pacman -S cmake ninja gcc vulkan-headers vulkan-icd-loader shaderc glfw spdlog
-```
+- `out/bootstrap/` — Ninja and the LunarG Vulkan SDK when the host does not already provide them
+- `out/build/<preset>/_deps/` — GLFW, spdlog, Vulkan Memory Allocator, and Dear ImGui from pinned release archives when package discovery fails
 
-On Windows, install the Vulkan SDK, CMake, Ninja, and a C++23 compiler. CMake can fetch GLFW/spdlog if package discovery fails.
+Linux native-window note: fetched GLFW still needs one system window backend at compile time. If neither X11 nor Wayland development files are installed, configure stops early with a distro-specific command for Debian/Ubuntu, Fedora/RHEL, Arch/CachyOS/Manjaro, openSUSE, or Alpine. CMake does not run `sudo` or mutate the OS package database from configure.
+
+Windows note: install a C++23-capable toolchain and GPU driver. The `windows-*` presets can provision Ninja plus a repo-local Vulkan SDK if they are not already installed.
 
 ## Build
 
