@@ -1,5 +1,8 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
+#include <chrono>
+#include <fstream>
+
 namespace ve {
 
 void VulkanRenderer::Impl::requestScreenshot(std::filesystem::path path) {

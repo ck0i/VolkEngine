@@ -1,5 +1,9 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
+#include <chrono>
+#include <fstream>
+#include <random>
+
 namespace ve {
 namespace {
 
@@ -37,6 +41,18 @@ namespace {
     return words;
 }
 
+[[nodiscard]] std::filesystem::path uniquePipelineCacheTemporaryPath(const std::filesystem::path& path) {
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    std::random_device random;
+    const std::uint64_t salt = (static_cast<std::uint64_t>(random()) << 32U) ^ static_cast<std::uint64_t>(random());
+
+    std::filesystem::path temporaryPath = path;
+    temporaryPath += ".tmp.";
+    temporaryPath += std::to_string(ticks);
+    temporaryPath += ".";
+    temporaryPath += std::to_string(salt);
+    return temporaryPath;
+}
 } // namespace
 
 
