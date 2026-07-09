@@ -312,15 +312,15 @@ int main() {
                 50U, 60U, 70U, 128U,
                 70U, 80U, 90U, 255U}};
         std::vector<ve::LoadedImageRgba8> mipChain;
-        expectNoThrow("buildAlbedoMipChainRgba8 linearly averages non-sRGB RGBA", [&] {
+        expectNoThrow("buildAlbedoMipChainRgba8 alpha-weights non-sRGB RGB and averages alpha", [&] {
             mipChain = ve::buildAlbedoMipChainRgba8(baseLevel, false);
         });
         expectEqual("linear albedo chain has base and one mip level", mipChain.size(), static_cast<std::size_t>(2));
         if (mipChain.size() == 2U) {
             expectEqual("linear albedo mip width", mipChain[1U].width, 1U);
             expectEqual("linear albedo mip height", mipChain[1U].height, 1U);
-            expectEqualBytes("linear albedo mip averages RGBA", mipChain[1U].pixels,
-                             std::vector<std::uint8_t>{40U, 50U, 60U, 112U});
+            expectEqualBytes("linear albedo mip alpha-weights RGB and averages alpha", mipChain[1U].pixels,
+                             std::vector<std::uint8_t>{59U, 69U, 79U, 112U});
         }
     }
 
@@ -334,13 +334,33 @@ int main() {
                 0U, 0U, 0U, 128U,
                 255U, 255U, 255U, 255U}};
         std::vector<ve::LoadedImageRgba8> mipChain;
-        expectNoThrow("buildAlbedoMipChainRgba8 gamma-averages sRGB RGB", [&] {
+        expectNoThrow("buildAlbedoMipChainRgba8 alpha-weights sRGB RGB in linear space", [&] {
             mipChain = ve::buildAlbedoMipChainRgba8(baseLevel, true);
         });
         expectEqual("sRGB albedo chain has base and one mip level", mipChain.size(), static_cast<std::size_t>(2));
         if (mipChain.size() == 2U) {
-            expectEqualBytes("sRGB albedo mip averages RGB in linear space and alpha linearly", mipChain[1U].pixels,
-                             std::vector<std::uint8_t>{188U, 188U, 188U, 112U});
+            expectEqualBytes("sRGB albedo mip alpha-weights RGB in linear space and alpha linearly", mipChain[1U].pixels,
+                             std::vector<std::uint8_t>{220U, 220U, 220U, 112U});
+        }
+    }
+
+    {
+        const ve::LoadedImageRgba8 baseLevel{
+            2U,
+            2U,
+            std::vector<std::uint8_t>{
+                255U, 0U, 0U, 255U,
+                0U, 0U, 255U, 0U,
+                0U, 0U, 255U, 0U,
+                0U, 0U, 255U, 0U}};
+        std::vector<ve::LoadedImageRgba8> mipChain;
+        expectNoThrow("buildAlbedoMipChainRgba8 prevents transparent color bleed", [&] {
+            mipChain = ve::buildAlbedoMipChainRgba8(baseLevel, false);
+        });
+        expectEqual("transparent bleed albedo chain has base and one mip level", mipChain.size(), static_cast<std::size_t>(2));
+        if (mipChain.size() == 2U) {
+            expectEqualBytes("transparent blue texels do not darken opaque red mip", mipChain[1U].pixels,
+                             std::vector<std::uint8_t>{255U, 0U, 0U, 64U});
         }
     }
 

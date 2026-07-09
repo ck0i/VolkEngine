@@ -1,6 +1,18 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 namespace ve {
+namespace {
+
+bool hasNonOpaqueAlpha(const LoadedImageRgba8& image) noexcept {
+    for (std::size_t offset = 3; offset < image.pixels.size(); offset += 4U) {
+        if (image.pixels[offset] != 255U) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 VkImageView VulkanRenderer::Impl::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, const std::uint32_t mipLevels) const {
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -89,11 +101,15 @@ void VulkanRenderer::Impl::createTextureResources() {
             upload.baseWidth = baseLevel.width;
             upload.baseHeight = baseLevel.height;
             const std::uint32_t requestedMipLevels = mipLevelCountForExtent(textureExtent);
-            const bool canGenerateMipmaps = requestedMipLevels > 1U && formatSupportsLinearMipBlit(upload.format);
-            upload.gpuMipGeneration = !upload.cpuNormalMipChain && canGenerateMipmaps;
+            const bool canLinearBlitMipmaps = requestedMipLevels > 1U && formatSupportsLinearMipBlit(upload.format);
+            const bool alphaNeedsCpuMips = !upload.cpuNormalMipChain && requestedMipLevels > 1U && hasNonOpaqueAlpha(baseLevel);
+            upload.gpuMipGeneration = !upload.cpuNormalMipChain && canLinearBlitMipmaps && !alphaNeedsCpuMips;
             if (upload.cpuNormalMipChain) {
                 upload.mipLevels = buildNormalMapMipChainRgba8(std::move(baseLevel));
-            } else if (canGenerateMipmaps || requestedMipLevels == 1U) {
+            } else if (alphaNeedsCpuMips) {
+                upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);
+                logger()->info("Texture {} uses alpha-weighted CPU albedo mips to avoid transparent texel bleed", upload.path.string());
+            } else if (upload.gpuMipGeneration || requestedMipLevels == 1U) {
                 upload.mipLevels = std::vector<LoadedImageRgba8>{std::move(baseLevel)};
             } else {
                 upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);

@@ -68,7 +68,7 @@ Current texture path (`VulkanRenderer.Resources.cpp`):
 - decodes source images to RGBA8 CPU pixels while preserving source alpha.
 - uploads albedo as `VK_FORMAT_R8G8B8A8_SRGB`.
 - uploads normal maps as linear `VK_FORMAT_R8G8B8A8_UNORM`; shader code remaps sampled normals from `[0, 1]` to `[-1, 1]` before TBN transform.
-- generates albedo mip levels with checked linear blits when supported; if the selected format/device cannot linearly blit the sRGB texture, the CPU builds a gamma-correct albedo mip chain by averaging RGB in linear space and alpha linearly.
+- generates opaque albedo mip levels with checked linear blits when supported; if the image has non-opaque alpha or the selected format/device cannot linearly blit the sRGB texture, the CPU builds a gamma-correct albedo mip chain by alpha-weighting RGB in linear space and averaging alpha coverage linearly so transparent texel colors do not bleed into lower mips.
 - builds normal-map mip chains on the CPU by decoding each proportional source footprint to tangent-space vectors, averaging, renormalizing, preserving averaged alpha, and uploading explicit mip copy regions; this avoids color-style byte averaging that flattens high-frequency normals and covers odd-size edge texels.
 - records albedo and normal texture copies/mip generation from one shared staging buffer into one startup graphics upload command buffer and one submit, then binds them through one fixed material texture descriptor array.
 - uses separate descriptor samplers for albedo and normal maps: albedo can enable device anisotropy and uses the albedo mip range, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.

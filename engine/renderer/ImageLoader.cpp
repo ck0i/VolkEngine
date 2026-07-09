@@ -258,18 +258,20 @@ void validateRgba8Image(const LoadedImageRgba8& image, const char* context) {
             for (std::uint32_t sy = yBegin; sy < yEnd; ++sy) {
                 for (std::uint32_t sx = xBegin; sx < xEnd; ++sx) {
                     const std::size_t offset = (static_cast<std::size_t>(sy) * source.width + sx) * 4U;
-                    colorSum[0] += decodeColorSample(source.pixels[offset + 0U], isSrgb);
-                    colorSum[1] += decodeColorSample(source.pixels[offset + 1U], isSrgb);
-                    colorSum[2] += decodeColorSample(source.pixels[offset + 2U], isSrgb);
-                    alphaSum += source.pixels[offset + 3U];
+                    const std::uint8_t alpha = source.pixels[offset + 3U];
+                    const float alphaWeight = static_cast<float>(alpha);
+                    colorSum[0] += decodeColorSample(source.pixels[offset + 0U], isSrgb) * alphaWeight;
+                    colorSum[1] += decodeColorSample(source.pixels[offset + 1U], isSrgb) * alphaWeight;
+                    colorSum[2] += decodeColorSample(source.pixels[offset + 2U], isSrgb) * alphaWeight;
+                    alphaSum += alpha;
                     ++sampleCount;
                 }
             }
-            const float invSampleCount = 1.0f / static_cast<float>(sampleCount);
+            const float invColorWeight = alphaSum > 0U ? 1.0f / static_cast<float>(alphaSum) : 0.0f;
             const std::size_t offset = (static_cast<std::size_t>(y) * mip.width + x) * 4U;
-            mip.pixels[offset + 0U] = encodeColorSample(colorSum[0] * invSampleCount, isSrgb);
-            mip.pixels[offset + 1U] = encodeColorSample(colorSum[1] * invSampleCount, isSrgb);
-            mip.pixels[offset + 2U] = encodeColorSample(colorSum[2] * invSampleCount, isSrgb);
+            mip.pixels[offset + 0U] = encodeColorSample(colorSum[0] * invColorWeight, isSrgb);
+            mip.pixels[offset + 1U] = encodeColorSample(colorSum[1] * invColorWeight, isSrgb);
+            mip.pixels[offset + 2U] = encodeColorSample(colorSum[2] * invColorWeight, isSrgb);
             mip.pixels[offset + 3U] = static_cast<std::uint8_t>((alphaSum + sampleCount / 2U) / sampleCount);
         }
     }
