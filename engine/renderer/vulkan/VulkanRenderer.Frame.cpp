@@ -523,6 +523,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     stats_.gridVisibilityCacheHit = visibility.gridVisibilityCacheHit;
     stats_.gridVisibilityWorkItems = visibility.gridVisibilityWorkItems;
     stats_.indirectSceneDraws = indirectSceneDrawsEnabled_ && sceneDrawCalls > 0U;
+    stats_.sceneTriangleCount = visibility.sceneTriangleCount;
     stats_.triangleCount = (visibility.sceneTriangleCount * scenePassCount) + 1ULL;
 }
 

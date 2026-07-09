@@ -71,6 +71,7 @@ struct RenderStats {
     unsigned sphereLodLowCount = 0;
     unsigned gridVisibilityWorkItems = 0;
     bool indirectSceneDraws = false;
+    std::uint64_t sceneTriangleCount = 0;
     std::uint64_t triangleCount = 0;
 };
 

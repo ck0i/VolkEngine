@@ -115,6 +115,6 @@ Unsupported format/usage combinations (no `TRANSFER_SRC` support or non-UNORM sw
 
 - Debug-utils names are assigned to long-lived Vulkan objects when available.
 - Pass regions are labeled for RenderDoc/validation captures.
-- `RenderStats` exposes CPU timing buckets, optional GPU timing validity, draw/triangle counts, visibility and grid telemetry, LOD counts, instance capacity, and submission mode.
+- `RenderStats` exposes CPU timing buckets, optional GPU timing validity, draw counts, scene/submitted triangle counts, visibility and grid telemetry, LOD counts, instance capacity, and submission mode.
 - `RenderDeviceInfo` mirrors adapter, feature, and upload-sync decisions.
 - ImGui is optional; `--no-imgui` skips overlay initialization and overlay work.

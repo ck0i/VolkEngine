@@ -161,7 +161,7 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
                     stats_.gridTilesCulled, stats_.gridTilesIntersected);
         ImGui::Text("Grid visibility cache: %s  Work records: %u",
                     stats_.gridVisibilityCacheHit ? "hit" : "miss", stats_.gridVisibilityWorkItems);
-        ImGui::Text("Triangles: %llu", static_cast<unsigned long long>(stats_.triangleCount));
+        ImGui::Text("Triangles: %llu scene / %llu submitted", static_cast<unsigned long long>(stats_.sceneTriangleCount), static_cast<unsigned long long>(stats_.triangleCount));
         ImGui::Text("Sphere LOD instances: %u high / %u medium / %u low",
                     stats_.sphereLodHighCount, stats_.sphereLodMediumCount, stats_.sphereLodLowCount);
         ImGui::Text("Exposure: %.2f  VSync: %s  Depth prepass: %s (%s)", config_.exposure, config_.vsync ? "on" : "off", stats_.depthPrepassEnabled ? "on" : "off", depthPrepassModeName(config_.depthPrepassMode));

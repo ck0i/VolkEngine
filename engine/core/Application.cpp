@@ -96,14 +96,14 @@ int Application::run(const RunOptions& options) {
     } else {
         std::snprintf(finalGpu.data(), finalGpu.size(), "pending/unavailable");
     }
-    logger()->info("Exited cleanly. Last frame: frame {:.3f} ms, CPU {:.3f} ms (scene {:.3f} / prepare {:.3f} / record {:.3f} / submit {:.3f}), GPU {}, prepass {}, scene passes {}, batches {}, submission {}, upload sync {}, visible {}/{}, draws {}, culled {}, triangles {}, grid tiles {} (accepted {}, culled {}, intersected {}), grid cache {} (work {}), instance cap {} ({:.2f} MiB), sphere LOD instances {}/{}/{}",
+    logger()->info("Exited cleanly. Last frame: frame {:.3f} ms, CPU {:.3f} ms (scene {:.3f} / prepare {:.3f} / record {:.3f} / submit {:.3f}), GPU {}, prepass {}, scene passes {}, batches {}, submission {}, upload sync {}, visible {}/{}, draws {}, culled {}, triangles scene/submitted {}/{}, grid tiles {} (accepted {}, culled {}, intersected {}), grid cache {} (work {}), instance cap {} ({:.2f} MiB), sphere LOD instances {}/{}/{}",
                    finalStats.frameDeltaMs, finalStats.cpuFrameMs,
                    finalStats.cpuSceneBuildMs, finalStats.cpuPrepareMs, finalStats.cpuCommandRecordMs, finalStats.cpuQueueSubmitMs,
                    finalGpu.data(),
                    finalStats.depthPrepassEnabled ? "on" : "off", finalStats.scenePassCount, finalStats.meshBatchCount,
                    finalStats.indirectSceneDraws ? "multi-draw-indirect" : "direct",
                    transferUploadSyncName(finalDevice.transferUploadSync), finalStats.visibleItemCount,
-                   finalStats.sceneItemCount, finalStats.drawCalls, finalStats.culledDrawCalls, finalStats.triangleCount,
+                   finalStats.sceneItemCount, finalStats.drawCalls, finalStats.culledDrawCalls, finalStats.sceneTriangleCount, finalStats.triangleCount,
                    finalStats.gridTileCount, finalStats.gridTilesAccepted, finalStats.gridTilesCulled, finalStats.gridTilesIntersected,
                    finalStats.gridVisibilityCacheHit ? "hit" : "miss", finalStats.gridVisibilityWorkItems,
                    finalStats.sceneInstanceCapacity, finalStats.sceneInstanceBufferMiB,

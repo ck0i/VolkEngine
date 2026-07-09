@@ -59,7 +59,7 @@ CPU bucket fields are mutually exclusive:
 
 GPU timing fields are valid only when `gpuTimestampsValid` is true. When the prepass is disabled by `Auto` or `--no-depth-prepass`, `gpuDepthPrepassMs` is reported as zero and HDR timing includes the depth-writing scene pass.
 
-Draw stats intentionally exclude ImGui draw lists. Scene draw counts include scene submissions plus the fullscreen tonemap draw.
+Draw stats intentionally exclude ImGui draw lists. Scene draw counts include scene submissions plus the fullscreen tonemap draw; `sceneTriangleCount` is visible scene geometry before pass multiplication, while `triangleCount` is submitted triangle work including depth/HDR scene passes and the fullscreen tonemap triangle.
 
 ## Benchmark switches
 

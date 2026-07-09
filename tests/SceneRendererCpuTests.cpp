@@ -105,6 +105,8 @@ int main() {
     ve::RenderStats renderStats{};
     renderStats.triangleCount = widerTriangleCount;
     expectEqual("RenderStats::triangleCount holds >uint32_t::max() without narrowing", renderStats.triangleCount, widerTriangleCount);
+    renderStats.sceneTriangleCount = widerTriangleCount;
+    expectEqual("RenderStats::sceneTriangleCount holds >uint32_t::max() without narrowing", renderStats.sceneTriangleCount, widerTriangleCount);
 
     expectEqual("requiredItemCount(4, 5)", DemoSceneRenderer::requiredItemCount(4U, 5U), static_cast<std::size_t>(4U * 5U + DemoSceneRenderer::kFixedItemCount));
     expectEqual("requiredItemCount(31, 66)", DemoSceneRenderer::requiredItemCount(31U, 66U), static_cast<std::size_t>(31U * 66U + DemoSceneRenderer::kFixedItemCount));

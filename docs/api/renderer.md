@@ -72,7 +72,8 @@ Submission/scene fields:
 - `drawCalls`
 - `culledDrawCalls`
 - `indirectSceneDraws`
-- `triangleCount`
+- `sceneTriangleCount`: visible scene geometry before multiplying by depth/HDR scene passes.
+- `triangleCount`: submitted triangle work, preserving scene-pass multiplication and the fullscreen tonemap triangle.
 
 Grid/LOD fields:
 
