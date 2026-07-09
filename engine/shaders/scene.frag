@@ -32,7 +32,7 @@ void main() {
         n = normalize(mat3(t, b, n) * tangentNormal);
     }
     vec3 v = normalize(scene.cameraPositionTime.xyz - vWorldPosition);
-    vec3 l = normalize(-scene.lightDirection.xyz);
+    vec3 l = -scene.lightDirection.xyz;
     vec3 h = normalize(v + l);
 
     vec3 albedo = max(vAlbedoRoughness.rgb, vec3(0.0));
