@@ -1,33 +1,58 @@
 # Renderer pipeline
 
-This page describes backend behavior. Public type contracts live in [Renderer API](../api/renderer.md), [Scene API](../api/scene.md), and [Frame graph API](../api/frame-graph.md).
+This page describes backend runtime behavior and the current Vulkan implementation split.
+Public type contracts remain in [Renderer API](../api/renderer.md), [Scene API](../api/scene.md), and [Frame graph API](../api/frame-graph.md).
 
-## Backend startup
+For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is backend integration and not required for normal app/game rendering flow.
 
-`VulkanRenderer` initializes:
+## Source-map / ownership (current source split)
 
-1. Vulkan instance and optional debug messenger.
-2. GLFW surface from `Window`.
-3. Physical-device suitability report and ranked adapter selection.
-4. Logical device and graphics/present/transfer queues.
-5. Command pools, swapchain, depth target, HDR target, descriptors, pipelines, frame resources, generated meshes, optional timestamp queries, and optional Dear ImGui backend.
+- `engine/renderer/vulkan/VulkanRenderer.hpp` — backend-specific public facade exposing `VulkanRenderer(Window&, EngineConfig)`, deleted copy/move, and methods:
+  `draw`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`.
+- `engine/renderer/vulkan/VulkanRenderer.cpp` — thin public wrapper that forwards every call to `VulkanRenderer::Impl`.
+- `engine/renderer/vulkan/VulkanRendererImpl.hpp` — private implementation state and detail helpers (`Impl`, shared structs, constants, utility helpers, frame-graph and frame data declarations).
+- `engine/renderer/vulkan/VulkanRenderer.Lifecycle.cpp` — startup/shutdown orchestration, constructor error rollback, `cleanupResources`, and swapchain-dependent setup/teardown entry points.
+- `engine/renderer/vulkan/VulkanRenderer.Device.cpp` — Vulkan instance and debug-utils setup, surface creation, physical/logical-device setup, queue-family selection, queue creation, allocator creation, command pool bootstrap, and debug-object-name/debug-label helper functions.
+- `engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp` — swapchain capability queries, format/present-mode/extents choice, swapchain/image-view creation, and swapchain resize/recreate lifecycle for depth/HDR attachments.
+- `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — per-frame resources (uniform and instance buffers, descriptor sets), mapped per-frame state, per-frame fences/semaphores, timestamp queries, and frame-graph construction metadata.
+- `engine/renderer/vulkan/VulkanRenderer.Resources.cpp` — long-lived GPU buffers/images, texture loading/sampling state, descriptor layouts/pools/sets, tonemap descriptor setup, and resource-registry metadata.
+- `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp` — generated geometry construction, geometry buffer uploads, and `GpuMesh` offset/count helpers.
+- `engine/renderer/vulkan/VulkanRenderer.Pipelines.cpp` — shader modules, pipeline layouts/pipelines, pipeline cache load/save/validation, and hot-reload path.
+- `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — image layout/access state helpers, image transition barriers, and sync-state bookkeeping for frame-graph usage.
+- `engine/renderer/vulkan/VulkanRenderer.Uploads.cpp` — staging uploads and transfer-queue vs same-queue synchronization (including one-shot upload fences/semaphores).
+- `engine/renderer/vulkan/VulkanRenderer.Visibility.cpp` — frustum extraction/culling, grid visibility acceleration, LOD bucketing, and draw-work planning.
+- `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — draw loop, command recording/submission/presentation, stats, pacing, and screenshot path integration.
+- `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp` — optional diagnostics overlay (`VOLKENGINE_ENABLE_IMGUI`) lifecycle and rendering.
+- `engine/renderer/vulkan/VulkanRenderer.Screenshot.cpp` — screenshot request/readback handling, swapchain readback copy, PPM publishing, and temp/backup file behavior.
+- `engine/renderer/vulkan/VmaUsage.cpp` — single translation unit containing `#define VMA_IMPLEMENTATION`.
 
-A device must satisfy the renderer contract: Vulkan 1.3, graphics/present/transfer queues, `VK_KHR_swapchain`, usable surface format/present mode, dynamic rendering, and synchronization2. Startup errors list rejected adapters and concrete reasons.
+`VulkanRenderer` startup is split across files but still follows this runtime sequence:
+
+1. Create the instance and optional debug messenger.
+2. Create the GLFW-backed surface, enumerate/rank physical devices, and select the adapter.
+3. Create the logical device, queues, VMA allocator, debug-utils function pointers, and command pools.
+4. Create the swapchain, image views, depth image, and HDR image.
+5. Create texture/sampler/descriptors, pipeline cache, pipelines, frame resources, generated meshes, tonemap descriptors, timestamp queries, and the startup frame graph.
+6. Create optional ImGui state, then log selected device capabilities and tracked resource totals.
+
+`VulkanRenderer` enforces the contract: Vulkan 1.3, graphics/present/transfer queues, `VK_KHR_swapchain`, usable surface formats/present modes, dynamic rendering, and synchronization2.
+Startup logs include rejected adapters and concrete rejection reasons.
 
 ## Frame loop
 
 Each frame executes the same high-level sequence:
 
 1. Wait for the current frame fence.
-2. Read the previous timestamp range for that frame slot when timestamps are enabled.
+2. Read the previous frame timestamp bucket when GPU timestamps are enabled.
 3. Acquire a swapchain image.
-4. Update mapped scene uniforms.
-5. Build the CPU visibility plan from `SceneRenderList`.
-6. Ensure the current frame's mapped instance storage can hold the visible compacted count.
-7. Build ImGui draw data when the overlay is enabled.
-8. Reset the frame command pool and record one primary command buffer.
-9. Submit once to the graphics queue.
-10. Present using the acquired image's present-wait semaphore.
+4. Build/reuse the demo `SceneRenderList`.
+5. Compute camera matrices and build the CPU visibility plan.
+6. Grow mapped per-frame instance storage if required, then update mapped scene uniforms.
+7. Reset the current frame command pool.
+8. Begin optional ImGui frame work when the overlay is enabled.
+9. Record one primary command buffer.
+10. Submit once to the graphics queue with the expected wait stages.
+11. Present using the acquired image’s wait semaphore and, when required, rebuild swapchain state.
 
 Normal rendering does not call `vkDeviceWaitIdle`.
 
@@ -52,36 +77,44 @@ flowchart LR
     ImGui --> Present[Present]
 ```
 
-The renderer uses Vulkan dynamic rendering, not render-pass/framebuffer objects. The swapchain format is UNORM with manual gamma in the tonemap shader to avoid sRGB double encoding.
+The renderer uses Vulkan dynamic rendering (`vkCmdBeginRendering` / `vkCmdEndRendering`) rather than render-pass/framebuffer objects.
+Swapchain images are preferred as UNORM for tone-map output to avoid automatic sRGB re-encoding.
 
 ## Scene submission
 
 - Generated meshes are packed into one shared vertex buffer and one shared index buffer.
-- `GpuMesh` records contain offsets and counts only.
-- `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounding sphere.
-- Visibility planning extracts frustum planes from the camera view-projection matrix, culls bounding spheres, applies optional material-grid tile acceleration, and counts visible work by mesh bucket.
+- `GpuMesh` records carry offset/count values only.
+- `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds.
+- Visibility planning extracts frustum planes from the camera view-projection matrix, culls bounding spheres, applies optional material-grid acceleration, and counts visible mesh work.
 - Command recording writes visible instances into mesh-contiguous ranges of the mapped per-frame storage buffer.
-- If `multiDrawIndirect`, `drawIndirectFirstInstance`, and `maxDrawIndirectCount` allow it, one `vkCmdDrawIndexedIndirect` submits all visible mesh batches per scene pass.
-- Otherwise the renderer falls back to direct `vkCmdDrawIndexed` per visible mesh batch.
+- If `multiDrawIndirect`, `drawIndirectFirstInstance`, and `maxDrawIndirectCount` allow it, one `vkCmdDrawIndexedIndirect` submits all visible mesh batches per pass.
+- Otherwise the renderer records direct `vkCmdDrawIndexed` per visible mesh batch.
 
 ## Swapchain and resize
 
 - `--vsync` selects FIFO.
 - `--no-vsync` prefers immediate, then mailbox, then FIFO.
-- Resize/minimize waits for a non-zero framebuffer extent and aborts if the window closes while minimized.
-- Swapchain recreation rebuilds image views, present semaphores, depth/HDR images, the tonemap descriptor, and ImGui swapchain state.
-- Graphics pipelines are reused when HDR, depth, and swapchain formats are unchanged.
+- Resize/minimize waits for a non-zero framebuffer extent and returns if the window closes while minimized.
+- Swapchain recreation rebuilds image views, per-image render-finished semaphores, depth/HDR images, and tonemap/ImGui state.
+- Pipelines are recreated when dependent formats change; otherwise existing pipelines are reused.
 
 ## Screenshot path
 
-`VulkanRenderer::requestScreenshot(path)` queues one screenshot request. The next `draw()` consumes it, records a copy from the final LDR swapchain image to a transient host-visible readback buffer, queues presentation first, waits for the submitted frame, maps the readback allocation, and writes binary PPM/P6 RGB.
+`VulkanRenderer::requestScreenshot(path)` queues one screenshot request.
+The next `draw()` consumes it, records an image-to-buffer transfer copy from the final swapchain image when supported, and waits on the submitting frame before writing disk.
 
-Screenshot output is complete-before-publish: bytes are written to a sibling temp file, checked, then moved into place with a backup/restore fallback for platforms that cannot replace an existing file directly.
+Output is complete-before-publish:
+
+- writes binary PPM (P6) via a temporary file,
+- renames into place atomically when possible,
+- falls back to backup/restore if target replacement is restricted by platform semantics.
+
+Unsupported format/usage combinations (no `TRANSFER_SRC` support or non-UNORM swapchain format) are reported and skipped safely.
 
 ## Debug and diagnostics
 
 - Debug-utils names are assigned to long-lived Vulkan objects when available.
 - Pass regions are labeled for RenderDoc/validation captures.
-- `RenderStats` exposes CPU timing buckets, GPU timing validity, draw/triangle counts, visibility counts, grid telemetry, LOD counts, instance capacity, and submission mode.
+- `RenderStats` exposes CPU timing buckets, optional GPU timing validity, draw/triangle counts, visibility and grid telemetry, LOD counts, instance capacity, and submission mode.
 - `RenderDeviceInfo` mirrors adapter, feature, and upload-sync decisions.
-- ImGui is optional; `--no-imgui` avoids overlay initialization and per-frame overlay work.
+- ImGui is optional; `--no-imgui` skips overlay initialization and overlay work.

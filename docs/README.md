@@ -5,7 +5,7 @@ Use this directory as a map, not a novel. The headers are the source of truth fo
 ## Start here
 
 - [Architecture](topics/architecture.md) — subsystem boundaries, ownership, and frame data flow.
-- [Renderer pipeline](topics/renderer-pipeline.md) — Vulkan backend behavior, frame loop, passes, resources, and screenshots.
+- [Renderer pipeline](topics/renderer-pipeline.md) — split backend notes for Vulkan startup, device/swapchain orchestration, frame flow, sync/upload paths, and screenshots.
 - [Performance model](topics/performance.md) — hot-path rules, metrics, benchmark switches, and next work.
 - [Shaders and assets](topics/shaders-assets.md) — shader build/copy flow, shader reload, texture loading, and pipeline cache.
 
@@ -13,7 +13,7 @@ Use this directory as a map, not a novel. The headers are the source of truth fo
 
 - [Core API](api/core.md) — `EngineConfig`, `RunOptions`, `Application`, timing, file IO, logging, math, camera.
 - [Platform API](api/platform.md) — `Window` lifecycle, events, input, surface creation, resize signaling.
-- [Renderer API](api/renderer.md) — `IRenderer`, `RenderDeviceInfo`, `RenderStats`, backend integration notes.
+- [Renderer API](api/renderer.md) — `IRenderer`, `RenderDeviceInfo`, `RenderStats`, and backend-facing `VulkanRenderer` notes.
 - [Scene API](api/scene.md) — `SceneRenderItem`, `SceneRenderList`, grid metadata, `DemoSceneRenderer`.
 - [Frame graph API](api/frame-graph.md) — fixed-capacity pass/resource metadata and validation rules.
 - [GPU resource registry API](api/resources.md) — diagnostic allocation accounting.

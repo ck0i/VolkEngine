@@ -2,7 +2,17 @@
 
 Header: `engine/renderer/GpuResourceRegistry.hpp`.
 
-`GpuResourceRegistry` is diagnostic accounting for long-lived renderer resources. It does not own GPU memory, Vulkan handles, or VMA allocations.
+`GpuResourceRegistry` is diagnostic accounting for long-lived renderer resources. It does not own GPU memory, Vulkan handles, or VMA allocations. Callers should treat returned IDs as opaque debug accounting handles, not resource ownership.
+
+Engine-side usage points (non-exhaustive):
+
+- `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — per-frame buffers and descriptor set resources.
+- `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp` — geometry buffers.
+- `engine/renderer/vulkan/VulkanRenderer.Resources.cpp` — texture image accounting and shared buffer/image unregister helpers.
+- `engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp` — imported swapchain images and swapchain-dependent image tracking.
+- `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — screenshot readback buffer accounting.
+
+Callers do not own registry entries; IDs are renderer-internal accounting handles.
 
 ## Capacity and names
 

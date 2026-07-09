@@ -44,7 +44,7 @@ ve::Application app{config};
 return app.run(ve::RunOptions{.maxFrames = 120});
 ```
 
-`Application` owns the main `Window`, `Camera`, `VulkanRenderer`, and `Clock`. It is the intended high-level entry point for the sandbox-style app loop.
+`Application` owns the main `Window`, `Camera`, concrete `VulkanRenderer` facade, and `Clock`. It is the intended high-level entry point for the sandbox-style app loop and calls only the public renderer operations; private split internals stay behind `VulkanRenderer::Impl`.
 
 ## `Camera`
 

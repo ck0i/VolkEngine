@@ -89,16 +89,27 @@ Draw counts exclude ImGui overlay draw lists.
 
 ## Advanced: `VulkanRenderer`
 
-Use this directly only when wiring the Vulkan backend.
+`VulkanRenderer` is the backend-specific Vulkan facade for engine integration only.
+It is a thin PIMPL wrapper that owns a private `VulkanRenderer::Impl` and forwards all renderer behavior to it.
 
-Public operations:
+Implementation map:
 
-- `VulkanRenderer(Window& window, EngineConfig config)` — creates the backend and all renderer-owned Vulkan resources.
-- `~VulkanRenderer()` — waits/tears down renderer resources and persists the pipeline cache during normal shutdown.
+The authoritative Vulkan file-role map lives in [Renderer pipeline](../topics/renderer-pipeline.md#source-map--ownership-current-source-split). API docs only depend on these boundaries:
+
+- `engine/renderer/vulkan/VulkanRenderer.hpp` — public facade declaration.
+- `engine/renderer/vulkan/VulkanRenderer.cpp` — forwarding wrapper.
+- `engine/renderer/vulkan/VulkanRendererImpl.hpp` — private implementation state and helper declarations.
+
+Current public operations:
+
+- `VulkanRenderer(Window& window, EngineConfig config)` — constructs backend state and initializes renderer-owned resources.
+- `~VulkanRenderer()` — destroys backend state via `Impl` teardown and persists pipeline-cache metadata during normal shutdown.
 - copy construction/assignment are deleted.
+- move construction/assignment are deleted.
 - `draw(...)` — implements `IRenderer`.
 - `stats()`, `deviceInfo()` — implement `IRenderer`.
 - `requestScreenshot(std::filesystem::path)` — queues one screenshot for the next `draw()`.
-- `waitIdle()` — explicit idle point for shutdown/test boundaries, not normal frame pacing.
+- `waitIdle()` — explicit idle synchronization point for shutdown/test boundaries, not for normal pacing.
 
-Do not depend on `VulkanRenderer` private structs or Vulkan handles from game-facing code. Those details are free to change as the backend grows.
+Game-facing code must stay at the `IRenderer` level and `RenderStats`/`RenderDeviceInfo` contracts.
+Do not rely on `VulkanRendererImpl.hpp`, private `Impl` members, or Vulkan handles from callers.

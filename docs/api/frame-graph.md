@@ -2,7 +2,12 @@
 
 Header: `engine/renderer/FrameGraph.hpp`.
 
-`FrameGraph` is currently a fixed-capacity metadata and validation layer. It describes pass/resource intent and catches simple ordering mistakes; it does not allocate transient resources or emit Vulkan barriers yet.
+`FrameGraph` is a backend-agnostic, fixed-capacity metadata and validation layer. It describes pass/resource intent and catches simple ordering mistakes; it does not allocate transient resources or emit Vulkan barriers.
+
+Backend integration points:
+
+- `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — contains startup graph construction; `VulkanRenderer::Impl` owns the graph state.
+- `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — translates graph intent into Vulkan image layout/stage/access barriers.
 
 ## Capacity
 
@@ -103,9 +108,9 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 
 ## Current renderer use
 
-The Vulkan backend builds a static graph at startup for either:
+The Vulkan backend builds one static graph at startup for either:
 
-- default path: HDR scene, tonemap/final, optional screenshot readback.
-- depth-prepass path: depth prepass, HDR scene, tonemap/final, optional screenshot readback.
+- default path: HDR scene, tonemap/final, screenshot-readback metadata.
+- depth-prepass path: depth prepass, HDR scene, tonemap/final, screenshot-readback metadata.
 
-The graph supplies pass names/debug colors and validates that expected depth/screenshot edges exist. Vulkan image barriers still live in the renderer.
+The `Screenshot Readback` pass/edge is always present so graph validation can prove the final swapchain image has a transfer-source path. The runtime image copy, fence wait, and PPM write are still conditional on `VulkanRenderer::requestScreenshot(path)`. Vulkan image barriers and transitions remain renderer responsibilities.
