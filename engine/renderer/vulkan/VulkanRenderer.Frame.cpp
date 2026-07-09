@@ -119,7 +119,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSecond
         }
         throw;
     }
-    markUploadWaitSemaphoresQueued(frame, pendingUploadWaitSemaphores_);
+    markUploadWaitSemaphoresQueued(frame);
     frame.submittedOnce = true;
     cpuEnd = std::chrono::steady_clock::now();
 

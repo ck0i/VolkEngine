@@ -1,12 +1,27 @@
 #include "core/Math.hpp"
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <string_view>
+#include <type_traits>
+#include <vector>
 
 namespace {
 
 int gFailureCount = 0;
+struct TestPendingUpload {
+    VkSemaphore signalSemaphore = VK_NULL_HANDLE;
+};
+
+template <typename Handle>
+Handle fakeHandle(const std::uintptr_t value) {
+    if constexpr (std::is_pointer_v<Handle>) {
+        return reinterpret_cast<Handle>(value);
+    } else {
+        return static_cast<Handle>(value);
+    }
+}
 
 void expectEqual(std::string_view context, const ve::vulkan_renderer_detail::FrustumSphereClassification actual, const ve::vulkan_renderer_detail::FrustumSphereClassification expected) {
     if (actual != expected) {
@@ -54,6 +69,19 @@ int main() {
                !ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{4097U, 2048U}, 4096U));
     expectTrue("texture extent rejects invalid zero device limit",
                !ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{1U, 1U}, 0U));
+
+    const VkSemaphore firstUploadSemaphore = fakeHandle<VkSemaphore>(1);
+    const VkSemaphore secondUploadSemaphore = fakeHandle<VkSemaphore>(2);
+    std::vector<TestPendingUpload> pendingUploads{{firstUploadSemaphore}, {VK_NULL_HANDLE}, {secondUploadSemaphore}};
+    std::vector<VkSemaphore> queuedSemaphores;
+    queuedSemaphores.reserve(2);
+    ve::vulkan_renderer_detail::queueReservedUploadWaitSemaphores(pendingUploads, queuedSemaphores);
+    expectTrue("upload queue transfers only non-null semaphores", queuedSemaphores.size() == 2U);
+    expectTrue("upload queue preserves semaphore order",
+               queuedSemaphores.size() == 2U && queuedSemaphores[0] == firstUploadSemaphore && queuedSemaphores[1] == secondUploadSemaphore);
+    expectTrue("upload queue clears transferred semaphores",
+               pendingUploads[0].signalSemaphore == VK_NULL_HANDLE && pendingUploads[1].signalSemaphore == VK_NULL_HANDLE &&
+                   pendingUploads[2].signalSemaphore == VK_NULL_HANDLE);
 
     if (gFailureCount == 0) {
         return 0;

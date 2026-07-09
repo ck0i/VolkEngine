@@ -157,17 +157,8 @@ void VulkanRenderer::Impl::collectPendingUploadWaitSemaphores(std::vector<VkSema
     }
 }
 
-void VulkanRenderer::Impl::markUploadWaitSemaphoresQueued(FrameResources& frame,
-                                                          const std::vector<VkSemaphore>& semaphores) noexcept {
-    for (const VkSemaphore semaphore : semaphores) {
-        frame.uploadWaitSemaphores.push_back(semaphore);
-        for (PendingUploadBatch& upload : pendingUploads_) {
-            if (upload.signalSemaphore == semaphore) {
-                upload.signalSemaphore = VK_NULL_HANDLE;
-                break;
-            }
-        }
-    }
+void VulkanRenderer::Impl::markUploadWaitSemaphoresQueued(FrameResources& frame) noexcept {
+    vulkan_renderer_detail::queueReservedUploadWaitSemaphores(pendingUploads_, frame.uploadWaitSemaphores);
 }
 
 bool VulkanRenderer::Impl::formatSupportsLinearMipBlit(const VkFormat format) const {

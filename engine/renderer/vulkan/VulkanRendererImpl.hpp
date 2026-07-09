@@ -342,6 +342,17 @@ inline std::uint32_t mipLevelCountForExtent(VkExtent2D extent) {
     return maxImageDimension2D > 0U && extent.width <= maxImageDimension2D && extent.height <= maxImageDimension2D;
 }
 
+template <typename PendingUploads>
+inline void queueReservedUploadWaitSemaphores(PendingUploads& pendingUploads, std::vector<VkSemaphore>& frameUploadWaitSemaphores) noexcept {
+    for (auto& upload : pendingUploads) {
+        if (upload.signalSemaphore == VK_NULL_HANDLE) {
+            continue;
+        }
+        frameUploadWaitSemaphores.push_back(upload.signalSemaphore);
+        upload.signalSemaphore = VK_NULL_HANDLE;
+    }
+}
+
 inline std::uint64_t imageByteEstimate(VkExtent2D extent, const VkFormat format, const std::uint32_t mipLevels = 1) {
     const std::uint32_t bytesPerPixel = bytesPerPixelEstimate(format);
     std::uint64_t total = 0;
@@ -690,7 +701,7 @@ private:
     void retirePendingUploadResources(PendingUploadBatch& upload);
     void destroyFrameUploadWaitSemaphores(FrameResources& frame);
     void collectPendingUploadWaitSemaphores(std::vector<VkSemaphore>& semaphores) const;
-    void markUploadWaitSemaphoresQueued(FrameResources& frame, const std::vector<VkSemaphore>& semaphores) noexcept;
+    void markUploadWaitSemaphoresQueued(FrameResources& frame) noexcept;
     [[nodiscard]] bool formatSupportsLinearMipBlit(VkFormat format) const;
     void generateMipmaps(VkCommandBuffer commandBuffer, ImageResource& image) const;
     [[nodiscard]] VkCommandBuffer beginUploadCommands() const;
