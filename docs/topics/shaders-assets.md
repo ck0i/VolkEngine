@@ -77,7 +77,7 @@ Current geometry path (`VulkanRenderer.Meshes.cpp`):
 
 - creates procedural cube/sphere/plane meshes in memory.
 - loads `assets/models/imported_showcase.obj` through `loadObjMesh()`.
-- supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, and generated normals when faces omit normals.
+- supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, generated normals when faces omit normals, and generated-normal fallback when explicit OBJ normals are degenerate.
 - computes `MeshData::bounds` from vertex positions and computes `Vertex::tangent` as `vec4(xyz, handedness)` for normal-map TBN shading; missing/degenerate UVs get deterministic fallback tangents.
 - packs per-instance normal matrices as three `vec4` columns so shaders transform normals with inverse-transpose data while tangents still use the model linear transform and `tangent.w * sign(det(model3x3))`.
 - converts CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes, while uploaded triangle-list indices are reordered for post-transform vertex-cache locality.

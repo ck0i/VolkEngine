@@ -593,6 +593,7 @@ MeshData loadObjMesh(const std::filesystem::path& path) {
     std::vector<Vec3> positions;
     std::vector<Vec2> texcoords;
     std::vector<Vec3> normals;
+    std::vector<std::uint8_t> validNormals;
     MeshData mesh{};
     std::vector<Vec3> generatedNormalSums;
     std::vector<std::uint8_t> hasExplicitNormal;
@@ -612,6 +613,7 @@ MeshData loadObjMesh(const std::filesystem::path& path) {
     positions.reserve(recordCounts.positions);
     texcoords.reserve(recordCounts.texcoords);
     normals.reserve(recordCounts.normals);
+    validNormals.reserve(recordCounts.normals);
     mesh.vertices.reserve(estimatedUniqueVertices);
     mesh.indices.reserve(recordCounts.triangleIndices);
     generatedNormalSums.reserve(estimatedUniqueVertices);
@@ -620,7 +622,10 @@ MeshData loadObjMesh(const std::filesystem::path& path) {
     const auto appendVertex = [&](const ObjFaceVertex& faceVertex, const std::uint64_t line) {
         const std::uint32_t position = resolveObjIndex(path, line, faceVertex.position, positions.size(), "position");
         const std::uint32_t texcoord = resolveOptionalObjIndex(path, line, faceVertex.texcoord, texcoords.size(), "texcoord");
-        const std::uint32_t normal = resolveOptionalObjIndex(path, line, faceVertex.normal, normals.size(), "normal");
+        std::uint32_t normal = resolveOptionalObjIndex(path, line, faceVertex.normal, normals.size(), "normal");
+        if (normal != kMissingObjIndex && validNormals[normal] == 0U) {
+            normal = kMissingObjIndex;
+        }
         const ObjVertexKey key{position, texcoord, normal};
         if (const auto found = vertexLookup.find(key); found != vertexLookup.end()) {
             return found->second;
@@ -676,6 +681,7 @@ MeshData loadObjMesh(const std::filesystem::path& path) {
         } else if (keyword == "vn") {
             appendObjVector(normals, fields, path, lineNumber, "normal");
             normals.back() = normalizeOr(normals.back(), {});
+            validNormals.push_back(isNearlyZero(normals.back()) ? 0U : 1U);
         } else if (keyword == "f") {
             faceIndices.clear();
             while (true) {

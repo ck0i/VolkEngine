@@ -415,6 +415,29 @@ int main() {
     }
 
     {
+        const auto fixture = addFixture("geometry_cpu_degenerate_explicit_normal",
+                                       "# zero explicit normal should fall back to generated face normals\n"
+                                       "v 0 0 0\n"
+                                       "v 1 0 0\n"
+                                       "v 0 1 0\n"
+                                       "vn 0 0 0\n"
+                                       "f 1//1 2//1 3//1\n");
+        ve::MeshData mesh;
+        expectNoThrow("loadObjMesh treats degenerate explicit OBJ normals as missing", [&] {
+            mesh = ve::loadObjMesh(fixture);
+        });
+        expectEqual("degenerate explicit normal mesh has one triangle", mesh.indices.size(), static_cast<std::size_t>(3));
+        expectEqual("degenerate explicit normal mesh has 3 unique vertices", mesh.vertices.size(), static_cast<std::size_t>(3));
+        if (mesh.indices.size() == 3U && mesh.vertices.size() == 3U) {
+            for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+                expectVec3Nearly("degenerate explicit normal generated vertex normal", mesh.vertices.at(i).normal, {0.0f, 0.0f, 1.0f});
+                expectNearly("degenerate explicit normal is unit length", ve::length(mesh.vertices.at(i).normal), 1.0f, 1.0e-6f);
+                expectTangentBasisContract("degenerate explicit normal tangent basis", mesh.vertices.at(i).tangent, mesh.vertices.at(i).normal);
+            }
+        }
+    }
+
+    {
         const auto fixture = addFixture("geometry_cpu_degenerate_fan",
                                        "# first fan triangle is collinear and should not reach the index buffer\n"
                                        "v 0 0 0\n"
