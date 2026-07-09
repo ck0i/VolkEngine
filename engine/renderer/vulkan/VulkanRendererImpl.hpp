@@ -338,6 +338,10 @@ inline std::uint32_t mipLevelCountForExtent(VkExtent2D extent) {
     return levels;
 }
 
+[[nodiscard]] inline bool textureExtentFitsDeviceLimit(const VkExtent2D extent, const std::uint32_t maxImageDimension2D) noexcept {
+    return maxImageDimension2D > 0U && extent.width <= maxImageDimension2D && extent.height <= maxImageDimension2D;
+}
+
 inline std::uint64_t imageByteEstimate(VkExtent2D extent, const VkFormat format, const std::uint32_t mipLevels = 1) {
     const std::uint32_t bytesPerPixel = bytesPerPixelEstimate(format);
     std::uint64_t total = 0;

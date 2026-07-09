@@ -15,6 +15,13 @@ void expectEqual(std::string_view context, const ve::vulkan_renderer_detail::Fru
     }
 }
 
+void expectTrue(std::string_view context, const bool value) {
+    if (!value) {
+        std::cerr << "[FAILED] " << context << '\n';
+        ++gFailureCount;
+    }
+}
+
 void expectVisible(std::string_view context, const ve::vulkan_renderer_detail::Frustum& frustum, const ve::Vec3 center, const float radius) {
     const auto classification = ve::vulkan_renderer_detail::classifySphereAgainstFrustum(frustum, center, radius);
     if (classification == ve::vulkan_renderer_detail::FrustumSphereClassification::Outside) {
@@ -40,6 +47,13 @@ int main() {
     expectEqual("reverse-Z frustum rejects beyond far plane",
                 ve::vulkan_renderer_detail::classifySphereAgainstFrustum(frustum, {0.0f, 0.0f, -kFar * 1.01f}, 0.001f),
                 ve::vulkan_renderer_detail::FrustumSphereClassification::Outside);
+
+    expectTrue("texture extent accepts equal device limit",
+               ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{4096U, 2048U}, 4096U));
+    expectTrue("texture extent rejects width above device limit",
+               !ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{4097U, 2048U}, 4096U));
+    expectTrue("texture extent rejects invalid zero device limit",
+               !ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{1U, 1U}, 0U));
 
     if (gFailureCount == 0) {
         return 0;

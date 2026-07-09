@@ -98,6 +98,11 @@ void VulkanRenderer::Impl::createTextureResources() {
         for (TextureUpload& upload : uploads) {
             LoadedImageRgba8 baseLevel = loadImageRgba8(upload.path);
             const VkExtent2D textureExtent{baseLevel.width, baseLevel.height};
+            if (!vulkan_renderer_detail::textureExtentFitsDeviceLimit(textureExtent, deviceInfo_.maxImageDimension2D)) {
+                throw std::runtime_error("Texture " + upload.path.string() + " is " + std::to_string(textureExtent.width) + "x" +
+                                         std::to_string(textureExtent.height) + ", exceeding device maxImageDimension2D " +
+                                         std::to_string(deviceInfo_.maxImageDimension2D));
+            }
             upload.baseWidth = baseLevel.width;
             upload.baseHeight = baseLevel.height;
             const std::uint32_t requestedMipLevels = mipLevelCountForExtent(textureExtent);
