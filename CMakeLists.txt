@@ -100,7 +100,20 @@ add_library(VolkEngine STATIC
     engine/renderer/Geometry.cpp
     engine/renderer/ImageLoader.cpp
     engine/renderer/vulkan/VmaUsage.cpp
-    engine/renderer/vulkan/VulkanRenderer.cpp)
+    engine/renderer/vulkan/VulkanRenderer.cpp
+    engine/renderer/vulkan/VulkanRenderer.Device.cpp
+    engine/renderer/vulkan/VulkanRenderer.Frame.cpp
+    engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp
+    engine/renderer/vulkan/VulkanRenderer.ImGui.cpp
+    engine/renderer/vulkan/VulkanRenderer.Lifecycle.cpp
+    engine/renderer/vulkan/VulkanRenderer.Meshes.cpp
+    engine/renderer/vulkan/VulkanRenderer.Pipelines.cpp
+    engine/renderer/vulkan/VulkanRenderer.Resources.cpp
+    engine/renderer/vulkan/VulkanRenderer.Screenshot.cpp
+    engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp
+    engine/renderer/vulkan/VulkanRenderer.Sync.cpp
+    engine/renderer/vulkan/VulkanRenderer.Uploads.cpp
+    engine/renderer/vulkan/VulkanRenderer.Visibility.cpp)
 
 if(MSVC)
     set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp PROPERTIES COMPILE_OPTIONS /w)
