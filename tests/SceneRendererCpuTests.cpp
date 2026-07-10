@@ -166,6 +166,27 @@ int main() {
     expectEqual("build(4, 5) imported model appended", static_cast<int>(first[firstImportedItemIndex].mesh), static_cast<int>(ve::SceneMeshId::ImportedModel));
     expectVec3Nearly("build(4, 5) imported model transformed center", first[firstImportedItemIndex].boundsCenter, importedModelCenter);
     expectNearly("build(4, 5) imported model transformed radius", first[firstImportedItemIndex].boundsRadius, importedModelRadius);
+
+    const auto importedItemCenterBeforeInvalidBounds = first[firstImportedItemIndex].boundsCenter;
+    const float importedItemRadiusBeforeInvalidBounds = first[firstImportedItemIndex].boundsRadius;
+    renderer.setImportedModelBounds({{std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f}, 1.0f, true});
+    const auto& afterInvalidCenter = renderer.build(0.125, 4U, 5U);
+    expectVec3Nearly("invalid imported bounds center is ignored", afterInvalidCenter[firstImportedItemIndex].boundsCenter,
+                     importedItemCenterBeforeInvalidBounds);
+    expectNearly("invalid imported bounds center preserves radius", afterInvalidCenter[firstImportedItemIndex].boundsRadius,
+                 importedItemRadiusBeforeInvalidBounds);
+    renderer.setImportedModelBounds({{}, -1.0f, true});
+    const auto& afterNegativeRadius = renderer.build(0.125, 4U, 5U);
+    expectNearly("negative imported bounds radius is ignored", afterNegativeRadius[firstImportedItemIndex].boundsRadius,
+                 importedItemRadiusBeforeInvalidBounds);
+    renderer.setImportedModelBounds({{}, std::numeric_limits<float>::quiet_NaN(), true});
+    const auto& afterNaNRadius = renderer.build(0.125, 4U, 5U);
+    expectNearly("NaN imported bounds radius is ignored", afterNaNRadius[firstImportedItemIndex].boundsRadius,
+                 importedItemRadiusBeforeInvalidBounds);
+    renderer.setImportedModelBounds({{}, std::numeric_limits<float>::infinity(), true});
+    const auto& afterInfiniteRadius = renderer.build(0.125, 4U, 5U);
+    expectNearly("infinite imported bounds radius is ignored", afterInfiniteRadius[firstImportedItemIndex].boundsRadius,
+                 importedItemRadiusBeforeInvalidBounds);
     constexpr std::uint32_t largeRows = 65535U;
     constexpr std::uint32_t largeColumns = 65535U;
     constexpr std::uint64_t largeExpected = static_cast<std::uint64_t>(largeRows) * static_cast<std::uint64_t>(largeColumns)

@@ -12,6 +12,10 @@ namespace {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
+[[nodiscard]] bool validMeshBounds(const MeshBounds& bounds) noexcept {
+    return bounds.valid && bounds.radius >= 0.0f && std::isfinite(bounds.radius) && finiteVec3(bounds.center);
+}
+
 [[nodiscard]] bool finiteMatrix(const Mat4& matrix) noexcept {
     for (const float value : matrix.m) {
         if (!std::isfinite(value)) {
@@ -212,7 +216,7 @@ void DemoSceneRenderer::validateMaterialGridDimensions(const std::uint32_t mater
 }
 
 void DemoSceneRenderer::setImportedModelBounds(const MeshBounds& bounds) noexcept {
-    if (!bounds.valid) {
+    if (!validMeshBounds(bounds)) {
         return;
     }
     importedModelLocalBounds_ = bounds;
