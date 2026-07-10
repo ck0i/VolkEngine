@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -17,6 +18,17 @@ void expectTrue(const std::string_view context, const bool value) {
         std::cerr << "[FAILED] " << context << '\n';
         ++gFailureCount;
     }
+}
+
+template <typename Function>
+void expectInvalidArgument(const std::string_view context, Function&& function) {
+    bool threw = false;
+    try {
+        function();
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    expectTrue(context, threw);
 }
 
 void expectNearly(const std::string_view context, const float actual, const float expected, const float epsilon = 1.0e-5f) {
@@ -431,6 +443,50 @@ int main() {
                      reusedAddress[0].model.m[12],
                      100.0f);
         std::destroy_at(secondLifetime);
+    }
+
+    {
+        ve::World hierarchy;
+        const ve::World::Entity otherRoot = hierarchy.createEntity();
+        const ve::World::Entity root = hierarchy.createEntity();
+        const ve::World::Entity middle = hierarchy.createEntity();
+        const ve::World::Entity child = hierarchy.createEntity();
+        ve::setWorldSceneParent(hierarchy, root, otherRoot);
+        ve::setWorldSceneParent(hierarchy, middle, root);
+        ve::setWorldSceneParent(hierarchy, child, middle);
+        expectTrue("safe parenting creates parent component",
+                   hierarchy.tryGet<ve::WorldSceneParent>(child)->parent == middle);
+
+        expectInvalidArgument("safe parenting rejects descendant cycle",
+                              [&] { ve::setWorldSceneParent(hierarchy, root, child); });
+        expectTrue("rejected cycle preserves existing parent",
+                   hierarchy.tryGet<ve::WorldSceneParent>(root)->parent == otherRoot);
+        expectInvalidArgument("safe parenting rejects self parent",
+                              [&] { ve::setWorldSceneParent(hierarchy, child, child); });
+
+        ve::setWorldSceneParent(hierarchy, child, otherRoot);
+        expectTrue("safe parenting updates existing parent without duplicate insertion",
+                   hierarchy.tryGet<ve::WorldSceneParent>(child)->parent == otherRoot &&
+                       hierarchy.componentCount<ve::WorldSceneParent>() == 3U);
+
+        const ve::World::Entity malformedA = hierarchy.createEntity();
+        const ve::World::Entity malformedB = hierarchy.createEntity();
+        hierarchy.emplace<ve::WorldSceneParent>(malformedA, ve::WorldSceneParent{malformedB});
+        hierarchy.emplace<ve::WorldSceneParent>(malformedB, ve::WorldSceneParent{malformedA});
+        expectInvalidArgument("safe parenting rejects malformed cyclic ancestor chain",
+                              [&] { ve::setWorldSceneParent(hierarchy, child, malformedA); });
+        expectTrue("malformed ancestor rejection preserves prior parent",
+                   hierarchy.tryGet<ve::WorldSceneParent>(child)->parent == otherRoot);
+
+        const ve::World::Entity dead = hierarchy.createEntity();
+        expectTrue("safe parenting test destroys endpoint", hierarchy.destroyEntity(dead));
+        expectInvalidArgument("safe parenting rejects dead parent",
+                              [&] { ve::setWorldSceneParent(hierarchy, child, dead); });
+        expectInvalidArgument("safe parenting rejects dead child",
+                              [&] { ve::setWorldSceneParent(hierarchy, dead, otherRoot); });
+        expectTrue("clear parent removes existing relationship", ve::clearWorldSceneParent(hierarchy, child));
+        expectTrue("clear parent reports missing relationship", !ve::clearWorldSceneParent(hierarchy, child));
+        expectTrue("clear parent reports dead child", !ve::clearWorldSceneParent(hierarchy, dead));
     }
 
     if (gFailureCount == 0) {

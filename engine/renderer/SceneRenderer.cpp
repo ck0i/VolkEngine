@@ -16,7 +16,6 @@ namespace {
     return bounds.valid && bounds.radius >= 0.0f && std::isfinite(bounds.radius) && finiteVec3(bounds.center);
 }
 
-
 [[nodiscard]] Vec3 transformPoint(const Mat4& matrix, const Vec3 point) noexcept {
     return {matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
             matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
@@ -35,6 +34,11 @@ namespace {
     return std::all_of(matrix.m.begin(), matrix.m.end(), [](const float value) {
         return std::isfinite(value);
     });
+}
+
+[[nodiscard]] World::Entity nextHierarchyParent(const World& world, const World::Entity entity) noexcept {
+    const WorldSceneParent* link = world.tryGet<WorldSceneParent>(entity);
+    return link != nullptr && world.alive(link->parent) ? link->parent : World::Entity{};
 }
 
 } // namespace
@@ -146,6 +150,40 @@ bool SceneRenderList::indexInMaterialGridRange(const std::size_t index) const no
     }
     const std::size_t gridItemCount = rowCount * columnCount;
     return index - materialGridRange_.firstItem < gridItemCount;
+}
+
+void setWorldSceneParent(World& world, const World::Entity child, const World::Entity parent) {
+    if (!world.alive(child) || !world.alive(parent)) {
+        throw std::invalid_argument("Scene hierarchy endpoints must be live entities");
+    }
+    if (child == parent) {
+        throw std::invalid_argument("Scene entity cannot parent itself");
+    }
+
+    World::Entity ancestor = parent;
+    World::Entity slow = parent;
+    World::Entity fast = parent;
+    while (world.alive(ancestor)) {
+        if (ancestor == child) {
+            throw std::invalid_argument("Scene parent would create a hierarchy cycle");
+        }
+        ancestor = nextHierarchyParent(world, ancestor);
+        slow = nextHierarchyParent(world, slow);
+        fast = nextHierarchyParent(world, nextHierarchyParent(world, fast));
+        if (slow.valid() && slow == fast) {
+            throw std::invalid_argument("Scene parent chain already contains a hierarchy cycle");
+        }
+    }
+
+    if (WorldSceneParent* existing = world.tryGet<WorldSceneParent>(child); existing != nullptr) {
+        existing->parent = parent;
+    } else {
+        world.emplace<WorldSceneParent>(child, WorldSceneParent{parent});
+    }
+}
+
+bool clearWorldSceneParent(World& world, const World::Entity child) {
+    return world.remove<WorldSceneParent>(child);
 }
 
 void WorldSceneExtractor::ensureWorld(const World& world) {

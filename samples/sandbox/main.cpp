@@ -97,7 +97,7 @@ void populateWorldScene(ve::World& world) {
     const ve::World::Entity cube = world.createEntity();
     auto& transform = world.emplace<ve::WorldSceneTransform>(cube);
     transform.current = ve::TransformTRS{{0.85f, 0.0f, 0.0f}, {}, {0.75f, 0.75f, 0.75f}};
-    world.emplace<ve::WorldSceneParent>(cube, pivot);
+    ve::setWorldSceneParent(world, cube, pivot);
 
     auto& renderable = world.emplace<ve::WorldSceneRenderable>(cube);
     renderable.mesh = ve::SceneMeshId::Cube;

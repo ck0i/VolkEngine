@@ -126,6 +126,9 @@ struct WorldSceneParent {
     World::Entity parent{};
 };
 
+void setWorldSceneParent(World& world, World::Entity child, World::Entity parent);
+[[nodiscard]] bool clearWorldSceneParent(World& world, World::Entity child);
+
 struct WorldSceneRenderable {
     SceneMeshId mesh = SceneMeshId::Cube;
     RenderMaterial material{};
