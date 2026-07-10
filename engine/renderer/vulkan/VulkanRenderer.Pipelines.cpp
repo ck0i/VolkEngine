@@ -103,17 +103,7 @@ void VulkanRenderer::Impl::createPipelineCache() {
     VkPipelineCacheCreateInfo cacheInfo{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     cacheInfo.initialDataSize = initialData.size();
     cacheInfo.pInitialData = initialData.empty() ? nullptr : initialData.data();
-    VkPipelineCache cache = VK_NULL_HANDLE;
-    VkResult result = vkCreatePipelineCache(device_, &cacheInfo, nullptr, &cache);
-    if (result == VK_ERROR_INITIALIZATION_FAILED && !initialData.empty()) {
-        logger()->warn("Vulkan pipeline cache creation with persisted data failed; retrying with an empty cache");
-        cache = VK_NULL_HANDLE;
-        cacheInfo.initialDataSize = 0;
-        cacheInfo.pInitialData = nullptr;
-        result = vkCreatePipelineCache(device_, &cacheInfo, nullptr, &cache);
-    }
-    checkVk(result, "vkCreatePipelineCache");
-    pipelineCache_ = cache;
+    checkVk(vkCreatePipelineCache(device_, &cacheInfo, nullptr, &pipelineCache_), "vkCreatePipelineCache");
     setObjectName(VK_OBJECT_TYPE_PIPELINE_CACHE, handleToUint64(pipelineCache_), "Renderer Pipeline Cache");
 }
 

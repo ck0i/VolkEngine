@@ -60,7 +60,6 @@ The depth prepass uses `scene_depth.vert`, which keeps the same model/view-proje
 - Saves to a unique temp sibling first.
 - Publishes only after a complete cache payload is read back and validated.
 - Avoids truncating a prior cache on failed writes.
-- If the driver rejects persisted data during cache creation with `VK_ERROR_INITIALIZATION_FAILED`, the backend retries once with an empty cache and repopulates the file on clean shutdown; other creation errors still fail startup.
 
 ## Assets
 
