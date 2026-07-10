@@ -46,6 +46,12 @@ int main() {
                ve::resolveAssetPath(assetRoot, defaults.groundAlbedoTexture) == assetRoot / "textures/ground_albedo.png");
     expectTrue("relative model path resolves under asset directory",
                ve::resolveAssetPath(assetRoot, defaults.importedModelPath) == assetRoot / "models/imported_showcase.obj");
+    expectTrue("normalized relative asset path remains under asset directory",
+               ve::resolveAssetPath(assetRoot, "textures/../ground.png") == assetRoot / "ground.png");
+    expectTrue("relative asset traversal escaping root is rejected",
+               ve::resolveAssetPath(assetRoot, "../outside.png").empty());
+    expectTrue("multi-level relative asset traversal is rejected",
+               ve::resolveAssetPath(assetRoot, "../../outside.png").empty());
     const std::filesystem::path absoluteOverride = "/opt/materials/albedo.png";
     expectTrue("absolute asset paths bypass asset directory",
                ve::resolveAssetPath(assetRoot, absoluteOverride) == absoluteOverride);

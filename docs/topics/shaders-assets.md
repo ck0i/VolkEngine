@@ -65,7 +65,7 @@ The depth prepass uses `scene_depth.vert`, which keeps the same model/view-proje
 
 Runtime assets are copied from `assets/` to `EngineConfig::assetDirectory`.
 
-Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNormalTexture`, and `groundOrmTexture`) resolve relative to `EngineConfig::assetDirectory`; absolute paths are accepted as direct overrides:
+Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNormalTexture`, and `groundOrmTexture`) resolve relative to `EngineConfig::assetDirectory`; relative paths are normalized and rejected when they escape the asset root, while absolute paths remain accepted as direct overrides:
 
 - defaults load `textures/ground_albedo.png`, `textures/ground_normal.png`, and `textures/ground_orm.png` through `loadImageRgba8()`.
 - startup validates that each configured role path is non-empty and names a regular file before allocating upload resources.
@@ -82,7 +82,7 @@ Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNor
 Current geometry path (`VulkanRenderer.Meshes.cpp`):
 - creates procedural cube/sphere/plane meshes in memory.
 
-- resolves `EngineConfig::importedModelPath` relative to `EngineConfig::assetDirectory` (absolute overrides are accepted).
+- resolves `EngineConfig::importedModelPath` relative to `EngineConfig::assetDirectory`, normalizes it, and rejects relative paths that escape the asset root; absolute overrides are accepted.
 - validates the resolved model path is a regular file before mesh allocation, then loads it through `loadObjMesh()`.
 - supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, generated normals when faces omit normals, and generated-normal fallback when explicit OBJ normals are degenerate.
 - computes `MeshData::bounds` from vertex positions and computes `Vertex::tangent` as `vec4(xyz, handedness)` for normal-map TBN shading; missing/degenerate UVs get deterministic fallback tangents.

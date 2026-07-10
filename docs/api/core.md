@@ -21,8 +21,8 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `materialGridTileRows`, `materialGridTileColumns` | `16`, `16` | Demo grid tile dimensions for culling acceleration. |
 | `depthPrepassMode` | `DepthPrepassMode::Auto` | Adaptive prepass selection by visible scene complexity; `ForceOn` and `ForceOff` are deterministic overrides. |
 | `shaderDirectory`, `assetDirectory`, `cacheDirectory` | CMake-defined build paths | Runtime shader, asset, and pipeline-cache locations. |
-| `groundAlbedoTexture`, `groundNormalTexture`, `groundOrmTexture` | `textures/ground_{albedo,normal,orm}.png` relative to `assetDirectory` | Role-specific ground material inputs. Relative paths resolve under `assetDirectory`; absolute paths bypass it. Empty or non-regular files are rejected before texture upload. |
-| `importedModelPath` | `models/imported_showcase.obj` relative to `assetDirectory` | Wavefront OBJ imported as the `SceneMeshId::ImportedModel` batch. Relative paths resolve under `assetDirectory`; absolute paths bypass it. Empty or non-regular files are rejected before mesh upload. |
+| `groundAlbedoTexture`, `groundNormalTexture`, `groundOrmTexture` | `textures/ground_{albedo,normal,orm}.png` relative to `assetDirectory` | Role-specific ground material inputs. Relative paths are normalized and must remain inside `assetDirectory`; escaping paths resolve to empty and are rejected before texture upload. Absolute paths bypass the asset directory. |
+| `importedModelPath` | `models/imported_showcase.obj` relative to `assetDirectory` | Wavefront OBJ imported as the `SceneMeshId::ImportedModel` batch. Relative paths are normalized and must remain inside `assetDirectory`; escaping paths resolve to empty and are rejected before mesh upload. Absolute paths bypass the asset directory. |
 
 `isValidExposure(float)` is the shared helper for sandbox CLI parsing and programmatic config checks.
 
