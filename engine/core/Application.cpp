@@ -27,7 +27,7 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
 Application::Application(EngineConfig config)
     : config_(std::move(config)), window_(config_), camera_{}, renderer_(window_, config_), sceneRenderer_{}, clock_{} {
     const VkExtent2D extent = window_.framebufferExtent();
-    if (extent.height > 0) {
+    if (extent.width > 0U && extent.height > 0U) {
         camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
     }
     sceneRenderer_.setImportedModelBounds(renderer_.meshBounds(SceneMeshId::ImportedModel));
@@ -51,7 +51,7 @@ int Application::run(const RunOptions& options) {
         const double simulationDelta = clampDeltaSeconds(timing.deltaSeconds, 0.05);
         window_.updateCamera(camera_, static_cast<float>(simulationDelta));
         const VkExtent2D extent = window_.framebufferExtent();
-        if (extent.height > 0) {
+        if (extent.width > 0U && extent.height > 0U) {
             camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
         }
 
