@@ -12,6 +12,8 @@ namespace ve {
 struct ScenePersistenceLimits {
   std::size_t maxEntities = 1'000'000U;
   std::size_t maxBytes = 256U * 1024U * 1024U;
+  std::size_t maxNameBytes = 255U;
+  std::size_t maxTotalNameBytes = 16U * 1024U * 1024U;
 };
 
 [[nodiscard]] std::vector<std::byte>

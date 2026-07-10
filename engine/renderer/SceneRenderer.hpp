@@ -4,9 +4,12 @@
 #include "core/World.hpp"
 #include "renderer/Geometry.hpp"
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace ve {
@@ -111,6 +114,27 @@ private:
     std::uint64_t materialGridTileRevision_ = 0;
     std::vector<SceneGridTile> materialGridTiles_{};
 };
+
+struct SceneEntityId {
+    std::uint64_t high = 0U;
+    std::uint64_t low = 0U;
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return high != 0U || low != 0U;
+    }
+
+    constexpr auto operator<=>(const SceneEntityId&) const noexcept = default;
+};
+
+struct WorldSceneIdentity {
+    SceneEntityId id{};
+    std::string name{};
+};
+
+[[nodiscard]] bool validWorldSceneName(std::string_view name) noexcept;
+void setWorldSceneIdentity(World& world, World::Entity entity, SceneEntityId id, std::string_view name = {});
+[[nodiscard]] bool clearWorldSceneIdentity(World& world, World::Entity entity);
+[[nodiscard]] World::Entity findWorldSceneEntity(const World& world, SceneEntityId id);
 
 struct WorldSceneTransform {
     TransformTRS current{};

@@ -217,6 +217,7 @@ add_test(NAME WorldSceneCpu
 add_executable(VolkEngineScenePersistenceCpuTest
     tests/ScenePersistenceCpuTests.cpp
     engine/core/FileSystem.cpp
+    engine/renderer/SceneRenderer.cpp
     engine/scene/ScenePersistence.cpp)
 target_include_directories(VolkEngineScenePersistenceCpuTest
     PRIVATE

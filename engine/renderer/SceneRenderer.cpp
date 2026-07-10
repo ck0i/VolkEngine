@@ -41,7 +41,165 @@ namespace {
     return link != nullptr && world.alive(link->parent) ? link->parent : World::Entity{};
 }
 
+[[nodiscard]] bool utf8Continuation(const unsigned char byte) noexcept {
+    return (byte & 0xC0U) == 0x80U;
+}
+
+[[nodiscard]] bool validUtf8(std::string_view value) noexcept {
+    for (std::size_t index = 0U; index < value.size();) {
+        const unsigned char first = static_cast<unsigned char>(value[index]);
+        if (first == 0U) {
+            return false;
+        }
+        if (first <= 0x7FU) {
+            ++index;
+            continue;
+        }
+        if (first >= 0xC2U && first <= 0xDFU) {
+            if (index + 1U >= value.size() || !utf8Continuation(static_cast<unsigned char>(value[index + 1U]))) {
+                return false;
+            }
+            index += 2U;
+            continue;
+        }
+        if (first == 0xE0U) {
+            if (index + 2U >= value.size()) {
+                return false;
+            }
+            const unsigned char second = static_cast<unsigned char>(value[index + 1U]);
+            if (second < 0xA0U || second > 0xBFU ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 2U]))) {
+                return false;
+            }
+            index += 3U;
+            continue;
+        }
+        if ((first >= 0xE1U && first <= 0xECU) || (first >= 0xEEU && first <= 0xEFU)) {
+            if (index + 2U >= value.size() ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 1U])) ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 2U]))) {
+                return false;
+            }
+            index += 3U;
+            continue;
+        }
+        if (first == 0xEDU) {
+            if (index + 2U >= value.size()) {
+                return false;
+            }
+            const unsigned char second = static_cast<unsigned char>(value[index + 1U]);
+            if (second < 0x80U || second > 0x9FU ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 2U]))) {
+                return false;
+            }
+            index += 3U;
+            continue;
+        }
+        if (first == 0xF0U) {
+            if (index + 3U >= value.size()) {
+                return false;
+            }
+            const unsigned char second = static_cast<unsigned char>(value[index + 1U]);
+            if (second < 0x90U || second > 0xBFU ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 2U])) ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 3U]))) {
+                return false;
+            }
+            index += 4U;
+            continue;
+        }
+        if (first >= 0xF1U && first <= 0xF3U) {
+            if (index + 3U >= value.size() ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 1U])) ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 2U])) ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 3U]))) {
+                return false;
+            }
+            index += 4U;
+            continue;
+        }
+        if (first == 0xF4U) {
+            if (index + 3U >= value.size()) {
+                return false;
+            }
+            const unsigned char second = static_cast<unsigned char>(value[index + 1U]);
+            if (second < 0x80U || second > 0x8FU ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 2U])) ||
+                !utf8Continuation(static_cast<unsigned char>(value[index + 3U]))) {
+                return false;
+            }
+            index += 4U;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+void validateWorldSceneIdentity(const World& world, const World::Entity entity, const SceneEntityId id) {
+    if (!world.alive(entity)) {
+        throw std::invalid_argument("Scene identity entity must be live");
+    }
+    if (!id.valid()) {
+        throw std::invalid_argument("Scene identity must be nonzero");
+    }
+
+    bool duplicate = false;
+    world.each<WorldSceneIdentity>([&](const World::Entity candidate, const WorldSceneIdentity& identity) {
+        if (candidate != entity && identity.id == id) {
+            duplicate = true;
+        }
+    });
+    if (duplicate) {
+        throw std::invalid_argument("Scene identity is already assigned");
+    }
+}
+
 } // namespace
+
+bool validWorldSceneName(const std::string_view name) noexcept {
+    return validUtf8(name);
+}
+
+void setWorldSceneIdentity(World& world,
+                           const World::Entity entity,
+                           const SceneEntityId id,
+                           const std::string_view name) {
+    if (!validWorldSceneName(name)) {
+        throw std::invalid_argument("Scene identity name must be strict UTF-8 without NUL");
+    }
+    validateWorldSceneIdentity(world, entity, id);
+
+    WorldSceneIdentity replacement{id, std::string{name}};
+    if (WorldSceneIdentity* existing = world.tryGet<WorldSceneIdentity>(entity); existing != nullptr) {
+        existing->id = replacement.id;
+        existing->name.swap(replacement.name);
+        return;
+    }
+    world.emplace<WorldSceneIdentity>(entity, std::move(replacement));
+}
+
+bool clearWorldSceneIdentity(World& world, const World::Entity entity) {
+    return world.remove<WorldSceneIdentity>(entity);
+}
+
+World::Entity findWorldSceneEntity(const World& world, const SceneEntityId id) {
+    if (!id.valid()) {
+        throw std::invalid_argument("Scene identity must be nonzero");
+    }
+
+    World::Entity match{};
+    world.each<WorldSceneIdentity>([&](const World::Entity entity, const WorldSceneIdentity& identity) {
+        if (identity.id != id) {
+            return;
+        }
+        if (match.valid()) {
+            throw std::logic_error("Scene identity is assigned to multiple entities");
+        }
+        match = entity;
+    });
+    return match;
+}
 
 void SceneRenderList::clear() noexcept {
     items_.clear();
