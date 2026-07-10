@@ -657,6 +657,24 @@ int main() {
             (void)ve::loadObjMesh(uint32RangeFixture);
         });
 
+        const auto nonFinitePositionFixture = addFixture(
+            "geometry_cpu_non_finite_position", "v nan 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+        expectRuntimeErrorContains("loadObjMesh rejects non-finite position", "non-finite position", [&] {
+            (void)ve::loadObjMesh(nonFinitePositionFixture);
+        });
+
+        const auto nonFiniteTexcoordFixture = addFixture(
+            "geometry_cpu_non_finite_texcoord", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 inf\nf 1/1 2/1 3/1\n");
+        expectRuntimeErrorContains("loadObjMesh rejects non-finite texcoord", "non-finite texcoord", [&] {
+            (void)ve::loadObjMesh(nonFiniteTexcoordFixture);
+        });
+
+        const auto nonFiniteNormalFixture = addFixture(
+            "geometry_cpu_non_finite_normal", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 -inf\nf 1//1 2//1 3//1\n");
+        expectRuntimeErrorContains("loadObjMesh rejects non-finite normal", "non-finite normal", [&] {
+            (void)ve::loadObjMesh(nonFiniteNormalFixture);
+        });
+
         const auto emptyFixture = addFixture("geometry_cpu_empty", "# no geometry here\n# only comments\n");
         expectThrowsRuntimeError("loadObjMesh rejects OBJ without faces", [&] {
             (void)ve::loadObjMesh(emptyFixture);

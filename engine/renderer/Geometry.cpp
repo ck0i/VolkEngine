@@ -212,6 +212,9 @@ constexpr float kTriangleDegenerateSinEpsilonSquared = kTriangleDegenerateSinEps
     if (ec != std::errc{} || ptr != token.data() + token.size()) {
         throw objError(path, line, std::string("malformed ") + fieldName);
     }
+    if (!std::isfinite(value)) {
+        throw objError(path, line, std::string("non-finite ") + fieldName);
+    }
     return value;
 }
 
