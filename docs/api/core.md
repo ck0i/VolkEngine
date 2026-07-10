@@ -74,7 +74,7 @@ The default constructor anchors to `std::chrono::steady_clock::now()`. For deter
 
 Samples must be nondecreasing. A timestamp earlier than the previous sample throws `std::runtime_error` before mutating clock state, so a rejected sample cannot poison elapsed time or frame indexing. Runtime `tick()` remains the production path and delegates to the same monotonic sampling logic.
 
-`clampDeltaSeconds(deltaSeconds, maximumSeconds)` is a pure simulation helper. It clamps negative or hitch-sized deltas to a non-negative maximum without changing the raw wall-clock timing reported by `Clock`; telemetry and renderer frame metrics retain the original delta.
+`clampDeltaSeconds(deltaSeconds, maximumSeconds)` is a pure simulation helper. It clamps negative, non-finite, or hitch-sized deltas to a non-negative maximum without changing the raw wall-clock timing reported by `Clock`; telemetry and renderer frame metrics retain the original delta. `advanceSimulationSeconds(currentSeconds, deltaSeconds, maximumDeltaSeconds)` accumulates this bounded delta for gameplay and scene simulation timelines.
 
 ## File IO helpers
 

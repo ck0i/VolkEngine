@@ -12,10 +12,15 @@ struct FrameTiming {
 };
 
 [[nodiscard]] constexpr double clampDeltaSeconds(const double deltaSeconds, const double maximumSeconds) noexcept {
-    if (maximumSeconds <= 0.0 || deltaSeconds <= 0.0) {
+    if (!(maximumSeconds > 0.0) || !(deltaSeconds > 0.0)) {
         return 0.0;
     }
     return deltaSeconds < maximumSeconds ? deltaSeconds : maximumSeconds;
+}
+[[nodiscard]] constexpr double advanceSimulationSeconds(const double currentSeconds,
+                                                         const double deltaSeconds,
+                                                         const double maximumDeltaSeconds) noexcept {
+    return currentSeconds + clampDeltaSeconds(deltaSeconds, maximumDeltaSeconds);
 }
 
 class Clock {

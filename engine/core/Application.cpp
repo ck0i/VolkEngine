@@ -48,8 +48,10 @@ int Application::run(const RunOptions& options) {
             window_.setSize(config_.initialWidth, config_.initialHeight);
         }
 
-        const double simulationDelta = clampDeltaSeconds(timing.deltaSeconds, 0.05);
-        window_.updateCamera(camera_, static_cast<float>(simulationDelta));
+        const double previousSimulationElapsedSeconds = simulationElapsedSeconds_;
+        simulationElapsedSeconds_ = advanceSimulationSeconds(simulationElapsedSeconds_, timing.deltaSeconds, 0.05);
+        const float simulationDelta = static_cast<float>(simulationElapsedSeconds_ - previousSimulationElapsedSeconds);
+        window_.updateCamera(camera_, simulationDelta);
         const VkExtent2D extent = window_.framebufferExtent();
         if (extent.width > 0U && extent.height > 0U) {
             camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
@@ -62,7 +64,7 @@ int Application::run(const RunOptions& options) {
 
         const auto sceneBuildStart = std::chrono::steady_clock::now();
         const SceneRenderList& renderItems = sceneRenderer_.build(
-            timing.elapsedSeconds,
+            simulationElapsedSeconds_,
             config_.materialGridRows,
             config_.materialGridColumns,
             config_.materialGridTileRows,

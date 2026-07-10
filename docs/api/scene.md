@@ -116,7 +116,7 @@ Public API:
 - `requiredItemCount(rows, columns)` — returns `rows * columns + kFixedItemCount` with overflow checks.
 - `validateMaterialGridDimensions(rows, columns)` — throws on invalid/overflowing dimensions.
 - `setImportedModelBounds(bounds)` — supplies local-space imported-model bounds from loaded mesh data and invalidates the cached static layout.
-- `build(elapsedSeconds, rows, columns, tileRows, tileColumns) -> const SceneRenderList&` — returns a reused render list.
+- `build(simulationElapsedSeconds, rows, columns, tileRows, tileColumns) -> const SceneRenderList&` — returns a reused render list driven by the caller's bounded simulation timeline.
 
 Behavior:
 

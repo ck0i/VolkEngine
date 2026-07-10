@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string_view>
 
+#include <limits>
 namespace {
 
 int gFailureCount = 0;
@@ -75,6 +76,13 @@ int main() {
     expectNear("hitch delta is capped", ve::clampDeltaSeconds(0.5, 0.05), 0.05);
     expectNear("negative delta is rejected", ve::clampDeltaSeconds(-0.25, 0.05), 0.0);
     expectNear("non-positive maximum disables simulation", ve::clampDeltaSeconds(0.05, 0.0), 0.0);
+    const double simulationAfterNormal = ve::advanceSimulationSeconds(0.0, 0.016, 0.05);
+    expectNear("simulation time advances by normal delta", simulationAfterNormal, 0.016);
+    expectNear("simulation hitch is capped", ve::advanceSimulationSeconds(simulationAfterNormal, 0.5, 0.05), 0.066);
+    expectNear("simulation negative delta does not advance", ve::advanceSimulationSeconds(simulationAfterNormal, -0.25, 0.05), simulationAfterNormal);
+    expectNear("simulation NaN delta does not advance",
+               ve::advanceSimulationSeconds(simulationAfterNormal, std::numeric_limits<double>::quiet_NaN(), 0.05),
+               simulationAfterNormal);
 
     if (gFailureCount == 0) {
         return 0;

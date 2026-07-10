@@ -21,6 +21,7 @@ private:
     VulkanRenderer renderer_;
     DemoSceneRenderer sceneRenderer_;
     Clock clock_;
+    double simulationElapsedSeconds_ = 0.0;
 };
 
 } // namespace ve
