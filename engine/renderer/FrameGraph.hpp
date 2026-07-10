@@ -417,12 +417,13 @@ private:
         validateResource(resource);
         validateAccessUsage(access, usage);
         for (const Edge& edge : edges_) {
-            if (edge.pass.index == pass.index &&
-                edge.resource.index == resource.index &&
-                edge.access == access &&
-                edge.usage == usage) {
+            if (edge.pass.index != pass.index || edge.resource.index != resource.index) {
+                continue;
+            }
+            if (edge.access == access && edge.usage == usage) {
                 throw std::runtime_error("Duplicate FrameGraph edge");
             }
+            throw std::runtime_error("FrameGraph pass cannot declare multiple access states for one resource; split the work into passes");
         }
         edges_.push_back(Edge{pass, resource, access, usage});
         compiled_ = false;

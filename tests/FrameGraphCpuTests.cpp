@@ -343,6 +343,21 @@ int main() {
 
     {
         FrameGraph graph;
+        const auto importedImage = graph.addResource({"Conflicting Image", ve::FrameGraphResourceKind::Image, true});
+        const auto pass = graph.addPass({"Conflicting Pass"});
+        graph.read(pass, importedImage, FrameGraphUsage::SampledImage);
+
+        expectThrowsRuntimeError("same-pass read/write resource conflict is rejected", [&] {
+            graph.write(pass, importedImage, FrameGraphUsage::ColorAttachment);
+        });
+        expectThrowsRuntimeError("same-pass read usage conflict is rejected", [&] {
+            graph.read(pass, importedImage, FrameGraphUsage::TransferSource);
+        });
+        expectEqual("same-pass conflicts do not append edges", graph.edgeCount(), static_cast<std::size_t>(1));
+    }
+
+    {
+        FrameGraph graph;
         constexpr std::size_t kLargeGraphCount = 300;
         std::vector<FrameGraph::ResourceHandle> resources;
         std::vector<FrameGraph::PassHandle> passes;

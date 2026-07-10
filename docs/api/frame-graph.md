@@ -84,7 +84,7 @@ Operations:
 - `write(pass, resource, usage)`
 - `setFinalUsage(resource, usage)`
 
-Adding the same `(pass, resource, access, usage)` edge twice throws immediately.
+- Adding the same `(pass, resource, access, usage)` edge twice throws immediately. A pass may declare at most one access state for a given resource; a second edge with different access or usage also throws. Split the work into separate passes to model ordering and synchronization.
 
 ## Validation on `compile()`
 
