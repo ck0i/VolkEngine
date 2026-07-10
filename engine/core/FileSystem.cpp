@@ -1,6 +1,9 @@
 #include "core/FileSystem.hpp"
+#include <atomic>
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -11,8 +14,8 @@
 #include <unistd.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <unistd.h>
 #endif
-
 
 #include <fstream>
 #include <stdexcept>
@@ -64,8 +67,39 @@ std::filesystem::path resolveExecutablePath() {
 #endif
 }
 
-} // namespace
+std::atomic<std::uint64_t> nextTemporaryFileSuffix = 0;
 
+std::uint64_t processIdentifier() {
+#if defined(_WIN32)
+    return GetCurrentProcessId();
+#elif defined(__linux__) || defined(__APPLE__)
+    return static_cast<std::uint64_t>(getpid());
+#else
+    return 0;
+#endif
+}
+
+class TemporaryFile {
+public:
+    explicit TemporaryFile(std::filesystem::path path) : path_(std::move(path)) {}
+
+    ~TemporaryFile() {
+        if (active_) {
+            std::error_code error;
+            std::filesystem::remove(path_, error);
+        }
+    }
+
+    const std::filesystem::path& path() const { return path_; }
+    void arm() { active_ = true; }
+    void release() { active_ = false; }
+
+private:
+    std::filesystem::path path_;
+    bool active_ = false;
+};
+
+} // namespace
 
 std::filesystem::path executableDirectory() {
     static const std::filesystem::path directory = resolveExecutablePath().parent_path();
@@ -73,6 +107,10 @@ std::filesystem::path executableDirectory() {
 }
 
 std::vector<std::byte> readBinaryFile(const std::filesystem::path& path) {
+    return readBinaryFile(path, std::numeric_limits<std::size_t>::max());
+}
+
+std::vector<std::byte> readBinaryFile(const std::filesystem::path& path, const std::size_t maximumBytes) {
     std::ifstream file(path, std::ios::ate | std::ios::binary);
     if (!file) {
         throw std::runtime_error("Failed to open binary file: " + path.string());
@@ -82,6 +120,10 @@ std::vector<std::byte> readBinaryFile(const std::filesystem::path& path) {
     if (size < 0) {
         throw std::runtime_error("Failed to determine file size: " + path.string());
     }
+    if (static_cast<std::uintmax_t>(size) > static_cast<std::uintmax_t>(maximumBytes) ||
+        static_cast<std::uintmax_t>(size) > std::numeric_limits<std::size_t>::max()) {
+        throw std::runtime_error("Binary file exceeds size limit: " + path.string());
+    }
 
     std::vector<std::byte> buffer(static_cast<std::size_t>(size));
     file.seekg(0, std::ios::beg);
@@ -89,6 +131,77 @@ std::vector<std::byte> readBinaryFile(const std::filesystem::path& path) {
         throw std::runtime_error("Failed to read binary file: " + path.string());
     }
     return buffer;
+}
+
+void writeBinaryFileAtomic(const std::filesystem::path& path, const std::span<const std::byte> data) {
+    if (path.empty() || path.filename().empty()) {
+        throw std::runtime_error("Invalid binary file path: " + path.string());
+    }
+    if (data.size() > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max())) {
+        throw std::runtime_error("Binary file payload is too large: " + path.string());
+    }
+
+    std::filesystem::path temporaryPath;
+    std::ofstream file;
+    for (;;) {
+        temporaryPath = path;
+        temporaryPath += std::filesystem::path{
+            ".tmp." + std::to_string(processIdentifier()) + "."
+            + std::to_string(nextTemporaryFileSuffix.fetch_add(1, std::memory_order_relaxed))};
+        file.open(temporaryPath, std::ios::binary | std::ios::noreplace);
+        if (file) {
+            break;
+        }
+        file.clear();
+        std::error_code error;
+        const std::filesystem::file_status status = std::filesystem::symlink_status(temporaryPath, error);
+        if (error && error != std::errc::no_such_file_or_directory) {
+            throw std::runtime_error(
+                "Failed to validate temporary binary file path: " + temporaryPath.string() + ": "
+                + error.message());
+        }
+        if (status.type() == std::filesystem::file_type::not_found) {
+            throw std::runtime_error("Failed to create temporary binary file: " + temporaryPath.string());
+        }
+    }
+
+    TemporaryFile temporaryFile(temporaryPath);
+    temporaryFile.arm();
+    if (!data.empty()) {
+        file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        if (!file) {
+            file.close();
+            throw std::runtime_error("Failed to write temporary binary file: " + temporaryPath.string());
+        }
+    }
+    file.flush();
+    if (!file) {
+        file.close();
+        throw std::runtime_error("Failed to flush temporary binary file: " + temporaryPath.string());
+    }
+    file.close();
+    if (file.fail()) {
+        throw std::runtime_error("Failed to close temporary binary file: " + temporaryPath.string());
+    }
+
+#if defined(_WIN32)
+    if (MoveFileExW(temporaryFile.path().c_str(),
+                    path.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
+        throw std::runtime_error(
+            "Failed to publish temporary binary file " + temporaryPath.string() + " to " + path.string()
+            + ": Windows error " + std::to_string(GetLastError()));
+    }
+#else
+    std::error_code error;
+    std::filesystem::rename(temporaryFile.path(), path, error);
+    if (error) {
+        throw std::runtime_error(
+            "Failed to publish temporary binary file " + temporaryPath.string() + " to " + path.string()
+            + ": " + error.message());
+    }
+#endif
+    temporaryFile.release();
 }
 
 std::string readTextFile(const std::filesystem::path& path) {

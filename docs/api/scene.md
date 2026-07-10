@@ -97,6 +97,16 @@ Parent links are validated during every extraction because ECS component fields 
 
 The alpha is retained fixed-step debt divided by the step interval, so presentation intentionally interpolates from the penultimate state to the latest completed state rather than extrapolating an unknown future state. Extraction remains deterministic by sorting pending records by `{Entity::index, Entity::generation}` before populating its reusable `SceneRenderList`; the renderer borrows that list synchronously.
 
+## World-scene persistence
+
+`encodeWorldScene(world, limits)` and `decodeWorldScene(destination, bytes, limits)` persist the explicit scene bridge—not arbitrary ECS component pools. Version 1 covers `WorldSceneTransform::current`, `WorldSceneParent`, and `WorldSceneRenderable`; presentation-only discontinuity revisions and gameplay components are intentionally excluded. Default limits bound input/output to 1,000,000 scene entities and 256 MiB.
+
+The `VESN` binary stream uses explicit little-endian fields rather than native struct layouts. Records are canonicalized by runtime `{index, generation}` only to produce deterministic bytes, then assigned contiguous file-local IDs. Parent references use those IDs and are remapped to newly created runtime entities on load; runtime entity indices, generations, pointers, and handles are never persistent identity. Alive referenced parents with no scene components are retained as identity-only records.
+
+Encoding rejects dangling parents, cycles, non-finite values, invalid mesh identifiers, and valid bounds with negative radius. Decoding additionally rejects bad magic/version, unknown component bits, invalid booleans, truncated or trailing bytes, malformed parent IDs, unreferenced identity records, and configured limit breaches. Parsing and graph validation finish before a temporary `World` is constructed, and the destination is move-replaced only after the complete load succeeds. A failure therefore preserves the destination's entities, components, handles, and instance token.
+
+`saveWorldScene(world, path, limits)` publishes encoded bytes through `writeBinaryFileAtomic`; `loadWorldScene(destination, path, limits)` reads and transactionally decodes them. The work is one-shot—$O(N \log N)$ canonical sorting plus $O(N)$ encoding, graph validation, and reconstruction—with no per-frame cost.
+
 ## `SceneGridRange`
 
 Describes a contiguous grid in a `SceneRenderList`:

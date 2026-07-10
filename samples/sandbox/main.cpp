@@ -3,6 +3,7 @@
 
 #include "core/Log.hpp"
 #include "renderer/SceneRenderer.hpp"
+#include "scene/ScenePersistence.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -20,6 +21,8 @@ constexpr std::size_t kMaxSandboxSceneItems = 4'194'304;
 struct SandboxArgs {
     ve::EngineConfig config{};
     ve::RunOptions run{};
+    std::filesystem::path loadScenePath;
+    std::filesystem::path saveScenePath;
     bool worldScene = false;
     bool help = false;
 };
@@ -128,6 +131,12 @@ SandboxArgs parseArguments(int argc, char** argv) {
             args.run.acquireRecoverySmoke = true;
         } else if (arg == "--world-scene") {
             args.worldScene = true;
+        } else if (arg == "--load-scene") {
+            args.loadScenePath = std::filesystem::path{requireValue(i, argc, argv, arg)};
+            args.worldScene = true;
+        } else if (arg == "--save-scene") {
+            args.saveScenePath = std::filesystem::path{requireValue(i, argc, argv, arg)};
+            args.worldScene = true;
         } else if (arg == "--frames") {
             args.run.maxFrames = parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--width") {
@@ -182,7 +191,7 @@ SandboxArgs parseArguments(int argc, char** argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--resize-smoke] [--acquire-recovery-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
+    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--load-scene FILE.vescene] [--save-scene FILE.vescene] [--resize-smoke] [--acquire-recovery-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
 }
 
 } // namespace
@@ -201,12 +210,20 @@ int main(int argc, char** argv) {
             return app.run(args.run);
         }
         ve::World world;
-        populateWorldScene(world);
+        if (args.loadScenePath.empty()) {
+            populateWorldScene(world);
+        } else {
+            ve::loadWorldScene(world, args.loadScenePath);
+        }
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1);
         scheduler.addSystem("spin", &updateWorldScene);
         scheduler.compile();
-        return app.run(world, scheduler, args.run);
+        const int result = app.run(world, scheduler, args.run);
+        if (result == 0 && !args.saveScenePath.empty()) {
+            ve::saveWorldScene(world, args.saveScenePath);
+        }
+        return result;
     } catch (const std::exception& e) {
         ve::logger()->critical("Fatal error: {}", e.what());
         std::cerr << "Fatal error: " << e.what() << '\n';

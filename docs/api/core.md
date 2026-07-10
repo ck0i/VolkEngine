@@ -114,10 +114,14 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 
 ## File IO helpers
 
-- `readBinaryFile(path) -> std::vector<std::byte>`
+- `readBinaryFile(path[, maximumBytes]) -> std::vector<std::byte>`
+- `writeBinaryFileAtomic(path, bytes)`
 - `readTextFile(path) -> std::string`
 
-Use these for engine file reads so errors remain consistent across shader, asset, and test code.
+Use these for engine file access so errors remain consistent across scene, shader, asset, and test code.
+The bounded binary-read overload checks the on-disk length before allocating or reading, so hostile or accidental oversized files cannot bypass caller limits.
+
+`writeBinaryFileAtomic` writes a uniquely named sibling temporary, verifies write/flush/close, and publishes only after completion. POSIX uses atomic rename replacement; Windows uses `MoveFileExW` with replacement and write-through flags. Failures leave the prior destination untouched and remove the handled temporary file.
 
 ## Logging
 

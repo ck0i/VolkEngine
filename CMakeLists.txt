@@ -96,6 +96,7 @@ add_library(VolkEngine STATIC
     engine/core/FileSystem.cpp
     engine/core/Log.cpp
     engine/core/Time.cpp
+    engine/scene/ScenePersistence.cpp
     engine/platform/Input.cpp
     engine/platform/Window.cpp
     engine/renderer/Geometry.cpp
@@ -212,6 +213,17 @@ target_include_directories(VolkEngineWorldSceneCpuTest
 volkengine_target_warnings(VolkEngineWorldSceneCpuTest)
 add_test(NAME WorldSceneCpu
     COMMAND VolkEngineWorldSceneCpuTest)
+
+add_executable(VolkEngineScenePersistenceCpuTest
+    tests/ScenePersistenceCpuTests.cpp
+    engine/core/FileSystem.cpp
+    engine/scene/ScenePersistence.cpp)
+target_include_directories(VolkEngineScenePersistenceCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineScenePersistenceCpuTest)
+add_test(NAME ScenePersistenceCpu
+    COMMAND VolkEngineScenePersistenceCpuTest)
 
 add_executable(VolkEngineWorldSchedulerCpuTest
     tests/WorldSchedulerCpuTests.cpp

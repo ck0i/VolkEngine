@@ -89,7 +89,15 @@ World-backed extraction smoke run:
 ```
 This path compiles and runs the sandbox's named `spin` world system through `WorldSystemScheduler`, interpolates a parent pivot and child-local cube transform through `WorldSceneExtractor`, then performs normal Vulkan submission.
 
-Common flags: `--frames N`, `--world-scene`, `--resize-smoke`, `--acquire-recovery-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
+Versioned scene persistence smoke:
+
+```sh
+./out/build/linux-debug/VolkEngineSandbox --world-scene --frames 120 --save-scene /tmp/example.vescene --no-imgui
+./out/build/linux-debug/VolkEngineSandbox --load-scene /tmp/example.vescene --frames 120 --no-imgui
+```
+`--load-scene` implies `--world-scene`; the persisted subset is transforms, hierarchy links, and renderables, while sandbox-only gameplay controllers remain runtime state.
+
+Common flags: `--frames N`, `--world-scene`, `--load-scene FILE.vescene`, `--save-scene FILE.vescene`, `--resize-smoke`, `--acquire-recovery-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
 `--help` / `-h` is terminal: it prints usage and exits successfully without initializing GLFW or Vulkan, even when copied trailing arguments are malformed or unknown.
 
 Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold right mouse button for captured mouse-look; with `--world-scene`, `Space` pauses/resumes the cube rotation.

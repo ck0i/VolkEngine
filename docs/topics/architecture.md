@@ -36,6 +36,7 @@ graph TD
 
 - `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
 - `World` owns generational entities and component pools. `WorldSystemScheduler` owns a compiled deterministic system order and one deferred command buffer; system callbacks and contexts remain caller-owned. Caller-owned standalone `WorldCommandBuffer` instances stage structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneParent`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns reusable render-list, local-pose history, and hierarchy-resolution storage. The generic ECS owns no child lists or hierarchy lifecycle hooks.
+- `ScenePersistence` is a stateless one-shot boundary over the explicit scene component subset. It canonicalizes transient runtime entities into file-local IDs, validates complete parent graphs, and reconstructs into a temporary `World`; it does not expose or serialize generic type-erased component pools.
 - `GlfwRuntime` owns GLFW process initialization/termination. `Window` borrows the runtime and owns only its native window handle; one runtime is allowed per process and GLFW calls remain on the main thread.
 - `VulkanRenderer` owns runtime Vulkan behavior via private `Impl`, but keeps ownership boundaries explicit:
   - `VulkanRenderer.hpp` remains the backend API entry boundary.
@@ -64,6 +65,8 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
 6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.
 7. `RenderStats` and `RenderDeviceInfo` expose what path was used and how the last submitted frame behaved.
+
+Scene files are loaded before entering `Application::run` and saved after it returns. Persistence therefore performs no frame-loop work and never competes with scheduler queries, deferred structural playback, extraction, or renderer borrowing.
 
 ## Public/private line
 
