@@ -240,23 +240,46 @@ void appendObjVector(std::vector<Vec>& values, std::string_view fields, const st
     if (vertices.empty()) {
         return {};
     }
-    Vec3 minimum = vertices.front().position;
-    Vec3 maximum = vertices.front().position;
+
+    double minimumX = static_cast<double>(vertices.front().position.x);
+    double minimumY = static_cast<double>(vertices.front().position.y);
+    double minimumZ = static_cast<double>(vertices.front().position.z);
+    double maximumX = minimumX;
+    double maximumY = minimumY;
+    double maximumZ = minimumZ;
     for (const Vertex& vertex : vertices) {
-        minimum.x = std::min(minimum.x, vertex.position.x);
-        minimum.y = std::min(minimum.y, vertex.position.y);
-        minimum.z = std::min(minimum.z, vertex.position.z);
-        maximum.x = std::max(maximum.x, vertex.position.x);
-        maximum.y = std::max(maximum.y, vertex.position.y);
-        maximum.z = std::max(maximum.z, vertex.position.z);
+        if (!std::isfinite(vertex.position.x) || !std::isfinite(vertex.position.y) || !std::isfinite(vertex.position.z)) {
+            return {};
+        }
+        const double x = static_cast<double>(vertex.position.x);
+        const double y = static_cast<double>(vertex.position.y);
+        const double z = static_cast<double>(vertex.position.z);
+        minimumX = std::min(minimumX, x);
+        minimumY = std::min(minimumY, y);
+        minimumZ = std::min(minimumZ, z);
+        maximumX = std::max(maximumX, x);
+        maximumY = std::max(maximumY, y);
+        maximumZ = std::max(maximumZ, z);
     }
-    const Vec3 center = (minimum + maximum) * 0.5f;
-    float radiusSquared = 0.0f;
+
+    const double centerX = (minimumX + maximumX) * 0.5;
+    const double centerY = (minimumY + maximumY) * 0.5;
+    const double centerZ = (minimumZ + maximumZ) * 0.5;
+    double radiusSquared = 0.0;
     for (const Vertex& vertex : vertices) {
-        const Vec3 offset = vertex.position - center;
-        radiusSquared = std::max(radiusSquared, dot(offset, offset));
+        const double offsetX = static_cast<double>(vertex.position.x) - centerX;
+        const double offsetY = static_cast<double>(vertex.position.y) - centerY;
+        const double offsetZ = static_cast<double>(vertex.position.z) - centerZ;
+        radiusSquared = std::max(radiusSquared, offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
     }
-    return MeshBounds{center, std::sqrt(radiusSquared), true};
+    const double radius = std::sqrt(radiusSquared);
+    constexpr double maxFloat = static_cast<double>(std::numeric_limits<float>::max());
+    if (!std::isfinite(centerX) || !std::isfinite(centerY) || !std::isfinite(centerZ) || !std::isfinite(radius) ||
+        radius < 0.0 || radius > maxFloat) {
+        return {};
+    }
+    return MeshBounds{Vec3{static_cast<float>(centerX), static_cast<float>(centerY), static_cast<float>(centerZ)},
+                      static_cast<float>(radius), true};
 }
 
 [[nodiscard]] Vec3 fallbackTangentForNormal(Vec3 normal) noexcept {
@@ -355,8 +378,11 @@ void compactMeshToReferencedVertices(MeshData& mesh) {
 
 void finalizeMesh(MeshData& mesh) {
     compactMeshToReferencedVertices(mesh);
-    calculateMeshTangents(mesh);
     mesh.bounds = calculateMeshBounds(mesh.vertices);
+    if (!mesh.bounds.valid) {
+        throw std::runtime_error("Mesh bounds are non-finite or outside float range");
+    }
+    calculateMeshTangents(mesh);
 }
 
 } // namespace

@@ -663,6 +663,14 @@ int main() {
             (void)ve::loadObjMesh(nonFinitePositionFixture);
         });
 
+        const auto overflowingBoundsFixture = addFixture(
+            "geometry_cpu_overflowing_bounds",
+            "v -3.4028235e38 -3.4028235e38 0\nv 3.4028235e38 3.4028235e38 0\nv 0 0 1\nf 1 2 3\n");
+        expectRuntimeErrorContains("loadObjMesh rejects finite coordinates with unrepresentable bounds",
+                                   "outside float range", [&] {
+                                       (void)ve::loadObjMesh(overflowingBoundsFixture);
+                                   });
+
         const auto nonFiniteTexcoordFixture = addFixture(
             "geometry_cpu_non_finite_texcoord", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 inf\nf 1/1 2/1 3/1\n");
         expectRuntimeErrorContains("loadObjMesh rejects non-finite texcoord", "non-finite texcoord", [&] {
