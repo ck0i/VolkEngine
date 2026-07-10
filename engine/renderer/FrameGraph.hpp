@@ -143,24 +143,32 @@ public:
         compiled_ = false;
         executionOrder_.clear();
         resourceLifetimes_.clear();
+        std::vector<std::vector<const Edge*>> edgesByPass(passes_.size());
+        std::vector<std::vector<const Edge*>> edgesByResource(resources_.size());
+        for (const Edge& edge : edges_) {
+            edgesByPass[edge.pass.index].push_back(&edge);
+            edgesByResource[edge.resource.index].push_back(&edge);
+        }
+        for (std::vector<const Edge*>& resourceEdges : edgesByResource) {
+            std::stable_sort(resourceEdges.begin(), resourceEdges.end(), [](const Edge* lhs, const Edge* rhs) {
+                return lhs->pass.index < rhs->pass.index;
+            });
+        }
         std::vector<std::uint8_t> hasWriter(resources_.size(), 0);
         std::vector<std::uint8_t> passHasAccess(passes_.size(), 0);
 
         for (std::size_t passIndex = 0; passIndex < passes_.size(); ++passIndex) {
-            for (const Edge& edge : edges_) {
-                if (static_cast<std::size_t>(edge.pass.index) != passIndex) {
-                    continue;
-                }
-
-                const std::size_t resourceIndex = static_cast<std::size_t>(edge.resource.index);
+            for (const Edge* edge : edgesByPass[passIndex]) {
+                const std::size_t resourceIndex = static_cast<std::size_t>(edge->resource.index);
                 passHasAccess[passIndex] = 1;
-                if (edge.access == FrameGraphAccess::Read && !resources_[resourceIndex].imported && hasWriter[resourceIndex] == 0U) {
+                if (edge->access == FrameGraphAccess::Read && !resources_[resourceIndex].imported && hasWriter[resourceIndex] == 0U) {
                     throw std::runtime_error("FrameGraph pass reads a non-imported resource before any pass writes it");
                 }
-                if (edge.access == FrameGraphAccess::Write) {
+                if (edge->access == FrameGraphAccess::Write) {
                     hasWriter[resourceIndex] = 1;
                 }
             }
+
             if (passHasAccess[passIndex] == 0U) {
                 throw std::runtime_error("FrameGraph pass has no resource edges");
             }
@@ -181,23 +189,18 @@ public:
 
         for (std::size_t resourceIndex = 0; resourceIndex < resources_.size(); ++resourceIndex) {
             std::vector<Index> readers;
-            for (std::size_t passIndex = 0; passIndex < passCount; ++passIndex) {
-                const Index pass = static_cast<Index>(passIndex);
-                for (const Edge& edge : edges_) {
-                    if (edge.resource.index != static_cast<Index>(resourceIndex) || edge.pass.index != pass) {
-                        continue;
+            for (const Edge* edge : edgesByResource[resourceIndex]) {
+                const Index pass = edge->pass.index;
+                if (edge->access == FrameGraphAccess::Read) {
+                    addDependency(lastWriters[resourceIndex], pass);
+                    readers.push_back(pass);
+                } else {
+                    addDependency(lastWriters[resourceIndex], pass);
+                    for (const Index reader : readers) {
+                        addDependency(reader, pass);
                     }
-                    if (edge.access == FrameGraphAccess::Read) {
-                        addDependency(lastWriters[resourceIndex], pass);
-                        readers.push_back(pass);
-                    } else {
-                        addDependency(lastWriters[resourceIndex], pass);
-                        for (const Index reader : readers) {
-                            addDependency(reader, pass);
-                        }
-                        readers.clear();
-                        lastWriters[resourceIndex] = pass;
-                    }
+                    readers.clear();
+                    lastWriters[resourceIndex] = pass;
                 }
             }
         }

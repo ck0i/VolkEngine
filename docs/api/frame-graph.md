@@ -16,6 +16,8 @@ Backend integration points:
 - Handles remain stable because records are appended and never erased.
 - Adding records throws only if the handle index range is exhausted or allocation fails.
 
+Compilation indexes edges by pass and resource, so dependency construction scales with declared edges rather than rescanning the full edge list for every pass/resource pair.
+
 ## Enums
 
 `FrameGraphResourceKind`:

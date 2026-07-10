@@ -152,6 +152,19 @@ int main() {
         expectEqual("hazard plan retains first WAW writer", graph.executionOrder()[1].index, firstWrite.index);
         expectEqual("hazard plan retains second WAW writer", graph.executionOrder()[2].index, secondWrite.index);
     }
+    {
+        FrameGraph graph;
+        const auto image = graph.addResource({"Interleaved Image", ve::FrameGraphResourceKind::Image, false});
+        const auto writer = graph.addPass({"Writer"});
+        const auto reader = graph.addPass({"Reader"});
+        graph.read(reader, image, FrameGraphUsage::SampledImage);
+        graph.write(writer, image, FrameGraphUsage::ColorAttachment);
+        expectNoThrow("interleaved edge declarations preserve pass ordering", [&] {
+            graph.compile();
+        });
+        expectEqual("interleaved plan places writer first", graph.executionOrder()[0].index, writer.index);
+        expectEqual("interleaved plan places reader second", graph.executionOrder()[1].index, reader.index);
+    }
 
     {
         FrameGraph graph;
