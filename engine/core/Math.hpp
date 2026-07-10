@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
@@ -22,6 +23,19 @@ struct alignas(16) Vec4 {
     float y = 0.0f;
     float z = 0.0f;
     float w = 0.0f;
+};
+
+struct Quat {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float w = 1.0f;
+};
+
+struct TransformTRS {
+    Vec3 translation{};
+    Quat rotation{};
+    Vec3 scale{1.0f, 1.0f, 1.0f};
 };
 
 struct alignas(16) Mat4 {
@@ -54,6 +68,111 @@ struct alignas(16) Mat4 {
         return {0.0f, 0.0f, 0.0f};
     }
     return v / len;
+}
+
+[[nodiscard]] inline bool finite(const Vec3 value) noexcept {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+[[nodiscard]] inline bool finite(const Quat value) noexcept {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) && std::isfinite(value.w);
+}
+
+[[nodiscard]] inline bool finite(const TransformTRS& transform) noexcept {
+    return finite(transform.translation) && finite(transform.rotation) && finite(transform.scale);
+}
+
+[[nodiscard]] inline Quat normalizeQuat(const Quat value) noexcept {
+    const float maximumComponent = std::max(
+        {std::fabs(value.x), std::fabs(value.y), std::fabs(value.z), std::fabs(value.w)});
+    if (!std::isfinite(maximumComponent) || maximumComponent == 0.0f) {
+        return {};
+    }
+    const Quat scaled{
+        value.x / maximumComponent,
+        value.y / maximumComponent,
+        value.z / maximumComponent,
+        value.w / maximumComponent};
+    const float inverseLength = 1.0f / std::sqrt(
+        scaled.x * scaled.x + scaled.y * scaled.y + scaled.z * scaled.z + scaled.w * scaled.w);
+    return {scaled.x * inverseLength,
+            scaled.y * inverseLength,
+            scaled.z * inverseLength,
+            scaled.w * inverseLength};
+}
+
+[[nodiscard]] inline Quat rotationY(const float radians) noexcept {
+    if (!std::isfinite(radians)) {
+        return {};
+    }
+    const float halfRadians = radians * 0.5f;
+    return {0.0f, std::sin(halfRadians), 0.0f, std::cos(halfRadians)};
+}
+
+[[nodiscard]] inline Quat slerp(const Quat from, const Quat to, float alpha) noexcept {
+    alpha = std::isfinite(alpha) ? std::clamp(alpha, 0.0f, 1.0f) : 0.0f;
+    const Quat normalizedFrom = normalizeQuat(from);
+    Quat normalizedTo = normalizeQuat(to);
+    float cosine = normalizedFrom.x * normalizedTo.x + normalizedFrom.y * normalizedTo.y +
+                   normalizedFrom.z * normalizedTo.z + normalizedFrom.w * normalizedTo.w;
+    if (cosine < 0.0f) {
+        normalizedTo = {-normalizedTo.x, -normalizedTo.y, -normalizedTo.z, -normalizedTo.w};
+        cosine = -cosine;
+    }
+    cosine = std::clamp(cosine, -1.0f, 1.0f);
+    if (cosine > 0.9995f) {
+        return normalizeQuat({normalizedFrom.x + (normalizedTo.x - normalizedFrom.x) * alpha,
+                          normalizedFrom.y + (normalizedTo.y - normalizedFrom.y) * alpha,
+                          normalizedFrom.z + (normalizedTo.z - normalizedFrom.z) * alpha,
+                          normalizedFrom.w + (normalizedTo.w - normalizedFrom.w) * alpha});
+    }
+    const float theta = std::acos(cosine);
+    const float sine = std::sin(theta);
+    if (!std::isfinite(sine) || std::fabs(sine) <= 0.000001f) {
+        return normalizedFrom;
+    }
+    const float fromWeight = std::sin((1.0f - alpha) * theta) / sine;
+    const float toWeight = std::sin(alpha * theta) / sine;
+    return normalizeQuat({normalizedFrom.x * fromWeight + normalizedTo.x * toWeight,
+                      normalizedFrom.y * fromWeight + normalizedTo.y * toWeight,
+                      normalizedFrom.z * fromWeight + normalizedTo.z * toWeight,
+                      normalizedFrom.w * fromWeight + normalizedTo.w * toWeight});
+}
+
+[[nodiscard]] inline Mat4 compose(const TransformTRS& transform) noexcept {
+    const Quat rotation = normalizeQuat(transform.rotation);
+    const float xx = rotation.x * rotation.x;
+    const float yy = rotation.y * rotation.y;
+    const float zz = rotation.z * rotation.z;
+    const float xy = rotation.x * rotation.y;
+    const float xz = rotation.x * rotation.z;
+    const float yz = rotation.y * rotation.z;
+    const float xw = rotation.x * rotation.w;
+    const float yw = rotation.y * rotation.w;
+    const float zw = rotation.z * rotation.w;
+    Mat4 matrix = Mat4::identity();
+    matrix.m[0] = (1.0f - 2.0f * (yy + zz)) * transform.scale.x;
+    matrix.m[1] = (2.0f * (xy + zw)) * transform.scale.x;
+    matrix.m[2] = (2.0f * (xz - yw)) * transform.scale.x;
+    matrix.m[4] = (2.0f * (xy - zw)) * transform.scale.y;
+    matrix.m[5] = (1.0f - 2.0f * (xx + zz)) * transform.scale.y;
+    matrix.m[6] = (2.0f * (yz + xw)) * transform.scale.y;
+    matrix.m[8] = (2.0f * (xz + yw)) * transform.scale.z;
+    matrix.m[9] = (2.0f * (yz - xw)) * transform.scale.z;
+    matrix.m[10] = (1.0f - 2.0f * (xx + yy)) * transform.scale.z;
+    matrix.m[12] = transform.translation.x;
+    matrix.m[13] = transform.translation.y;
+    matrix.m[14] = transform.translation.z;
+    return matrix;
+}
+
+[[nodiscard]] inline TransformTRS interpolate(const TransformTRS& previous,
+                                              const TransformTRS& current,
+                                              float alpha) noexcept {
+    alpha = std::isfinite(alpha) ? std::clamp(alpha, 0.0f, 1.0f) : 0.0f;
+    return {previous.translation + (current.translation - previous.translation) * alpha,
+            slerp(previous.rotation, current.rotation, alpha),
+            previous.scale + (current.scale - previous.scale) * alpha};
 }
 
 [[nodiscard]] inline std::array<Vec4, 3> normalMatrixColumns(const Mat4& matrix) {

@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace ve {
@@ -112,7 +113,13 @@ private:
 };
 
 struct WorldSceneTransform {
-    Mat4 model = Mat4::identity();
+    TransformTRS current{};
+    std::uint64_t discontinuityRevision = 0;
+
+    void teleport(const TransformTRS& value) noexcept {
+        current = value;
+        ++discontinuityRevision;
+    }
 };
 
 struct WorldSceneRenderable {
@@ -124,14 +131,31 @@ struct WorldSceneRenderable {
 
 class WorldSceneExtractor final {
 public:
-    [[nodiscard]] const SceneRenderList& build(const World& world);
+    void prepareSimulationStep(const World& world);
+    void captureSimulationStep(const World& world);
+    void resetSimulationState(const World& world);
+    void invalidateSimulationState() noexcept;
+    [[nodiscard]] const SceneRenderList& build(const World& world, double interpolationAlpha);
 
 private:
+    struct History {
+        World::Entity entity{};
+        TransformTRS previous{};
+        TransformTRS current{};
+        std::uint64_t discontinuityRevision = 0;
+        bool initialized = false;
+    };
+
     struct PendingItem {
         World::Entity entity;
         SceneRenderItem item;
     };
 
+    void ensureWorld(const World& world);
+    [[nodiscard]] History& historyFor(const World::Entity entity);
+    void initializeHistory(History& history, const World::Entity entity, const WorldSceneTransform& transform) noexcept;
+    std::uint64_t historyWorldToken_ = 0U;
+    std::vector<History> histories_;
     std::vector<PendingItem> pendingItems_;
     SceneRenderList renderList_;
 };

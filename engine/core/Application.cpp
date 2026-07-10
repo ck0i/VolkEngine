@@ -83,12 +83,19 @@ int Application::runInternal(World* world,
         for (std::uint32_t stepIndex = 0; stepIndex < simulationBatch.stepCount; ++stepIndex) {
             const InputState stepInput = simulationInputTracker_.consume();
             const double stepElapsedSeconds = simulationBatch.elapsedSecondsForStep(stepIndex);
-            if (world != nullptr) {
-                if (inputUpdate != nullptr) {
-                    inputUpdate(*world, stepInput, stepElapsedSeconds, simulationBatch.stepSeconds);
-                } else if (update != nullptr) {
-                    update(*world, stepElapsedSeconds, simulationBatch.stepSeconds);
+            if (world != nullptr && (inputUpdate != nullptr || update != nullptr)) {
+                worldSceneExtractor_.prepareSimulationStep(*world);
+                try {
+                    if (inputUpdate != nullptr) {
+                        inputUpdate(*world, stepInput, stepElapsedSeconds, simulationBatch.stepSeconds);
+                    } else {
+                        update(*world, stepElapsedSeconds, simulationBatch.stepSeconds);
+                    }
+                } catch (...) {
+                    worldSceneExtractor_.invalidateSimulationState();
+                    throw;
                 }
+                worldSceneExtractor_.captureSimulationStep(*world);
             }
         }
 
@@ -104,7 +111,7 @@ int Application::runInternal(World* world,
 
         const auto sceneBuildStart = std::chrono::steady_clock::now();
         const SceneRenderList& renderItems = world != nullptr
-            ? worldSceneExtractor_.build(*world)
+            ? worldSceneExtractor_.build(*world, simulationBatch.interpolationAlpha)
             : sceneRenderer_.build(simulationClock_.elapsedSeconds(),
                                    config_.materialGridRows,
                                    config_.materialGridColumns,

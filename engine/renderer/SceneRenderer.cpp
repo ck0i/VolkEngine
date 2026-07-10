@@ -16,18 +16,6 @@ namespace {
     return bounds.valid && bounds.radius >= 0.0f && std::isfinite(bounds.radius) && finiteVec3(bounds.center);
 }
 
-[[nodiscard]] bool finiteMatrix(const Mat4& matrix) noexcept {
-    for (const float value : matrix.m) {
-        if (!std::isfinite(value)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] bool affineMatrix(const Mat4& matrix) noexcept {
-    return matrix.m[3] == 0.0F && matrix.m[7] == 0.0F && matrix.m[11] == 0.0F && matrix.m[15] == 1.0F;
-}
 
 [[nodiscard]] Vec3 transformPoint(const Mat4& matrix, const Vec3 point) noexcept {
     return {matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
@@ -154,19 +142,97 @@ bool SceneRenderList::indexInMaterialGridRange(const std::size_t index) const no
     return index - materialGridRange_.firstItem < gridItemCount;
 }
 
-const SceneRenderList& WorldSceneExtractor::build(const World& world) {
+void WorldSceneExtractor::ensureWorld(const World& world) {
+    if (historyWorldToken_ != world.instanceToken()) {
+        histories_.clear();
+        historyWorldToken_ = world.instanceToken();
+    }
+}
+
+WorldSceneExtractor::History& WorldSceneExtractor::historyFor(const World::Entity entity) {
+    const std::size_t requiredSize = static_cast<std::size_t>(entity.index) + 1U;
+    if (histories_.size() < requiredSize) {
+        histories_.resize(requiredSize);
+    }
+    return histories_[entity.index];
+}
+
+void WorldSceneExtractor::initializeHistory(History& history,
+                                            const World::Entity entity,
+                                            const WorldSceneTransform& transform) noexcept {
+    history.entity = entity;
+    history.previous = transform.current;
+    history.current = transform.current;
+    history.discontinuityRevision = transform.discontinuityRevision;
+    history.initialized = true;
+}
+
+void WorldSceneExtractor::resetSimulationState(const World& world) {
+    ensureWorld(world);
+    histories_.reserve(world.entityCapacity());
+    world.each<WorldSceneTransform>([&](const World::Entity entity, const WorldSceneTransform& transform) {
+        initializeHistory(historyFor(entity), entity, transform);
+    });
+}
+
+void WorldSceneExtractor::invalidateSimulationState() noexcept {
+    histories_.clear();
+    historyWorldToken_ = 0U;
+}
+
+void WorldSceneExtractor::prepareSimulationStep(const World& world) {
+    ensureWorld(world);
+    histories_.reserve(world.entityCapacity());
+    world.each<WorldSceneTransform>([&](const World::Entity entity, const WorldSceneTransform& transform) {
+        History& history = historyFor(entity);
+        if (!history.initialized || history.entity != entity ||
+            history.discontinuityRevision != transform.discontinuityRevision ||
+            !finite(history.current) || !finite(transform.current)) {
+            initializeHistory(history, entity, transform);
+        }
+    });
+}
+
+void WorldSceneExtractor::captureSimulationStep(const World& world) {
+    ensureWorld(world);
+    histories_.reserve(world.entityCapacity());
+    world.each<WorldSceneTransform>([&](const World::Entity entity, const WorldSceneTransform& transform) {
+        History& history = historyFor(entity);
+        if (!history.initialized || history.entity != entity ||
+            history.discontinuityRevision != transform.discontinuityRevision ||
+            !finite(history.current) || !finite(transform.current)) {
+            initializeHistory(history, entity, transform);
+            return;
+        }
+        history.previous = history.current;
+        history.current = transform.current;
+    });
+}
+
+const SceneRenderList& WorldSceneExtractor::build(const World& world, const double interpolationAlpha) {
+    ensureWorld(world);
+    histories_.reserve(world.entityCapacity());
+    const double clampedAlpha = std::isfinite(interpolationAlpha)
+        ? std::clamp(interpolationAlpha, 0.0, 1.0)
+        : 0.0;
+    const float alpha = static_cast<float>(clampedAlpha);
     pendingItems_.clear();
     world.each<WorldSceneTransform, WorldSceneRenderable>(
         [&](const World::Entity entity, const WorldSceneTransform& transform, const WorldSceneRenderable& renderable) {
             const MeshBounds& bounds = renderable.localBounds;
-            if (!renderable.visible || !bounds.valid || bounds.radius < 0.0f ||
-                !finiteVec3(bounds.center) || !std::isfinite(bounds.radius) || !finiteMatrix(transform.model) ||
-                !affineMatrix(transform.model)) {
+            if (!renderable.visible || !validMeshBounds(bounds) || !finite(transform.current)) {
                 return;
             }
 
-            const Vec3 worldCenter = transformPoint(transform.model, bounds.center);
-            const float worldRadius = bounds.radius * conservativeRadiusScale(transform.model);
+            History& history = historyFor(entity);
+            if (!history.initialized || history.entity != entity ||
+                history.discontinuityRevision != transform.discontinuityRevision ||
+                !finite(history.previous) || !finite(history.current)) {
+                initializeHistory(history, entity, transform);
+            }
+            const Mat4 model = compose(interpolate(history.previous, history.current, alpha));
+            const Vec3 worldCenter = transformPoint(model, bounds.center);
+            const float worldRadius = bounds.radius * conservativeRadiusScale(model);
             if (!finiteVec3(worldCenter) || !std::isfinite(worldRadius)) {
                 return;
             }
@@ -175,7 +241,7 @@ const SceneRenderList& WorldSceneExtractor::build(const World& world) {
                                                 SceneRenderItem{worldCenter,
                                                                 worldRadius,
                                                                 renderable.mesh,
-                                                                transform.model,
+                                                                model,
                                                                 renderable.material}});
         });
 

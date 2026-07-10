@@ -86,11 +86,13 @@ Hot read-only accessors stay inline in `SceneRenderer.hpp`; heavier mutation and
 
 ## `WorldSceneTransform`, `WorldSceneRenderable`, and `WorldSceneExtractor`
 
-`WorldSceneTransform` stores an affine-capable model matrix. `WorldSceneRenderable` stores a mesh id, shader material, local `MeshBounds`, and a visibility flag. The application/world producer owns these components in `World`; `WorldSceneExtractor` owns a reusable scratch buffer and render list.
+`WorldSceneTransform` stores the simulation-owned current `TransformTRS`: translation, quaternion rotation, and scale. `teleport(value)` updates the pose and advances a discontinuity revision so presentation history resets instead of smearing across a discontinuous move. `WorldSceneRenderable` stores a mesh id, shader material, local `MeshBounds`, and visibility.
 
-`WorldSceneExtractor::build(const World&)` joins entities carrying both components, skips invisible entries, missing/invalid bounds, non-finite matrices, and non-affine/projective matrices, then emits world-space `SceneRenderItem` records. Bounds centers are transformed by the model matrix. Radius scaling uses the Frobenius norm of the model's linear 3x3 portion, conservatively covering non-uniform scale and shear; affine matrices are required because projective homogeneous division is not part of scene-bound extraction.
+`WorldSceneExtractor` owns reusable previous/current pose history indexed by the full generational entity handle and scoped to one observed `World` instance. `prepareSimulationStep(world)` initializes new, recycled, or discontinuous entities before a fixed update; `captureSimulationStep(world)` shifts and captures poses after a successful update. `invalidateSimulationState()` clears prepared history after an aborted update, while `resetSimulationState(world)` snaps all endpoints to current poses explicitly. Newly spawned and recycled entities start with identical history endpoints, destroyed entities disappear through the normal ECS join, and history vectors retain capacity across frames.
 
-Extraction sorts pending records by `{Entity::index, Entity::generation}` before pushing them, because ECS dense pools use swap-and-pop and do not promise stable iteration order. The returned list is reused and cleared on each build; the renderer borrows it synchronously and does not retain it.
+`build(world, interpolationAlpha)` clamps the presentation alpha, linearly interpolates translation and scale, applies normalized shortest-path quaternion slerp, and composes one affine model matrix. The same interpolated matrix drives submitted geometry and world-space bounds. Radius scaling uses the Frobenius norm of the TRS matrix's linear 3x3 portion, conservatively covering non-uniform scale. Non-finite poses and invalid bounds are omitted.
+
+The alpha is retained fixed-step debt divided by the step interval, so presentation intentionally interpolates from the penultimate state to the latest completed state rather than extrapolating an unknown future state. Extraction remains deterministic by sorting pending records by `{Entity::index, Entity::generation}` before populating its reusable `SceneRenderList`; the renderer borrows that list synchronously.
 
 ## `SceneGridRange`
 

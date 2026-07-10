@@ -89,6 +89,7 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 
 - `emplace<T>(entity, args...)` constructs one component of type `T`; duplicate insertion throws.
 - `tryGet<T>(entity)`, `contains<T>(entity)`, `remove<T>(entity)`, and `componentCount<T>()` provide component access.
+- `instanceToken()` identifies the current `World` state lifetime. Construction, `clear()`, move replacement, and moved-from reset receive fresh monotonic tokens, allowing external caches to reject same-address and same-entity-generation history from an earlier world state.
 - `reserveEntities(capacity)` reserves slot/free-index storage and rejects capacities beyond the 32-bit entity index range; `entityCapacity()` reports reserved slot capacity.
 - `reserveComponents<T>(capacity)` reserves dense component/entity storage for `T`; `componentCapacity<T>()` reports the dense capacity without changing component semantics.
 - `each<Ts...>(function)` iterates a one-or-more-component query as `(Entity, Ts&...)`; the `const World` overload supplies `(Entity, const Ts&...)` without permitting mutation. Component types must be distinct, unqualified object types.
@@ -97,7 +98,7 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 - `WorldCommandBuffer` records FIFO `destroy`, `remove<T>`, and `emplace<T>` operations for explicit playback after a query. Component insertion accepts an owned `T` value, so deferred commands never retain constructor arguments or caller references.
 - `playback(world)` returns applied/rejected counts. Dead or recycled entity handles, missing removals, and duplicate insertions are rejected without mutating the replacement entity. Playback itself is forbidden while any query is active, including for an empty buffer.
 - Playback detaches its current batch: commands recorded reentrantly during playback remain pending until the next call. If an operation throws, that attempted operation is consumed, the exception propagates, and the unattempted FIFO tail remains queued.
-- `WorldSceneTransform` and `WorldSceneRenderable` are the explicit world-owned render extraction components. `WorldSceneExtractor` joins them into renderer-facing `SceneRenderItem` records; extraction ordering is deterministic by entity handle, independent of dense-pool swap-and-pop order.
+- `WorldSceneTransform` stores the current simulation `TransformTRS`; `WorldSceneExtractor` retains previous/current poses and uses `FixedStepBatch::interpolationAlpha` to compose a smooth renderer-facing model matrix. `teleport()` marks discontinuities that must not interpolate. Extraction ordering remains deterministic by entity handle, independent of dense-pool swap-and-pop order.
 - `clear()` destroys all entities and component storage.
 
 ## File IO helpers

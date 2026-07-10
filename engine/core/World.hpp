@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -71,6 +72,7 @@ public:
         other.freeIndices_.clear();
         other.pools_.clear();
         other.aliveCount_ = 0U;
+        other.instanceToken_ = nextInstanceToken();
     }
     World& operator=(World&& other) {
         ensureStructuralMutationAllowed();
@@ -84,10 +86,16 @@ public:
             other.freeIndices_.clear();
             other.pools_.clear();
             other.aliveCount_ = 0U;
+            instanceToken_ = nextInstanceToken();
+            other.instanceToken_ = nextInstanceToken();
         }
         return *this;
     }
     ~World() = default;
+
+    [[nodiscard]] std::uint64_t instanceToken() const noexcept {
+        return instanceToken_;
+    }
 
     [[nodiscard]] Entity createEntity() {
         ensureStructuralMutationAllowed();
@@ -145,6 +153,7 @@ public:
                 freeIndices_.push_back(index);
             }
         }
+        instanceToken_ = nextInstanceToken();
     }
 
     [[nodiscard]] bool alive(const Entity entity) const noexcept {
@@ -292,6 +301,13 @@ public:
 
 private:
     friend class WorldCommandBuffer;
+    [[nodiscard]] static std::uint64_t nextInstanceToken() noexcept {
+        std::uint64_t token = nextInstanceToken_.fetch_add(1U, std::memory_order_relaxed);
+        while (token == 0U) {
+            token = nextInstanceToken_.fetch_add(1U, std::memory_order_relaxed);
+        }
+        return token;
+    }
 
     static constexpr Index kInvalidDenseIndex = kInvalidIndex;
 
@@ -502,6 +518,8 @@ private:
         }
     }
 
+    inline static std::atomic<std::uint64_t> nextInstanceToken_{1U};
+    std::uint64_t instanceToken_ = nextInstanceToken();
     std::vector<Slot> slots_;
     std::vector<Index> freeIndices_;
     mutable std::size_t activeQueryCount_ = 0U;

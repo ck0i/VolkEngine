@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 namespace {
@@ -163,6 +164,73 @@ int main() {
                          ve::Vec3{normalColumns.at(2).x, normalColumns.at(2).y, normalColumns.at(2).z},
                          ve::Vec3{0.0f, 0.0f, 1.0f});
         expectNearly("singular scale fallback handedness", normalColumns.at(0).w, 1.0f);
+    }
+
+    {
+        const ve::TransformTRS transform{{2.0f, 3.0f, 4.0f},
+                                         ve::rotationY(ve::radians(90.0f)),
+                                         {2.0f, 3.0f, 4.0f}};
+        const ve::Mat4 model = ve::compose(transform);
+        expectNearly("TRS composition preserves translation x", model.m[12], 2.0f);
+        expectNearly("TRS composition preserves translation y", model.m[13], 3.0f);
+        expectNearly("TRS composition preserves translation z", model.m[14], 4.0f);
+        expectNearly("TRS composition rotates scaled x axis", model.m[2], -2.0f, 1.0e-5f);
+        expectNearly("TRS composition rotates scaled z axis", model.m[8], 4.0f, 1.0e-5f);
+
+        const ve::TransformTRS previous{{0.0f, 2.0f, 4.0f},
+                                        ve::rotationY(ve::radians(170.0f)),
+                                        {1.0f, 2.0f, 3.0f}};
+        const ve::TransformTRS current{{10.0f, 6.0f, 8.0f},
+                                       ve::rotationY(ve::radians(-170.0f)),
+                                       {3.0f, 4.0f, 5.0f}};
+        const ve::TransformTRS halfway = ve::interpolate(previous, current, 0.5f);
+        expectVec3Nearly("TRS interpolation blends translation", halfway.translation, {5.0f, 4.0f, 6.0f});
+        expectVec3Nearly("TRS interpolation blends scale", halfway.scale, {2.0f, 3.0f, 4.0f});
+        const ve::Mat4 halfwayRotation = ve::compose({{}, halfway.rotation, {1.0f, 1.0f, 1.0f}});
+        expectNearly("quaternion slerp takes shortest path across 180 degrees", halfwayRotation.m[0], -1.0f, 1.0e-5f);
+
+        const ve::Quat orientation = ve::rotationY(ve::radians(35.0f));
+        const ve::Quat antipodal{-orientation.x, -orientation.y, -orientation.z, -orientation.w};
+        const ve::Mat4 antipodalMidpoint = ve::compose({{}, ve::slerp(orientation, antipodal, 0.5f), {1.0f, 1.0f, 1.0f}});
+        const ve::Mat4 orientationMatrix = ve::compose({{}, orientation, {1.0f, 1.0f, 1.0f}});
+        expectNearly("antipodal quaternion interpolation preserves orientation",
+                     antipodalMidpoint.m[0],
+                     orientationMatrix.m[0]);
+
+        const float hugeScale = std::numeric_limits<float>::max() * 0.5f;
+        const ve::Quat hugeOrientation{
+            orientation.x * hugeScale,
+            orientation.y * hugeScale,
+            orientation.z * hugeScale,
+            orientation.w * hugeScale};
+        const ve::Mat4 hugeOrientationMatrix =
+            ve::compose({{}, hugeOrientation, {1.0f, 1.0f, 1.0f}});
+        expectNearly("quaternion normalization preserves huge finite orientation",
+                     hugeOrientationMatrix.m[0],
+                     orientationMatrix.m[0],
+                     1.0e-5f);
+        const float tinyScale = std::numeric_limits<float>::min();
+        const ve::Quat tinyOrientation{
+            orientation.x * tinyScale,
+            orientation.y * tinyScale,
+            orientation.z * tinyScale,
+            orientation.w * tinyScale};
+        const ve::Mat4 tinyOrientationMatrix =
+            ve::compose({{}, tinyOrientation, {1.0f, 1.0f, 1.0f}});
+        expectNearly("quaternion normalization preserves tiny finite orientation",
+                     tinyOrientationMatrix.m[0],
+                     orientationMatrix.m[0],
+                     1.0e-5f);
+
+        const ve::TransformTRS invalidAlpha =
+            ve::interpolate(previous, current, std::numeric_limits<float>::quiet_NaN());
+        expectVec3Nearly("non-finite interpolation alpha selects previous pose",
+                         invalidAlpha.translation,
+                         previous.translation);
+        if (ve::finite(ve::TransformTRS{{std::numeric_limits<float>::infinity(), 0.0f, 0.0f}})) {
+            std::cerr << "[FAILED] TRS finite validation rejects infinity\n";
+            ++gFailureCount;
+        }
     }
 
     if (gFailureCount == 0) {

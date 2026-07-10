@@ -86,7 +86,7 @@ void validateConfig(const ve::EngineConfig& config) {
 void populateWorldScene(ve::World& world) {
     const ve::World::Entity cube = world.createEntity();
     auto& transform = world.emplace<ve::WorldSceneTransform>(cube);
-    transform.model = ve::translate({0.0f, 0.6f, -2.2f}) * ve::scale({0.75f, 0.75f, 0.75f});
+    transform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {0.75f, 0.75f, 0.75f}};
 
     auto& renderable = world.emplace<ve::WorldSceneRenderable>(cube);
     renderable.mesh = ve::SceneMeshId::Cube;
@@ -104,9 +104,9 @@ void updateWorldScene(ve::World& world, const ve::InputState& input, const doubl
             if (!spin.paused) {
                 spin.angleRadians += deltaSeconds * 0.55;
             }
-            transform.model = ve::translate({0.0f, 0.6f, -2.2f}) *
-                              ve::rotateY(static_cast<float>(spin.angleRadians)) *
-                              ve::scale({0.75f, 0.75f, 0.75f});
+            transform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f},
+                                                  ve::rotationY(static_cast<float>(spin.angleRadians)),
+                                                  {0.75f, 0.75f, 0.75f}};
         });
 }
 
