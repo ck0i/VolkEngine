@@ -462,7 +462,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         }
         transitionImageTracked(frame.commandBuffer, depth_.image, depth_.syncState,
                                imageSyncStateFor(depthWriteIntent.access, depthWriteIntent.usage),
-                               VK_IMAGE_ASPECT_DEPTH_BIT);
+                               VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, true);
     }
     if (timestampsEnabled_) {
         vkCmdWriteTimestamp2(frame.commandBuffer, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, timestampQueryPool_,

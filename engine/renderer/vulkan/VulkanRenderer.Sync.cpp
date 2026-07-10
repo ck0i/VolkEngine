@@ -90,8 +90,9 @@ void VulkanRenderer::Impl::transitionImage(VkCommandBuffer cmd, VkImage image, V
 }
 
 void VulkanRenderer::Impl::transitionImageTracked(VkCommandBuffer cmd, VkImage image, ImageSyncState& syncState, ImageSyncState newState, VkImageAspectFlags aspect,
-                                            const std::uint32_t baseMipLevel, const std::uint32_t levelCount) const {
-    if (syncState.layout == newState.layout && syncState.stage == newState.stage && syncState.access == newState.access) {
+                                            const std::uint32_t baseMipLevel, const std::uint32_t levelCount, const bool forceMemoryDependency) const {
+    if (!imageSyncStateRequiresBarrier(syncState.layout, syncState.stage, syncState.access,
+                                       newState.layout, newState.stage, newState.access, forceMemoryDependency)) {
         return;
     }
     transitionImage(cmd, image, syncState.layout, newState.layout, aspect,

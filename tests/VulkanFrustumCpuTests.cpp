@@ -71,6 +71,16 @@ int main() {
                ve::vulkan_renderer_detail::depthAttachmentLayout(ve::FrameGraphAccess::Write) == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
     expectTrue("depth read uses combined read-only layout",
                ve::vulkan_renderer_detail::depthAttachmentLayout(ve::FrameGraphAccess::Read) == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+    constexpr VkPipelineStageFlags2 depthStages = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    constexpr VkAccessFlags2 depthWriteAccess = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    expectTrue("equal image sync state normally elides a barrier",
+               !ve::vulkan_renderer_detail::imageSyncStateRequiresBarrier(
+                   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, depthStages, depthWriteAccess,
+                   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, depthStages, depthWriteAccess, false));
+    expectTrue("cross-frame equal depth writes force a WAW barrier",
+               ve::vulkan_renderer_detail::imageSyncStateRequiresBarrier(
+                   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, depthStages, depthWriteAccess,
+                   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, depthStages, depthWriteAccess, true));
     expectTrue("texture extent accepts equal device limit",
                ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{4096U, 2048U}, 4096U));
     expectTrue("texture extent rejects width above device limit",

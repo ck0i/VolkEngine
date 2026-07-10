@@ -58,6 +58,12 @@ inline double bytesToMiB(const std::uint64_t bytes) {
         ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
         : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
 }
+[[nodiscard]] inline constexpr bool imageSyncStateRequiresBarrier(
+    const VkImageLayout currentLayout, const VkPipelineStageFlags2 currentStage, const VkAccessFlags2 currentAccess,
+    const VkImageLayout newLayout, const VkPipelineStageFlags2 newStage, const VkAccessFlags2 newAccess,
+    const bool forceMemoryDependency) noexcept {
+    return forceMemoryDependency || currentLayout != newLayout || currentStage != newStage || currentAccess != newAccess;
+}
 
 struct TonemapPushConstants {
     float exposure = 1.0f;
@@ -741,7 +747,7 @@ private:
     [[nodiscard]] FrameImageSyncSnapshot captureFrameImageSyncState(std::uint32_t imageIndex) const;
     void restoreFrameImageSyncState(std::uint32_t imageIndex, const FrameImageSyncSnapshot& snapshot);
     void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess, std::uint32_t baseMipLevel = 0, std::uint32_t levelCount = 1) const;
-    void transitionImageTracked(VkCommandBuffer cmd, VkImage image, ImageSyncState& syncState, ImageSyncState newState, VkImageAspectFlags aspect, std::uint32_t baseMipLevel = 0, std::uint32_t levelCount = 1) const;
+    void transitionImageTracked(VkCommandBuffer cmd, VkImage image, ImageSyncState& syncState, ImageSyncState newState, VkImageAspectFlags aspect, std::uint32_t baseMipLevel = 0, std::uint32_t levelCount = 1, bool forceMemoryDependency = false) const;
     void setObjectName(VkObjectType objectType, std::uint64_t objectHandle, std::string_view name) const;
     void beginDebugLabel(VkCommandBuffer commandBuffer, const char* name, const std::array<float, 4>& color) const;
     void endDebugLabel(VkCommandBuffer commandBuffer) const;
