@@ -1,6 +1,7 @@
 #include "core/Math.hpp"
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <string_view>
@@ -12,6 +13,9 @@ namespace {
 int gFailureCount = 0;
 struct TestPendingUpload {
     VkSemaphore signalSemaphore = VK_NULL_HANDLE;
+};
+struct TestRetiredPipelineSet {
+    std::array<VkFence, 3> completionFences{};
 };
 
 template <typename Handle>
@@ -82,6 +86,24 @@ int main() {
     expectTrue("upload queue clears transferred semaphores",
                pendingUploads[0].signalSemaphore == VK_NULL_HANDLE && pendingUploads[1].signalSemaphore == VK_NULL_HANDLE &&
                    pendingUploads[2].signalSemaphore == VK_NULL_HANDLE);
+
+    const VkFence oldFence = fakeHandle<VkFence>(3);
+    const VkFence replacementFence = fakeHandle<VkFence>(4);
+    const VkFence unrelatedFence = fakeHandle<VkFence>(5);
+    std::vector<TestRetiredPipelineSet> retiredSets{
+        {{{oldFence, VK_NULL_HANDLE, unrelatedFence}}},
+        {{{oldFence, oldFence, VK_NULL_HANDLE}}}};
+    ve::vulkan_renderer_detail::replaceFenceReferences(retiredSets, oldFence, replacementFence);
+    expectTrue("deferred pipeline fence repair replaces every stale reference",
+               retiredSets[0].completionFences[0] == replacementFence &&
+                   retiredSets[0].completionFences[1] == VK_NULL_HANDLE &&
+                   retiredSets[0].completionFences[2] == unrelatedFence &&
+                   retiredSets[1].completionFences[0] == replacementFence &&
+                   retiredSets[1].completionFences[1] == replacementFence &&
+                   retiredSets[1].completionFences[2] == VK_NULL_HANDLE);
+    ve::vulkan_renderer_detail::replaceFenceReferences(retiredSets, VK_NULL_HANDLE, oldFence);
+    expectTrue("deferred pipeline fence repair ignores null stale handle",
+               retiredSets[0].completionFences[1] == VK_NULL_HANDLE && retiredSets[1].completionFences[2] == VK_NULL_HANDLE);
 
     if (gFailureCount == 0) {
         return 0;

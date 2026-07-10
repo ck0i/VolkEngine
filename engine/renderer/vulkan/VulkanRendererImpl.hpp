@@ -156,6 +156,21 @@ inline std::size_t sceneMeshBatchIndex(const SceneMeshId mesh) {
     throw std::runtime_error("Unknown scene mesh id");
 }
 
+template <typename RetiredSet>
+inline void replaceFenceReferences(std::vector<RetiredSet>& retiredSets,
+                                   const VkFence oldFence,
+                                   const VkFence replacementFence) noexcept {
+    if (oldFence == VK_NULL_HANDLE) {
+        return;
+    }
+    for (RetiredSet& retired : retiredSets) {
+        for (VkFence& completionFence : retired.completionFences) {
+            if (completionFence == oldFence) {
+                completionFence = replacementFence;
+            }
+        }
+    }
+}
 inline bool sameGridRange(const SceneGridRange& lhs, const SceneGridRange& rhs) noexcept {
     return lhs.firstItem == rhs.firstItem &&
            lhs.rows == rhs.rows &&

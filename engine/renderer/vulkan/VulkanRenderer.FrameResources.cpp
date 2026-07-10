@@ -313,6 +313,7 @@ void VulkanRenderer::Impl::restoreFrameFenceAfterSubmitFailure(FrameResources& f
     if (fenceResult == VK_SUCCESS) {
         const VkFence oldFence = frame.inFlight;
         frame.inFlight = replacement;
+        vulkan_renderer_detail::replaceFenceReferences(retiredPipelineSets_, oldFence, replacement);
         setObjectName(VK_OBJECT_TYPE_FENCE, handleToUint64(frame.inFlight), "Frame " + std::to_string(frameIndex) + " In-Flight Fence");
         if (oldFence != VK_NULL_HANDLE) {
             vkDestroyFence(device_, oldFence, nullptr);
