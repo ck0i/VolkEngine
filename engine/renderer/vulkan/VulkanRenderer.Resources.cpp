@@ -53,7 +53,12 @@ VulkanRenderer::Impl::ImageResource VulkanRenderer::Impl::createImage(VkExtent2D
     allocationInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     checkVk(vmaCreateImage(allocator_, &imageInfo, &allocationInfo, &resource.image, &resource.allocation, nullptr), "vmaCreateImage");
 
-    resource.view = createImageView(resource.image, format, aspectFlags, mipLevels);
+    try {
+        resource.view = createImageView(resource.image, format, aspectFlags, mipLevels);
+    } catch (...) {
+        destroyImage(resource);
+        throw;
+    }
     return resource;
 }
 
