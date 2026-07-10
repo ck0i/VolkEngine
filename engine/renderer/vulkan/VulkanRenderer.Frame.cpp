@@ -374,6 +374,15 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     const FrameGraph::PassDesc* depthPass = useDepthPrepass ? &graphVariant.graph.pass(graphVariant.passes.depthPrepass) : nullptr;
     const FrameGraph::PassDesc& hdrPass = graphVariant.graph.pass(graphVariant.passes.hdrScene);
     const FrameGraph::PassDesc& tonemapPass = graphVariant.graph.pass(graphVariant.passes.tonemap);
+    const FrameGraph::BarrierIntent& hdrSampleIntent = graphVariant.graph.barrierIntent(
+        graphVariant.passes.tonemap,
+        graphVariant.resources.hdr,
+        FrameGraphAccess::Read,
+        FrameGraphUsage::SampledImage);
+    if (hdrSampleIntent.finalTransition) {
+        throw std::runtime_error("Selected frame graph HDR sample intent cannot be final");
+    }
+    const ImageSyncState hdrSampleState = imageSyncStateFor(hdrSampleIntent.access, hdrSampleIntent.usage);
     const VkDescriptorSet sceneSet = sceneDescriptorSets_[frameIndex_];
     const VkDeviceSize offset = 0;
     if (sceneDrawCalls > 0U) {
@@ -454,7 +463,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         vkCmdEndRendering(frame.commandBuffer);
 
         transitionImageTracked(frame.commandBuffer, hdr_.image, hdr_.syncState,
-                               imageSyncStateFor(FrameGraphAccess::Read, FrameGraphUsage::SampledImage),
+                               hdrSampleState,
                                VK_IMAGE_ASPECT_COLOR_BIT);
         if (timestampsEnabled_) {
             vkCmdWriteTimestamp2(frame.commandBuffer, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, timestampQueryPool_,

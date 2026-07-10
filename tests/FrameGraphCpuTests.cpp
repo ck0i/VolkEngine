@@ -115,6 +115,11 @@ int main() {
         expectEqual("depth read transition follows depth write", barrierPlan[1].pass.index, hdrPass.index);
         expectEqual("depth read transition records previous write", barrierPlan[1].hasPrevious, true);
         expectEqual("hdr sampled transition follows hdr write", barrierPlan[3].pass.index, tonemapPass.index);
+        const FrameGraph::BarrierIntent& hdrSampleIntent = graph.barrierIntent(
+            tonemapPass, hdr, FrameGraphAccess::Read, FrameGraphUsage::SampledImage);
+        expectEqual("HDR sample intent targets tonemap", hdrSampleIntent.pass.index, tonemapPass.index);
+        expectEqual("HDR sample intent records color-write predecessor", static_cast<int>(hdrSampleIntent.previousUsage), static_cast<int>(FrameGraphUsage::ColorAttachment));
+        expectEqual("HDR sample intent is not final", hdrSampleIntent.finalTransition, false);
         expectEqual("final present transition is emitted last", barrierPlan.back().finalTransition, true);
         expectEqual("final transition targets swapchain", barrierPlan.back().resource.index, swapchain.index);
         const FrameGraph::BarrierIntent& finalIntent = graph.finalBarrierIntent(swapchain);
