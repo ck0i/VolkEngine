@@ -34,18 +34,25 @@ Application::Application(EngineConfig config)
     sceneRenderer_.setImportedModelBounds(renderer_.meshBounds(SceneMeshId::ImportedModel));
 }
 int Application::run(const RunOptions& options) {
-    return runInternal(nullptr, nullptr, options);
+    return runInternal(nullptr, nullptr, nullptr, options);
 }
 
 int Application::run(World& world, const RunOptions& options) {
-    return runInternal(&world, nullptr, options);
+    return runInternal(&world, nullptr, nullptr, options);
 }
 
 int Application::run(World& world, const WorldUpdateCallback update, const RunOptions& options) {
-    return runInternal(&world, update, options);
+    return runInternal(&world, update, nullptr, options);
 }
 
-int Application::runInternal(World* world, const WorldUpdateCallback update, const RunOptions& options) {
+int Application::runWithInput(World& world, const WorldInputUpdateCallback update, const RunOptions& options) {
+    return runInternal(&world, nullptr, update, options);
+}
+
+int Application::runInternal(World* world,
+                             const WorldUpdateCallback update,
+                             const WorldInputUpdateCallback inputUpdate,
+                             const RunOptions& options) {
     logger()->info("Entering main loop");
     if (options.acquireRecoverySmoke) {
         renderer_.armAcquireRecoverySmoke();
@@ -67,14 +74,19 @@ int Application::runInternal(World* world, const WorldUpdateCallback update, con
         const double previousSimulationElapsedSeconds = simulationElapsedSeconds_;
         simulationElapsedSeconds_ = advanceSimulationSeconds(simulationElapsedSeconds_, timing.deltaSeconds, 0.05);
         const double simulationDelta = simulationElapsedSeconds_ - previousSimulationElapsedSeconds;
-        window_.updateCamera(camera_, static_cast<float>(simulationDelta));
+        const InputState input = window_.pollInput();
+        window_.updateCamera(camera_, input, static_cast<float>(simulationDelta));
         const VkExtent2D extent = window_.framebufferExtent();
         if (extent.width > 0U && extent.height > 0U) {
             camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
         }
 
-        if (world != nullptr && update != nullptr) {
-            update(*world, simulationElapsedSeconds_, simulationDelta);
+        if (world != nullptr) {
+            if (inputUpdate != nullptr) {
+                inputUpdate(*world, input, simulationElapsedSeconds_, simulationDelta);
+            } else if (update != nullptr) {
+                update(*world, simulationElapsedSeconds_, simulationDelta);
+            }
         }
 
         if (!screenshotRequested && !options.screenshotPath.empty()) {

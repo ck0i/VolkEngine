@@ -14,12 +14,18 @@ class Application {
 public:
     explicit Application(EngineConfig config);
     using WorldUpdateCallback = void (*)(World&, double simulationElapsedSeconds, double simulationDeltaSeconds);
+    using WorldInputUpdateCallback =
+        void (*)(World&, const InputState&, double simulationElapsedSeconds, double simulationDeltaSeconds);
     int run(const RunOptions& options);
     int run(World& world, const RunOptions& options);
     int run(World& world, WorldUpdateCallback update, const RunOptions& options);
+    int runWithInput(World& world, WorldInputUpdateCallback update, const RunOptions& options);
 
 private:
-    int runInternal(World* world, WorldUpdateCallback update, const RunOptions& options);
+    int runInternal(World* world,
+                    WorldUpdateCallback update,
+                    WorldInputUpdateCallback inputUpdate,
+                    const RunOptions& options);
     EngineConfig config_;
     GlfwRuntime glfwRuntime_;
     Window window_;

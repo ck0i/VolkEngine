@@ -2,6 +2,7 @@
 
 #include "core/Config.hpp"
 #include "core/Camera.hpp"
+#include "platform/Input.hpp"
 
 #include <cstdint>
 #include <vulkan/vulkan.h>
@@ -35,6 +36,8 @@ public:
     void waitEvents();
     [[nodiscard]] bool shouldClose() const;
     void requestClose();
+    [[nodiscard]] InputState pollInput();
+    void updateCamera(Camera& camera, const InputState& input, float dt);
     void updateCamera(Camera& camera, float dt);
     void setSize(std::uint32_t width, std::uint32_t height);
     void setTitle(const char* title);
@@ -47,12 +50,17 @@ public:
 
 private:
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+    static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+    static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+    static void cursorPositionCallback(GLFWwindow* window, double x, double y);
+    static void focusCallback(GLFWwindow* window, int focused);
+
+    void beginCursorCapture();
+    void endCursorCapture();
 
     GLFWwindow* window_ = nullptr;
     mutable bool framebufferResized_ = false;
-    bool mouseLookActive_ = false;
-    double lastCursorX_ = 0.0;
-    double lastCursorY_ = 0.0;
+    InputTracker inputTracker_;
 };
 
 } // namespace ve

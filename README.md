@@ -90,7 +90,7 @@ World-backed extraction smoke run:
 
 Common flags: `--frames N`, `--world-scene`, `--resize-smoke`, `--acquire-recovery-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
 
-Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold right mouse button for captured mouse-look.
+Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold right mouse button for captured mouse-look; with `--world-scene`, `Space` pauses/resumes the cube rotation.
 
 ## Developer notes
 

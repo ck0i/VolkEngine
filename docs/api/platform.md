@@ -2,7 +2,7 @@
 
 Headers: `engine/platform/Window.hpp`, `engine/platform/Input.hpp`.
 
-`GlfwRuntime` owns GLFW's process-global initialization. `Window` owns one `GLFWwindow*`, collects native input, tracks framebuffer resize state, and creates Vulkan surfaces for the backend. The GLFW-free `CameraInput` mapper is the deterministic engine-side input policy.
+`GlfwRuntime` owns GLFW's process-global initialization. `Window` owns one `GLFWwindow*`, translates native callbacks into a zero-allocation `InputTracker`, tracks framebuffer resize state, and creates Vulkan surfaces for the backend. `InputState`, `CameraInput`, and their helpers remain GLFW-free for deterministic engine, gameplay, test, and replay code.
 
 ## Construction and lifetime
 
@@ -27,9 +27,9 @@ ve::Window window{glfwRuntime, config};
 
 ## Input and camera
 
-`updateCamera(Camera& camera, float dt)` collects current keyboard/mouse state and applies it to the supplied camera.
+GLFW callbacks update `InputTracker` as events arrive, preserving presses and releases that both occur between frames. `pollInput()` consumes one `InputState` value snapshot: held state persists, while pressed/released transitions and accumulated cursor deltas clear after consumption. The snapshot safely exposes supported keyboard and mouse-button state, cursor position/delta, and capture status without GLFW types.
 
-The reusable `mapCameraInput(...)` helper converts boolean actions into normalized signed axes, while `applyCameraInput(...)` applies those axes and mouse deltas to a camera transactionally. Non-finite axes or delta time, negative delta time, and camera-step overflow are rejected before the caller's camera is changed. This split keeps GLFW polling platform-owned and makes camera input deterministic to test and replay.
+`updateCamera(Camera& camera, const InputState& input, float dt)` applies the same snapshot that gameplay may receive through `Application::runWithInput(...)`. The compatibility overload `updateCamera(Camera& camera, float dt)` consumes the current tracker snapshot itself. `mapCameraInput(...)` converts actions into normalized signed axes, while `applyCameraInput(...)` applies axes and mouse deltas transactionally. Non-finite axes or delta time, negative delta time, and camera-step overflow are rejected before the caller's camera changes. Focus loss releases held inputs, clears cursor deltas, and exits captured/raw mouse mode.
 
 Current sandbox controls:
 
@@ -38,6 +38,7 @@ Current sandbox controls:
 - `Q` / `E`: down/up movement.
 - Arrow keys: look.
 - Hold right mouse button: captured mouse-look.
+- `Space` with `--world-scene`: pause/resume cube rotation.
 
 ## Size and resize state
 

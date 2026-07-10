@@ -50,7 +50,7 @@ ve::Application app{config};
 return app.run(ve::RunOptions{.maxFrames = 120});
 ```
 `Application` owns the main `Window`, `Camera`, concrete `VulkanRenderer` facade, demo/world scene extractors, and `Clock`. It builds the per-frame scene submission and passes it to the renderer; the backend only borrows that list during `draw()`. Private split internals stay behind `VulkanRenderer::Impl`.
-`run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the non-owning function-pointer callback once per frame after clamped simulation timing and camera input, then extracts the read-only world snapshot and submits it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
+`run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback once per frame after clamped simulation timing and camera input. `runWithInput(world, update, options)` additionally passes a read-only reference to the `InputState` value snapshot used for that frame's camera update, including held/pressed/released transitions and cursor motion. Both callback paths then extract the read-only world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
 
 ## `Camera`
 

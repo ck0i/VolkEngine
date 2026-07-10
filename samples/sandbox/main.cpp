@@ -22,6 +22,11 @@ struct SandboxArgs {
     bool help = false;
 };
 
+struct SpinController {
+    double angleRadians = 0.0;
+    bool paused = false;
+};
+
 template <typename Integer>
 Integer parseInteger(const std::string_view value, const std::string_view optionName) {
     Integer parsed{};
@@ -87,16 +92,21 @@ void populateWorldScene(ve::World& world) {
     renderable.mesh = ve::SceneMeshId::Cube;
     renderable.material.albedoRoughness = {0.75f, 0.18f, 0.08f, 0.55f};
     renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
+    world.emplace<SpinController>(cube);
 }
 
-void updateWorldScene(ve::World& world, const double elapsedSeconds, const double) {
-    world.each<ve::WorldSceneTransform, ve::WorldSceneRenderable>(
-        [elapsedSeconds](const ve::World::Entity, ve::WorldSceneTransform& transform, const ve::WorldSceneRenderable& renderable) {
-            if (renderable.mesh == ve::SceneMeshId::Cube) {
-                transform.model = ve::translate({0.0f, 0.6f, -2.2f}) *
-                                  ve::rotateY(static_cast<float>(elapsedSeconds * 0.55)) *
-                                  ve::scale({0.75f, 0.75f, 0.75f});
+void updateWorldScene(ve::World& world, const ve::InputState& input, const double, const double deltaSeconds) {
+    world.each<ve::WorldSceneTransform, SpinController>(
+        [&](const ve::World::Entity, ve::WorldSceneTransform& transform, SpinController& spin) {
+            if (input.pressed(ve::InputKey::Space)) {
+                spin.paused = !spin.paused;
             }
+            if (!spin.paused) {
+                spin.angleRadians += deltaSeconds * 0.55;
+            }
+            transform.model = ve::translate({0.0f, 0.6f, -2.2f}) *
+                              ve::rotateY(static_cast<float>(spin.angleRadians)) *
+                              ve::scale({0.75f, 0.75f, 0.75f});
         });
 }
 
@@ -186,7 +196,7 @@ int main(int argc, char** argv) {
         }
         ve::World world;
         populateWorldScene(world);
-        return app.run(world, &updateWorldScene, args.run);
+        return app.runWithInput(world, &updateWorldScene, args.run);
     } catch (const std::exception& e) {
         ve::logger()->critical("Fatal error: {}", e.what());
         std::cerr << "Fatal error: " << e.what() << '\n';
