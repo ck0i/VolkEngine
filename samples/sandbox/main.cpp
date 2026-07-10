@@ -32,8 +32,7 @@ struct SpinController {
     bool paused = false;
 };
 
-template <typename Integer>
-Integer parseInteger(const std::string_view value, const std::string_view optionName) {
+template <typename Integer> Integer parseInteger(const std::string_view value, const std::string_view optionName) {
     Integer parsed{};
     const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), parsed);
     if (ec != std::errc{} || ptr != value.data() + value.size()) {
@@ -69,46 +68,49 @@ float parseFloat(const std::string_view value, const std::string_view optionName
     return parsed;
 }
 
-std::string_view requireValue(int& index, const int argc, char** argv, const std::string_view optionName) {
+std::string_view requireValue(int &index, const int argc, char **argv, const std::string_view optionName) {
     if (index + 1 >= argc) {
         throw std::invalid_argument("Missing value for " + std::string(optionName));
     }
     return std::string_view{argv[++index]};
 }
 
-void validateConfig(const ve::EngineConfig& config) {
-    const std::size_t requiredItems = ve::DemoSceneRenderer::requiredItemCount(config.materialGridRows, config.materialGridColumns);
+void validateConfig(const ve::EngineConfig &config) {
+    const std::size_t requiredItems =
+        ve::DemoSceneRenderer::requiredItemCount(config.materialGridRows, config.materialGridColumns);
     if (requiredItems > kMaxSandboxSceneItems) {
-        throw std::runtime_error("Sandbox material grid would generate " + std::to_string(requiredItems)
-                                 + " scene items; cap is " + std::to_string(kMaxSandboxSceneItems)
-                                 + " to avoid exhausting host memory. Use smaller --grid-rows/--grid-columns.");
+        throw std::runtime_error("Sandbox material grid would generate " + std::to_string(requiredItems) +
+                                 " scene items; cap is " + std::to_string(kMaxSandboxSceneItems) +
+                                 " to avoid exhausting host memory. Use smaller "
+                                 "--grid-rows/--grid-columns.");
     }
     if (config.materialGridTileRows == 0 || config.materialGridTileColumns == 0) {
         throw std::runtime_error("Sandbox material grid tile dimensions must be positive.");
     }
 }
 
-void populateWorldScene(ve::World& world) {
+void populateWorldScene(ve::World &world) {
     const ve::World::Entity pivot = world.createEntity();
-    auto& pivotTransform = world.emplace<ve::WorldSceneTransform>(pivot);
+    auto &pivotTransform = world.emplace<ve::WorldSceneTransform>(pivot);
     pivotTransform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {1.0f, 1.0f, 1.0f}};
     world.emplace<SpinController>(pivot);
 
     const ve::World::Entity cube = world.createEntity();
-    auto& transform = world.emplace<ve::WorldSceneTransform>(cube);
+    auto &transform = world.emplace<ve::WorldSceneTransform>(cube);
     transform.current = ve::TransformTRS{{0.85f, 0.0f, 0.0f}, {}, {0.75f, 0.75f, 0.75f}};
     ve::setWorldSceneParent(world, cube, pivot);
 
-    auto& renderable = world.emplace<ve::WorldSceneRenderable>(cube);
+    auto &renderable = world.emplace<ve::WorldSceneRenderable>(cube);
     renderable.mesh = ve::SceneMeshId::Cube;
     renderable.material.albedoRoughness = {0.75f, 0.18f, 0.08f, 0.55f};
     renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
 }
 
-void updateWorldScene(void*, ve::World& world, ve::WorldSystemScheduler::CommandWriter&, const ve::InputState& input, const double, const double deltaSeconds) {
+void updateWorldScene(void *, ve::World &world, ve::WorldSystemScheduler::CommandWriter &, const ve::InputState &input,
+                      const double, const double deltaSeconds) {
     world.each<ve::WorldSceneTransform, SpinController>(
-        [&](const ve::World::Entity, ve::WorldSceneTransform& transform, SpinController& spin) {
-            if (input.pressed(ve::InputKey::Space)) {
+        [&](const ve::World::Entity, ve::WorldSceneTransform &transform, SpinController &spin) {
+            if (input.pressed(ve::InputKey::Space) || input.gamepad(0U).pressed(ve::GamepadButton::A)) {
                 spin.paused = !spin.paused;
             }
             if (!spin.paused) {
@@ -118,7 +120,7 @@ void updateWorldScene(void*, ve::World& world, ve::WorldSystemScheduler::Command
         });
 }
 
-SandboxArgs parseArguments(int argc, char** argv) {
+SandboxArgs parseArguments(int argc, char **argv) {
     SandboxArgs args{};
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg{argv[i]};
@@ -146,11 +148,14 @@ SandboxArgs parseArguments(int argc, char** argv) {
         } else if (arg == "--grid-rows") {
             args.config.materialGridRows = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--grid-columns") {
-            args.config.materialGridColumns = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
+            args.config.materialGridColumns =
+                parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--grid-tile-rows") {
-            args.config.materialGridTileRows = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
+            args.config.materialGridTileRows =
+                parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--grid-tile-columns") {
-            args.config.materialGridTileColumns = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
+            args.config.materialGridTileColumns =
+                parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--auto-depth-prepass") {
             args.config.depthPrepassMode = ve::DepthPrepassMode::Auto;
         } else if (arg == "--depth-prepass") {
@@ -191,12 +196,20 @@ SandboxArgs parseArguments(int argc, char** argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--load-scene FILE.vescene] [--save-scene FILE.vescene] [--resize-smoke] [--acquire-recovery-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
+    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--load-scene "
+                 "FILE.vescene] [--save-scene FILE.vescene] [--resize-smoke] "
+                 "[--acquire-recovery-smoke] [--screenshot FILE.ppm] "
+                 "[--hot-reload-shaders] [--grid-rows N] [--grid-columns N] "
+                 "[--grid-tile-rows N] [--grid-tile-columns N] "
+                 "[--auto-depth-prepass|--depth-prepass|--no-depth-prepass] "
+                 "[--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] "
+                 "[--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] "
+                 "[--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
 }
 
 } // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
     try {
         ve::initializeLogging();
         SandboxArgs args = parseArguments(argc, argv);
@@ -224,7 +237,7 @@ int main(int argc, char** argv) {
             ve::saveWorldScene(world, args.saveScenePath);
         }
         return result;
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         ve::logger()->critical("Fatal error: {}", e.what());
         std::cerr << "Fatal error: " << e.what() << '\n';
         return 1;

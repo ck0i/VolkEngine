@@ -7,7 +7,8 @@ namespace ve {
 class Camera {
 public:
     void setAspect(float aspect);
-    void update(float forward, float right, float up, float yawDelta, float pitchDelta, float dt);
+    void update(float forward, float right, float up, float yawDelta, float pitchDelta, float dt,
+                float movementMagnitude = 1.0f);
     void rotate(float yawDegrees, float pitchDegrees);
 
     [[nodiscard]] Mat4 viewMatrix() const;

@@ -18,6 +18,7 @@ namespace {
 
 } // namespace
 
+
 void Camera::setAspect(const float aspect) {
     if (!std::isfinite(aspect) || aspect <= 0.0f) {
         throw std::runtime_error("Camera aspect ratio must be finite and positive");
@@ -25,10 +26,13 @@ void Camera::setAspect(const float aspect) {
     aspect_ = aspect;
 }
 
-void Camera::update(const float forwardInput, const float rightInput, const float upInput, const float yawDelta, const float pitchDelta, const float dt) {
+void Camera::update(const float forwardInput, const float rightInput, const float upInput, const float yawDelta,
+                    const float pitchDelta, const float dt, const float movementMagnitude) {
     if (!finiteCameraInput(forwardInput) || !finiteCameraInput(rightInput) || !finiteCameraInput(upInput) ||
-        !finiteCameraInput(yawDelta) || !finiteCameraInput(pitchDelta) || !finiteCameraInput(dt) || dt < 0.0f) {
-        throw std::runtime_error("Camera inputs and delta time must be finite; delta time must be non-negative");
+        !finiteCameraInput(yawDelta) || !finiteCameraInput(pitchDelta) || !finiteCameraInput(dt) ||
+        !finiteCameraInput(movementMagnitude) || dt < 0.0f || movementMagnitude < 0.0f) {
+        throw std::runtime_error("Camera inputs, delta time, and movement "
+                                 "magnitude must be finite and non-negative");
     }
 
     const float lookSensitivity = 90.0f;
@@ -39,6 +43,7 @@ void Camera::update(const float forwardInput, const float rightInput, const floa
     }
 
     const float movementSpeed = 4.5f;
+    const float clampedMovementMagnitude = std::min(movementMagnitude, 1.0f);
     const Vec3 movement = forward() * forwardInput + right() * rightInput + Vec3{0.0f, 1.0f, 0.0f} * upInput;
     if (!finiteVec3(movement)) {
         throw std::runtime_error("Camera movement input produced a non-finite vector");
@@ -50,7 +55,8 @@ void Camera::update(const float forwardInput, const float rightInput, const floa
 
     Vec3 nextPosition = position_;
     if (movementLength > 0.0001f) {
-        const Vec3 displacement = normalize(movement) * movementSpeed * dt;
+        const float movementScale = clampedMovementMagnitude / movementLength;
+        const Vec3 displacement = movement * movementScale * movementSpeed * dt;
         if (!finiteVec3(displacement)) {
             throw std::runtime_error("Camera movement step is outside the finite range");
         }

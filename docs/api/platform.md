@@ -27,9 +27,22 @@ ve::Window window{glfwRuntime, config};
 
 ## Input and camera
 
-GLFW callbacks update `InputTracker` as events arrive, preserving presses and releases that both occur between frames. `pollInput()` consumes one `InputState` value snapshot: held state persists, while pressed/released transitions plus accumulated cursor and two-axis scroll deltas clear after consumption. The snapshot safely exposes supported keyboard and mouse-button state, cursor position/delta, scroll motion, and capture status without GLFW types. Non-finite events are ignored, and finite accumulation overflow resets the affected motion instead of poisoning a frame.
+GLFW callbacks update `InputTracker` as events arrive, preserving keyboard and mouse presses/releases that both occur between render frames. `pollInput()` consumes one `InputState` value snapshot after polling events and four standard-gamepad slots. Gamepads use GLFW's mapping database and are sampled once per render frame, so transitions occurring entirely between polls are not observable.
 
-`updateCamera(Camera& camera, const InputState& input, float dt)` applies the same snapshot that gameplay may receive through `Application::runWithInput(...)`. The compatibility overload `updateCamera(Camera& camera, float dt)` consumes the current tracker snapshot itself. `mapCameraInput(...)` converts actions into normalized signed axes, while `applyCameraInput(...)` applies axes and mouse deltas transactionally. Non-finite axes or delta time, negative delta time, and camera-step overflow are rejected before the caller's camera changes. Focus loss releases held inputs, clears cursor and scroll deltas, and exits captured/raw mouse mode.
+The public snapshot is GLFW-free:
+
+- `InputKey` covers letters, digits, navigation, modifiers, and function keys.
+- `InputMouseButton` covers eight stable buttons.
+- `GamepadButton` follows the standard face/bumper/thumb/D-pad layout.
+- `GamepadAxis` exposes left/right sticks with engine-semantic positive Y upward and triggers normalized to `[0, 1]`.
+- Four stable slots map to GLFW joystick slots 1-4. A disconnect neutralizes axes and releases formerly held buttons exactly once; a reconnect begins a fresh button lifetime.
+- `GamepadDeadzone` defaults to radial `0.15` stick and `0.05` trigger thresholds. Values are continuously rescaled outside each threshold, stick diagonals retain direction, and published axes remain finite and bounded.
+
+`InputState` exposes `pressed`, `held`, and `released` keyboard, mouse, and per-slot gamepad queries. Cursor and scroll deltas accumulate across all events in a render frame. Holding the right mouse button captures the cursor without a jump; focus loss releases keyboard/mouse inputs and reseeds the cursor baseline.
+
+`Application` accumulates each render snapshot into its fixed-step input buffer. Transitions and pointer deltas survive render frames with no simulation step, appear on the first eventual step, and clear before additional catch-up steps. Held keyboard, mouse, and gamepad levels remain available to every step.
+
+`updateCamera(Camera& camera, const InputState& input, float dt)` applies the same snapshot gameplay receives through `Application::runWithInput(...)`; the compatibility overload consumes the tracker directly. `mapCameraInput(...)` combines keyboard/mouse with slot 0: left stick moves horizontally, right stick looks, and the triggers move down/up. Combined signed axes clamp to `[-1, 1]`. `applyCameraInput(...)` rejects non-finite axes, negative/non-finite delta time, and camera-step overflow before committing a camera change.
 
 Current sandbox controls:
 
@@ -38,7 +51,10 @@ Current sandbox controls:
 - `Q` / `E`: down/up movement.
 - Arrow keys: look.
 - Hold right mouse button: captured mouse-look.
-- `Space` with `--world-scene`: pause/resume cube rotation.
+- `Space` or gamepad 1 `A` with `--world-scene`: pause/resume cube rotation.
+- Gamepad 1 left stick: horizontal movement.
+- Gamepad 1 right stick: look.
+- Gamepad 1 left/right triggers: down/up movement.
 
 ## Size and resize state
 

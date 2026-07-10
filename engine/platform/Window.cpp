@@ -21,7 +21,7 @@ void validateWindowDimensions(const std::uint32_t width, const std::uint32_t hei
     }
 }
 
-bool mapGlfwKey(const int glfwKey, InputKey& inputKey) noexcept {
+bool mapGlfwKey(const int glfwKey, InputKey &inputKey) noexcept {
     switch (glfwKey) {
     case GLFW_KEY_A: inputKey = InputKey::A; return true;
     case GLFW_KEY_B: inputKey = InputKey::B; return true;
@@ -90,7 +90,7 @@ bool mapGlfwKey(const int glfwKey, InputKey& inputKey) noexcept {
     }
 }
 
-bool mapGlfwMouseButton(const int glfwButton, InputMouseButton& inputButton) noexcept {
+bool mapGlfwMouseButton(const int glfwButton, InputMouseButton &inputButton) noexcept {
     switch (glfwButton) {
     case GLFW_MOUSE_BUTTON_LEFT: inputButton = InputMouseButton::Left; return true;
     case GLFW_MOUSE_BUTTON_RIGHT: inputButton = InputMouseButton::Right; return true;
@@ -102,6 +102,55 @@ bool mapGlfwMouseButton(const int glfwButton, InputMouseButton& inputButton) noe
     case GLFW_MOUSE_BUTTON_8: inputButton = InputMouseButton::Button8; return true;
     default: return false;
     }
+}
+[[nodiscard]] constexpr std::uint16_t gamepadButtonMask(const GamepadButton button) noexcept {
+    return static_cast<std::uint16_t>(std::uint16_t{1} << static_cast<std::uint8_t>(button));
+}
+
+void mapGlfwGamepadButtons(const GLFWgamepadstate &glfwState, GamepadSample &sample) noexcept {
+    const auto mapButton = [&glfwState, &sample](const int glfwButton, const GamepadButton button) {
+        if (glfwState.buttons[glfwButton] == GLFW_PRESS) {
+            sample.buttons |= gamepadButtonMask(button);
+        }
+    };
+
+    mapButton(GLFW_GAMEPAD_BUTTON_A, GamepadButton::A);
+    mapButton(GLFW_GAMEPAD_BUTTON_B, GamepadButton::B);
+    mapButton(GLFW_GAMEPAD_BUTTON_X, GamepadButton::X);
+    mapButton(GLFW_GAMEPAD_BUTTON_Y, GamepadButton::Y);
+    mapButton(GLFW_GAMEPAD_BUTTON_LEFT_BUMPER, GamepadButton::LeftBumper);
+    mapButton(GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER, GamepadButton::RightBumper);
+    mapButton(GLFW_GAMEPAD_BUTTON_BACK, GamepadButton::Back);
+    mapButton(GLFW_GAMEPAD_BUTTON_START, GamepadButton::Start);
+    mapButton(GLFW_GAMEPAD_BUTTON_GUIDE, GamepadButton::Guide);
+    mapButton(GLFW_GAMEPAD_BUTTON_LEFT_THUMB, GamepadButton::LeftThumb);
+    mapButton(GLFW_GAMEPAD_BUTTON_RIGHT_THUMB, GamepadButton::RightThumb);
+    mapButton(GLFW_GAMEPAD_BUTTON_DPAD_UP, GamepadButton::DpadUp);
+    mapButton(GLFW_GAMEPAD_BUTTON_DPAD_RIGHT, GamepadButton::DpadRight);
+    mapButton(GLFW_GAMEPAD_BUTTON_DPAD_DOWN, GamepadButton::DpadDown);
+    mapButton(GLFW_GAMEPAD_BUTTON_DPAD_LEFT, GamepadButton::DpadLeft);
+}
+
+void mapGlfwGamepadAxes(const GLFWgamepadstate &glfwState, GamepadSample &sample) noexcept {
+    sample.axes[static_cast<std::size_t>(GamepadAxis::LeftX)] = glfwState.axes[GLFW_GAMEPAD_AXIS_LEFT_X];
+    sample.axes[static_cast<std::size_t>(GamepadAxis::LeftY)] = -glfwState.axes[GLFW_GAMEPAD_AXIS_LEFT_Y];
+    sample.axes[static_cast<std::size_t>(GamepadAxis::RightX)] = glfwState.axes[GLFW_GAMEPAD_AXIS_RIGHT_X];
+    sample.axes[static_cast<std::size_t>(GamepadAxis::RightY)] = -glfwState.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y];
+    sample.axes[static_cast<std::size_t>(GamepadAxis::LeftTrigger)] =
+        (glfwState.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] + 1.0F) * 0.5F;
+    sample.axes[static_cast<std::size_t>(GamepadAxis::RightTrigger)] =
+        (glfwState.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] + 1.0F) * 0.5F;
+}
+
+void pollGlfwGamepad(InputTracker &tracker, const std::size_t slot) noexcept {
+    GamepadSample sample{};
+    GLFWgamepadstate glfwState{};
+    if (glfwGetGamepadState(GLFW_JOYSTICK_1 + static_cast<int>(slot), &glfwState) == GLFW_TRUE) {
+        sample.connected = true;
+        mapGlfwGamepadButtons(glfwState, sample);
+        mapGlfwGamepadAxes(glfwState, sample);
+    }
+    tracker.gamepadSample(slot, sample);
 }
 
 } // namespace
@@ -121,7 +170,7 @@ GlfwRuntime::~GlfwRuntime() {
     glfwTerminate();
 }
 
-Window::Window(GlfwRuntime&, const EngineConfig& config) {
+Window::Window(GlfwRuntime &, const EngineConfig &config) {
     validateWindowDimensions(config.initialWidth, config.initialHeight);
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -149,43 +198,34 @@ Window::~Window() {
     }
 }
 
-void Window::pollEvents() {
-    glfwPollEvents();
-}
+void Window::pollEvents() { glfwPollEvents(); }
 
-void Window::waitEvents() {
-    glfwWaitEvents();
-}
+void Window::waitEvents() { glfwWaitEvents(); }
 
-bool Window::shouldClose() const {
-    return glfwWindowShouldClose(window_) == GLFW_TRUE;
-}
+bool Window::shouldClose() const { return glfwWindowShouldClose(window_) == GLFW_TRUE; }
 
-void Window::requestClose() {
-    glfwSetWindowShouldClose(window_, GLFW_TRUE);
-}
+void Window::requestClose() { glfwSetWindowShouldClose(window_, GLFW_TRUE); }
 
 InputState Window::pollInput() {
+    for (std::size_t slot = 0; slot < GamepadSlotCount; ++slot) {
+        pollGlfwGamepad(inputTracker_, slot);
+    }
     return inputTracker_.consume();
 }
 
-void Window::updateCamera(Camera& camera, const InputState& state, const float dt) {
+void Window::updateCamera(Camera &camera, const InputState &state, const float dt) {
     const CameraInput input = mapCameraInput(state);
     applyCameraInput(camera, input, dt);
 }
 
-void Window::updateCamera(Camera& camera, const float dt) {
-    updateCamera(camera, pollInput(), dt);
-}
+void Window::updateCamera(Camera &camera, const float dt) { updateCamera(camera, pollInput(), dt); }
 
 void Window::setSize(const std::uint32_t width, const std::uint32_t height) {
     validateWindowDimensions(width, height);
     glfwSetWindowSize(window_, static_cast<int>(width), static_cast<int>(height));
 }
 
-void Window::setTitle(const char* title) {
-    glfwSetWindowTitle(window_, title);
-}
+void Window::setTitle(const char *title) { glfwSetWindowTitle(window_, title); }
 
 VkExtent2D Window::framebufferExtent() const {
     int width = 0;
@@ -200,21 +240,21 @@ bool Window::consumeFramebufferResized() {
     return resized;
 }
 
-void Window::createSurface(VkInstance instance, VkSurfaceKHR* surface) const {
+void Window::createSurface(VkInstance instance, VkSurfaceKHR *surface) const {
     if (glfwCreateWindowSurface(instance, window_, nullptr, surface) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan window surface");
     }
 }
 
-void Window::framebufferResizeCallback(GLFWwindow* window, int, int) {
-    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+void Window::framebufferResizeCallback(GLFWwindow *window, int, int) {
+    auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
     if (self) {
         self->framebufferResized_ = true;
     }
 }
 
-void Window::keyCallback(GLFWwindow* window, const int key, int, const int action, int) {
-    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+void Window::keyCallback(GLFWwindow *window, const int key, int, const int action, int) {
+    auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
     if (!self || (action != GLFW_PRESS && action != GLFW_RELEASE)) {
         return;
     }
@@ -230,8 +270,8 @@ void Window::keyCallback(GLFWwindow* window, const int key, int, const int actio
     }
 }
 
-void Window::mouseButtonCallback(GLFWwindow* window, const int button, const int action, int) {
-    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+void Window::mouseButtonCallback(GLFWwindow *window, const int button, const int action, int) {
+    auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
     if (!self || (action != GLFW_PRESS && action != GLFW_RELEASE)) {
         return;
     }
@@ -252,22 +292,22 @@ void Window::mouseButtonCallback(GLFWwindow* window, const int button, const int
     }
 }
 
-void Window::cursorPositionCallback(GLFWwindow* window, const double x, const double y) {
-    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+void Window::cursorPositionCallback(GLFWwindow *window, const double x, const double y) {
+    auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
     if (self) {
         self->inputTracker_.cursorPosition(x, y);
     }
 }
 
-void Window::scrollCallback(GLFWwindow* window, const double xOffset, const double yOffset) {
-    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+void Window::scrollCallback(GLFWwindow *window, const double xOffset, const double yOffset) {
+    auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
     if (self) {
         self->inputTracker_.scrollEvent(xOffset, yOffset);
     }
 }
 
-void Window::focusCallback(GLFWwindow* window, const int focused) {
-    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+void Window::focusCallback(GLFWwindow *window, const int focused) {
+    auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
     if (self && focused == GLFW_FALSE) {
         self->inputTracker_.focusLost();
         self->endCursorCapture();
