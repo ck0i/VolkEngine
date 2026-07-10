@@ -1,14 +1,41 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <tuple>
 #include <type_traits>
 #include <typeindex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+
+namespace ve::detail {
+
+template <typename... Components>
+struct DistinctWorldComponentTypes;
+
+template <>
+struct DistinctWorldComponentTypes<> : std::true_type {};
+
+template <typename First, typename... Rest>
+struct DistinctWorldComponentTypes<First, Rest...>
+    : std::bool_constant<((!std::is_same_v<First, Rest>) && ...) &&
+                         DistinctWorldComponentTypes<Rest...>::value> {};
+
+template <typename Component>
+inline constexpr bool validWorldComponentType =
+    std::is_object_v<Component> && !std::is_const_v<Component> && !std::is_volatile_v<Component> &&
+    !std::is_reference_v<Component>;
+
+template <typename... Components>
+inline constexpr bool validWorldComponentTypes =
+    (validWorldComponentType<Components> && ...) && DistinctWorldComponentTypes<Components...>::value;
+
+} // namespace ve::detail
 
 namespace ve {
 
@@ -149,66 +176,56 @@ public:
         return pool == nullptr ? 0U : pool->size();
     }
 
-    template <typename T, typename Function>
+    template <typename... Components, typename Function>
     void each(Function&& function) {
-        ComponentPool<T>* pool = findPool<T>();
-        if (pool != nullptr) {
-            pool->each(std::forward<Function>(function));
-        }
-    }
+        static_assert(sizeof...(Components) > 0U, "World queries require at least one component type");
+        static_assert(detail::validWorldComponentTypes<Components...>,
+                      "World queries require distinct, non-const object component types");
 
-    template <typename T, typename Function>
-    void each(Function&& function) const {
-        const ComponentPool<T>* pool = findPool<T>();
-        if (pool != nullptr) {
-            pool->each(std::forward<Function>(function));
-        }
-    }
-
-    template <typename T, typename U, typename Function>
-    void each(Function&& function) {
-        static_assert(!std::is_same_v<T, U>, "World multi-component queries require distinct component types");
-        ComponentPool<T>* first = findPool<T>();
-        ComponentPool<U>* second = findPool<U>();
-        if (first == nullptr || second == nullptr) {
+        auto pools = std::tuple<ComponentPool<Components>*...>{findPool<Components>()...};
+        bool available = true;
+        std::apply([&](auto*... pool) { available = ((pool != nullptr) && ...); }, pools);
+        if (!available) {
             return;
         }
-        if (first->size() <= second->size()) {
-            first->each([&](const Entity entity, T& component) {
-                if (U* other = second->tryGet(entity.index)) {
-                    function(entity, component, *other);
-                }
-            });
-        } else {
-            second->each([&](const Entity entity, U& component) {
-                if (T* other = first->tryGet(entity.index)) {
-                    function(entity, *other, component);
-                }
-            });
+
+        std::array<std::size_t, sizeof...(Components)> poolSizes{};
+        std::size_t sizeIndex = 0U;
+        std::apply([&](auto*... pool) { ((poolSizes[sizeIndex++] = pool->size()), ...); }, pools);
+
+        std::size_t smallestPoolIndex = 0U;
+        for (std::size_t index = 1U; index < poolSizes.size(); ++index) {
+            if (poolSizes[index] < poolSizes[smallestPoolIndex]) {
+                smallestPoolIndex = index;
+            }
         }
+        eachFromSmallestPool(pools, smallestPoolIndex, function);
     }
 
-    template <typename T, typename U, typename Function>
+    template <typename... Components, typename Function>
     void each(Function&& function) const {
-        static_assert(!std::is_same_v<T, U>, "World multi-component queries require distinct component types");
-        const ComponentPool<T>* first = findPool<T>();
-        const ComponentPool<U>* second = findPool<U>();
-        if (first == nullptr || second == nullptr) {
+        static_assert(sizeof...(Components) > 0U, "World queries require at least one component type");
+        static_assert(detail::validWorldComponentTypes<Components...>,
+                      "World queries require distinct, non-const object component types");
+
+        auto pools = std::tuple<const ComponentPool<Components>*...>{findPool<Components>()...};
+        bool available = true;
+        std::apply([&](const auto*... pool) { available = ((pool != nullptr) && ...); }, pools);
+        if (!available) {
             return;
         }
-        if (first->size() <= second->size()) {
-            first->each([&](const Entity entity, const T& component) {
-                if (const U* other = second->tryGet(entity.index)) {
-                    function(entity, component, *other);
-                }
-            });
-        } else {
-            second->each([&](const Entity entity, const U& component) {
-                if (const T* other = first->tryGet(entity.index)) {
-                    function(entity, *other, component);
-                }
-            });
+
+        std::array<std::size_t, sizeof...(Components)> poolSizes{};
+        std::size_t sizeIndex = 0U;
+        std::apply([&](const auto*... pool) { ((poolSizes[sizeIndex++] = pool->size()), ...); }, pools);
+
+        std::size_t smallestPoolIndex = 0U;
+        for (std::size_t index = 1U; index < poolSizes.size(); ++index) {
+            if (poolSizes[index] < poolSizes[smallestPoolIndex]) {
+                smallestPoolIndex = index;
+            }
         }
+        eachFromSmallestPool(pools, smallestPoolIndex, function);
     }
 
 private:
@@ -318,8 +335,65 @@ private:
 
     template <typename T>
     [[nodiscard]] ComponentPool<T>* findPool() noexcept {
+
         const auto it = pools_.find(typeid(T));
         return it == pools_.end() ? nullptr : static_cast<ComponentPool<T>*>(it->second.get());
+    }
+
+    template <std::size_t AnchorIndex, typename Function, typename... Components>
+    static void eachFromPool(std::tuple<ComponentPool<Components>*...>& pools, Function& function) {
+        std::get<AnchorIndex>(pools)->each([&](const Entity entity, auto&) {
+            const auto matched = [&]<std::size_t... PoolIndices>(std::index_sequence<PoolIndices...>) {
+                return std::tuple<Components*...>{std::get<PoolIndices>(pools)->tryGet(entity.index)...};
+            }(std::make_index_sequence<sizeof...(Components)>{});
+            std::apply(
+                [&](auto*... component) {
+                    if (((component != nullptr) && ...)) {
+                        function(entity, *component...);
+                    }
+                },
+                matched);
+        });
+    }
+
+    template <std::size_t AnchorIndex, typename Function, typename... Components>
+    static void eachFromPool(const std::tuple<const ComponentPool<Components>*...>& pools, Function& function) {
+        std::get<AnchorIndex>(pools)->each([&](const Entity entity, const auto&) {
+            const auto matched = [&]<std::size_t... PoolIndices>(std::index_sequence<PoolIndices...>) {
+                return std::tuple<const Components*...>{std::get<PoolIndices>(pools)->tryGet(entity.index)...};
+            }(std::make_index_sequence<sizeof...(Components)>{});
+            std::apply(
+                [&](const auto*... component) {
+                    if (((component != nullptr) && ...)) {
+                        function(entity, *component...);
+                    }
+                },
+                matched);
+        });
+    }
+
+    template <std::size_t Candidate = 0U, typename Function, typename... Components>
+    static void eachFromSmallestPool(std::tuple<ComponentPool<Components>*...>& pools,
+                                     const std::size_t smallestPoolIndex, Function& function) {
+        if constexpr (Candidate < sizeof...(Components)) {
+            if (Candidate == smallestPoolIndex) {
+                eachFromPool<Candidate>(pools, function);
+            } else {
+                eachFromSmallestPool<Candidate + 1U>(pools, smallestPoolIndex, function);
+            }
+        }
+    }
+
+    template <std::size_t Candidate = 0U, typename Function, typename... Components>
+    static void eachFromSmallestPool(const std::tuple<const ComponentPool<Components>*...>& pools,
+                                     const std::size_t smallestPoolIndex, Function& function) {
+        if constexpr (Candidate < sizeof...(Components)) {
+            if (Candidate == smallestPoolIndex) {
+                eachFromPool<Candidate>(pools, function);
+            } else {
+                eachFromSmallestPool<Candidate + 1U>(pools, smallestPoolIndex, function);
+            }
+        }
     }
 
     template <typename T>

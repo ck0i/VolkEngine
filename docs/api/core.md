@@ -82,8 +82,8 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 
 - `emplace<T>(entity, args...)` constructs one component of type `T`; duplicate insertion throws.
 - `tryGet<T>(entity)`, `contains<T>(entity)`, `remove<T>(entity)`, and `componentCount<T>()` provide component access.
-- `each<T>(function)` iterates the dense component pool as `(Entity, T&)`; the `const World` overload supplies `(Entity, const T&)` without permitting mutation.
-- `each<T, U>(function)` joins two component pools as `(Entity, T&, U&)` (or const references). It probes the smaller dense pool, skips non-matches, and preserves callback argument order.
+- `each<Ts...>(function)` iterates a one-or-more-component query as `(Entity, Ts&...)`; the `const World` overload supplies `(Entity, const Ts&...)` without permitting mutation. Component types must be distinct, unqualified object types.
+- Multi-component queries probe the smallest dense pool, skip non-matches, and preserve callback argument order from the template parameter list. This keeps sparse-set joins bounded by the least-populated required component while maintaining a stable callback contract.
 - `clear()` destroys all entities and component storage.
 
 ## File IO helpers

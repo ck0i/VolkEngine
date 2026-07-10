@@ -37,6 +37,10 @@ struct Health {
     int value = 100;
 };
 
+struct Armor {
+    int value = 0;
+};
+
 struct LvaluePositionVisitor {
     int* sum = nullptr;
 
@@ -56,7 +60,9 @@ int main() {
 
     world.emplace<Position>(first, 10);
     world.emplace<Health>(first, 80);
+    world.emplace<Armor>(first, 7);
     world.emplace<Position>(second, 20);
+    world.emplace<Armor>(second, 8);
     expectTrue("component lookup returns first entity data", world.tryGet<Position>(first) != nullptr && world.tryGet<Position>(first)->value == 10);
     expectTrue("component lookup returns second entity data", world.contains<Position>(second) && world.componentCount<Position>() == 2U);
     expectThrows("duplicate component insertion is rejected", [&] { world.emplace<Position>(first, 11); });
@@ -78,6 +84,17 @@ int main() {
         matchedPositionSum += position.value;
         matchedHealthSum += health.value;
     });
+    int threePositionSum = 0;
+    int threeHealthSum = 0;
+    int threeArmorSum = 0;
+    world.each<Position, Health, Armor>([&](const ve::World::Entity, Position& position, Health& health, Armor& armor) {
+        threePositionSum += position.value;
+        threeHealthSum += health.value;
+        threeArmorSum += armor.value;
+    });
+    expectTrue("three-component query preserves template callback order and joins the middle-sized pool",
+               threePositionSum == 10 && threeHealthSum == 80 && threeArmorSum == 7);
+
     expectTrue("two-component query joins only matching entities", matchedPositionSum == 10 && matchedHealthSum == 80);
     const ve::World& constQueryWorld = world;
     int constQueryCount = 0;
@@ -85,6 +102,13 @@ int main() {
         constQueryCount += position.value == 10 && health.value == 80 ? 1 : 0;
     });
     expectTrue("const two-component query exposes read-only matches", constQueryCount == 1);
+
+    int constThreeComponentCount = 0;
+    constQueryWorld.each<Position, Health, Armor>(
+        [&](const ve::World::Entity, const Position& position, const Health& health, const Armor& armor) {
+            constThreeComponentCount += position.value == 10 && health.value == 80 && armor.value == 7 ? 1 : 0;
+        });
+    expectTrue("const three-component query exposes read-only matches", constThreeComponentCount == 1);
     {
         ve::World smallerFirstWorld;
         const ve::World::Entity queryFirst = smallerFirstWorld.createEntity();
