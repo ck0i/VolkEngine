@@ -106,6 +106,9 @@ struct StbiPixels {
 
 LoadedImageRgba8 loadStbImageRgba8(const std::filesystem::path& path) {
     const std::vector<std::uint8_t> encoded = readWholeBinaryFile(path);
+    if (encoded.empty()) {
+        throw std::runtime_error("Image file is empty: " + path.string());
+    }
     int width = 0;
     int height = 0;
     int channelsInFile = 0;

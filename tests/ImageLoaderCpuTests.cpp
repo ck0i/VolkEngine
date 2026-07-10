@@ -258,6 +258,10 @@ int main() {
     expectThrowsRuntimeError("loadImageRgba8 rejects corrupt non-PPM data", [&] {
         (void)ve::loadImageRgba8(unsupportedNonPpmPath);
     });
+    const auto emptyImagePath = addBinaryFixture("image_loader_empty.png", {});
+    expectThrowsRuntimeError("loadImageRgba8 rejects empty image files", [&] {
+        (void)ve::loadImageRgba8(emptyImagePath);
+    });
 
     const auto unsupportedMagicPath = addFixture("image_loader_unsupported_magic.ppm", "P3\n1 1\n255\n", {});
     expectThrowsRuntimeError("loadPpmRgba8 rejects unsupported magic", [&] {
