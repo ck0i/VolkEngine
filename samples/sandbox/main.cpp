@@ -86,15 +86,20 @@ void validateConfig(const ve::EngineConfig& config) {
 }
 
 void populateWorldScene(ve::World& world) {
+    const ve::World::Entity pivot = world.createEntity();
+    auto& pivotTransform = world.emplace<ve::WorldSceneTransform>(pivot);
+    pivotTransform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {1.0f, 1.0f, 1.0f}};
+    world.emplace<SpinController>(pivot);
+
     const ve::World::Entity cube = world.createEntity();
     auto& transform = world.emplace<ve::WorldSceneTransform>(cube);
-    transform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {0.75f, 0.75f, 0.75f}};
+    transform.current = ve::TransformTRS{{0.85f, 0.0f, 0.0f}, {}, {0.75f, 0.75f, 0.75f}};
+    world.emplace<ve::WorldSceneParent>(cube, pivot);
 
     auto& renderable = world.emplace<ve::WorldSceneRenderable>(cube);
     renderable.mesh = ve::SceneMeshId::Cube;
     renderable.material.albedoRoughness = {0.75f, 0.18f, 0.08f, 0.55f};
     renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
-    world.emplace<SpinController>(cube);
 }
 
 void updateWorldScene(void*, ve::World& world, ve::WorldSystemScheduler::CommandWriter&, const ve::InputState& input, const double, const double deltaSeconds) {
@@ -106,9 +111,7 @@ void updateWorldScene(void*, ve::World& world, ve::WorldSystemScheduler::Command
             if (!spin.paused) {
                 spin.angleRadians += deltaSeconds * 0.55;
             }
-            transform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f},
-                                                  ve::rotationY(static_cast<float>(spin.angleRadians)),
-                                                  {0.75f, 0.75f, 0.75f}};
+            transform.current.rotation = ve::rotationY(static_cast<float>(spin.angleRadians));
         });
 }
 

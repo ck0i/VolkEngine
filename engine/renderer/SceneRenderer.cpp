@@ -31,6 +31,12 @@ namespace {
     return std::sqrt(sum);
 }
 
+[[nodiscard]] bool finiteMat4(const Mat4& matrix) noexcept {
+    return std::all_of(matrix.m.begin(), matrix.m.end(), [](const float value) {
+        return std::isfinite(value);
+    });
+}
+
 } // namespace
 
 void SceneRenderList::clear() noexcept {
@@ -145,6 +151,7 @@ bool SceneRenderList::indexInMaterialGridRange(const std::size_t index) const no
 void WorldSceneExtractor::ensureWorld(const World& world) {
     if (historyWorldToken_ != world.instanceToken()) {
         histories_.clear();
+        captureEpoch_ = 0U;
         historyWorldToken_ = world.instanceToken();
     }
 }
@@ -167,17 +174,117 @@ void WorldSceneExtractor::initializeHistory(History& history,
     history.initialized = true;
 }
 
+void WorldSceneExtractor::resetResolutionEntries() {
+    resolutionPath_.clear();
+    ++resolutionEpoch_;
+    if (resolutionEpoch_ == 0U) {
+        resolutionEntries_.clear();
+        resolutionEpoch_ = 1U;
+    }
+}
+
+WorldSceneExtractor::ResolutionEntry& WorldSceneExtractor::resolutionFor(const World::Entity entity) {
+    const std::size_t requiredSize = static_cast<std::size_t>(entity.index) + 1U;
+    if (resolutionEntries_.size() < requiredSize) {
+        resolutionEntries_.resize(requiredSize);
+    }
+    ResolutionEntry& entry = resolutionEntries_[entity.index];
+    if (entry.epoch != resolutionEpoch_ || entry.entity != entity) {
+        entry = ResolutionEntry{};
+        entry.entity = entity;
+        entry.epoch = resolutionEpoch_;
+    }
+    return entry;
+}
+
+void WorldSceneExtractor::invalidateResolutionPath() noexcept {
+    for (const World::Entity entity : resolutionPath_) {
+        resolutionEntries_[entity.index].state = ResolutionState::Invalid;
+    }
+}
+
+bool WorldSceneExtractor::resolveWorldTransform(const World& world, World::Entity entity, const float alpha) {
+    resolutionPath_.clear();
+    Mat4 parentWorld = Mat4::identity();
+
+    for (;;) {
+        ResolutionEntry& entry = resolutionFor(entity);
+        if (entry.state == ResolutionState::Resolved) {
+            parentWorld = entry.world;
+            break;
+        }
+        if (entry.state == ResolutionState::Invalid) {
+            invalidateResolutionPath();
+            return false;
+        }
+        if (entry.state == ResolutionState::Visiting) {
+            invalidateResolutionPath();
+            return false;
+        }
+
+        entry.state = ResolutionState::Visiting;
+        resolutionPath_.push_back(entity);
+
+        const WorldSceneTransform* transform = world.tryGet<WorldSceneTransform>(entity);
+        if (transform != nullptr && !finite(transform->current)) {
+            invalidateResolutionPath();
+            return false;
+        }
+
+        const WorldSceneParent* parent = world.tryGet<WorldSceneParent>(entity);
+        if (parent == nullptr || !world.alive(parent->parent)) {
+            break;
+        }
+        entity = parent->parent;
+    }
+
+    for (auto path = resolutionPath_.rbegin(); path != resolutionPath_.rend(); ++path) {
+        const World::Entity pathEntity = *path;
+        const WorldSceneTransform* transform = world.tryGet<WorldSceneTransform>(pathEntity);
+        Mat4 local = Mat4::identity();
+        if (transform != nullptr) {
+            History& history = historyFor(pathEntity);
+            if (!history.initialized || history.entity != pathEntity ||
+                history.discontinuityRevision != transform->discontinuityRevision ||
+                !finite(history.previous) || !finite(history.current)) {
+                initializeHistory(history, pathEntity, *transform);
+            }
+            local = compose(interpolate(history.previous, history.current, alpha));
+        }
+        if (!finiteMat4(local)) {
+            invalidateResolutionPath();
+            return false;
+        }
+
+        ResolutionEntry& entry = resolutionFor(pathEntity);
+        entry.world = parentWorld * local;
+        if (!finiteMat4(entry.world)) {
+            invalidateResolutionPath();
+            return false;
+        }
+        entry.state = ResolutionState::Resolved;
+        parentWorld = entry.world;
+    }
+    return true;
+}
+
 void WorldSceneExtractor::resetSimulationState(const World& world) {
     ensureWorld(world);
     histories_.reserve(world.entityCapacity());
     world.each<WorldSceneTransform>([&](const World::Entity entity, const WorldSceneTransform& transform) {
-        initializeHistory(historyFor(entity), entity, transform);
+        History& history = historyFor(entity);
+        initializeHistory(history, entity, transform);
+        history.lastCaptureEpoch = captureEpoch_;
     });
 }
 
 void WorldSceneExtractor::invalidateSimulationState() noexcept {
     histories_.clear();
     historyWorldToken_ = 0U;
+    captureEpoch_ = 0U;
+    resolutionEpoch_ = 0U;
+    resolutionEntries_.clear();
+    resolutionPath_.clear();
 }
 
 void WorldSceneExtractor::prepareSimulationStep(const World& world) {
@@ -196,16 +303,24 @@ void WorldSceneExtractor::prepareSimulationStep(const World& world) {
 void WorldSceneExtractor::captureSimulationStep(const World& world) {
     ensureWorld(world);
     histories_.reserve(world.entityCapacity());
+    ++captureEpoch_;
+    if (captureEpoch_ == 0U) {
+        histories_.clear();
+        captureEpoch_ = 1U;
+    }
+    const std::uint64_t previousCaptureEpoch = captureEpoch_ - 1U;
     world.each<WorldSceneTransform>([&](const World::Entity entity, const WorldSceneTransform& transform) {
         History& history = historyFor(entity);
         if (!history.initialized || history.entity != entity ||
             history.discontinuityRevision != transform.discontinuityRevision ||
-            !finite(history.current) || !finite(transform.current)) {
+            !finite(history.current) || !finite(transform.current) ||
+            history.lastCaptureEpoch != previousCaptureEpoch) {
             initializeHistory(history, entity, transform);
-            return;
+        } else {
+            history.previous = history.current;
+            history.current = transform.current;
         }
-        history.previous = history.current;
-        history.current = transform.current;
+        history.lastCaptureEpoch = captureEpoch_;
     });
 }
 
@@ -217,6 +332,7 @@ const SceneRenderList& WorldSceneExtractor::build(const World& world, const doub
         : 0.0;
     const float alpha = static_cast<float>(clampedAlpha);
     pendingItems_.clear();
+    resetResolutionEntries();
     world.each<WorldSceneTransform, WorldSceneRenderable>(
         [&](const World::Entity entity, const WorldSceneTransform& transform, const WorldSceneRenderable& renderable) {
             const MeshBounds& bounds = renderable.localBounds;
@@ -224,13 +340,10 @@ const SceneRenderList& WorldSceneExtractor::build(const World& world, const doub
                 return;
             }
 
-            History& history = historyFor(entity);
-            if (!history.initialized || history.entity != entity ||
-                history.discontinuityRevision != transform.discontinuityRevision ||
-                !finite(history.previous) || !finite(history.current)) {
-                initializeHistory(history, entity, transform);
+            if (!resolveWorldTransform(world, entity, alpha)) {
+                return;
             }
-            const Mat4 model = compose(interpolate(history.previous, history.current, alpha));
+            const Mat4& model = resolutionFor(entity).world;
             const Vec3 worldCenter = transformPoint(model, bounds.center);
             const float worldRadius = bounds.radius * conservativeRadiusScale(model);
             if (!finiteVec3(worldCenter) || !std::isfinite(worldRadius)) {

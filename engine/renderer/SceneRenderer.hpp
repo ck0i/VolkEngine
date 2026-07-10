@@ -122,6 +122,10 @@ struct WorldSceneTransform {
     }
 };
 
+struct WorldSceneParent {
+    World::Entity parent{};
+};
+
 struct WorldSceneRenderable {
     SceneMeshId mesh = SceneMeshId::Cube;
     RenderMaterial material{};
@@ -143,6 +147,7 @@ private:
         TransformTRS previous{};
         TransformTRS current{};
         std::uint64_t discontinuityRevision = 0;
+        std::uint64_t lastCaptureEpoch = 0;
         bool initialized = false;
     };
 
@@ -151,12 +156,34 @@ private:
         SceneRenderItem item;
     };
 
+    enum class ResolutionState : std::uint8_t {
+        Unresolved,
+        Visiting,
+        Resolved,
+        Invalid
+    };
+
+    struct ResolutionEntry {
+        World::Entity entity{};
+        Mat4 world{};
+        std::uint64_t epoch = 0;
+        ResolutionState state = ResolutionState::Unresolved;
+    };
+
     void ensureWorld(const World& world);
     [[nodiscard]] History& historyFor(const World::Entity entity);
     void initializeHistory(History& history, const World::Entity entity, const WorldSceneTransform& transform) noexcept;
+    void resetResolutionEntries();
+    [[nodiscard]] ResolutionEntry& resolutionFor(const World::Entity entity);
+    void invalidateResolutionPath() noexcept;
+    [[nodiscard]] bool resolveWorldTransform(const World& world, World::Entity entity, float alpha);
     std::uint64_t historyWorldToken_ = 0U;
+    std::uint64_t captureEpoch_ = 0U;
+    std::uint64_t resolutionEpoch_ = 0U;
     std::vector<History> histories_;
     std::vector<PendingItem> pendingItems_;
+    std::vector<ResolutionEntry> resolutionEntries_;
+    std::vector<World::Entity> resolutionPath_;
     SceneRenderList renderList_;
 };
 
