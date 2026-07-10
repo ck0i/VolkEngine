@@ -47,6 +47,9 @@ int Application::run(World& world, const WorldUpdateCallback update, const RunOp
 
 int Application::runInternal(World* world, const WorldUpdateCallback update, const RunOptions& options) {
     logger()->info("Entering main loop");
+    if (options.acquireRecoverySmoke) {
+        renderer_.armAcquireRecoverySmoke();
+    }
     double titleUpdateSeconds = 0.0;
     std::uint64_t titleUpdateFrames = 0;
     bool screenshotRequested = false;

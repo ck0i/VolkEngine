@@ -3,10 +3,35 @@
 
 namespace ve {
 
+void VulkanRenderer::Impl::recoverAcquiredFrame(FrameResources& frame, const std::size_t frameIndex,
+                                                const std::uint32_t imageIndex,
+                                                const FrameImageSyncSnapshot& imageSyncSnapshot) {
+    restoreFrameImageSyncState(imageIndex, imageSyncSnapshot);
+    acquireRecoveryFailed_ = true;
+    checkVk(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle recover acquired frame");
+    replaceFrameImageAvailableSemaphore(frame, frameIndex);
+    const VkExtent2D extent = window_.framebufferExtent();
+    if (extent.width == 0U || extent.height == 0U) {
+        cleanupSwapchain();
+    } else {
+        recreateSwapchain();
+    }
+    acquireRecoveryFailed_ = false;
+}
+
 void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& renderItems, const double sceneBuildMs,
                                  const double elapsedSeconds, const double frameDeltaMs) {
     if (!std::isfinite(sceneBuildMs) || sceneBuildMs < 0.0) {
         throw std::runtime_error("Scene build duration must be finite and non-negative");
+    }
+    if (acquireRecoveryFailed_) {
+        throw std::runtime_error("Renderer acquire recovery previously failed; refusing semaphore reuse");
+    }
+    if (swapchain_ == VK_NULL_HANDLE) {
+        recreateSwapchain();
+        if (swapchain_ == VK_NULL_HANDLE) {
+            return;
+        }
     }
     FrameResources& frame = frames_[frameIndex_];
     checkVk(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences frame");
@@ -15,6 +40,19 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
     destroyFrameUploadWaitSemaphores(frame);
     retireCompletedUploads();
     pollShaderHotReload(elapsedSeconds);
+
+    const auto cpuStart = std::chrono::steady_clock::now();
+    const auto cpuSceneEnd = cpuStart;
+    const Mat4 projection = camera.projectionMatrix();
+    const Mat4 viewProjection = projection * camera.viewMatrix();
+    SceneVisibilityPlan visibility = planSceneVisibility(camera, projection, viewProjection, renderItems);
+    ensureSceneInstanceCapacity(frame, frameIndex_, visibility.visibleItemCount);
+    updateUniforms(frame, camera, viewProjection, elapsedSeconds);
+    checkVk(vkResetCommandPool(device_, frame.commandPool, 0), "vkResetCommandPool frame");
+    const bool useDepthPrepass = resolveDepthPrepassForFrame(visibility);
+    auto cpuPrepareEnd = std::chrono::steady_clock::now();
+    auto cpuRecordEnd = cpuPrepareEnd;
+    auto cpuEnd = cpuPrepareEnd;
 
     std::uint32_t imageIndex = 0;
     VkResult acquire = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, frame.imageAvailable, VK_NULL_HANDLE, &imageIndex);
@@ -25,61 +63,66 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
     if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
         checkVk(acquire, "vkAcquireNextImageKHR");
     }
+    VkSemaphore renderFinished = swapchainRenderFinishedSemaphores_[imageIndex];
+    const FrameImageSyncSnapshot imageSyncSnapshot = captureFrameImageSyncState(imageIndex);
+    FrameSubmissionProgress submissionProgress = FrameSubmissionProgress::ImageAcquired;
     bool screenshotThisFrame = false;
     VkExtent2D screenshotExtent{};
     VkFormat screenshotFormat = VK_FORMAT_UNDEFINED;
     std::filesystem::path screenshotPath;
-    bool screenshotRequested = false;
-    {
-        const std::scoped_lock lock{screenshotRequestMutex_};
-        if (screenshotPending_) {
-            screenshotPath = std::move(screenshotPath_);
-            screenshotPath_.clear();
-            screenshotPending_ = false;
-            screenshotRequested = true;
-        }
-    }
-    if (screenshotRequested) {
-        if (!swapchainTransferSrcSupported_) {
-            logger()->warn("Screenshot requested but swapchain images do not support TRANSFER_SRC usage");
-        } else if (!screenshotFormatSupported()) {
-            logger()->warn("Screenshot requested but swapchain format {} is not BGRA8/RGBA8 UNORM", static_cast<int>(swapchainFormat_));
-        } else {
-            const VkDeviceSize screenshotBytes = static_cast<VkDeviceSize>(swapchainExtent_.width) * static_cast<VkDeviceSize>(swapchainExtent_.height) * 4U;
-            if (screenshotReadback_.buffer != VK_NULL_HANDLE && screenshotReadback_.size < screenshotBytes) {
-                destroyBuffer(screenshotReadback_);
-            }
-            if (screenshotReadback_.buffer == VK_NULL_HANDLE) {
-                screenshotReadback_ = createBuffer(screenshotBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                                   false, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT);
-                setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(screenshotReadback_.buffer), "Screenshot Readback Buffer");
-                vmaSetAllocationName(allocator_, screenshotReadback_.allocation, "Screenshot Readback Allocation");
-                screenshotReadback_.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, "Screenshot Readback Buffer", screenshotReadback_.size);
-            }
-            screenshotThisFrame = true;
-            screenshotExtent = swapchainExtent_;
-            screenshotFormat = swapchainFormat_;
-        }
-    }
-
-    const auto cpuStart = std::chrono::steady_clock::now();
-    const auto cpuSceneEnd = cpuStart;
-    const Mat4 projection = camera.projectionMatrix();
-    const Mat4 viewProjection = projection * camera.viewMatrix();
-    SceneVisibilityPlan visibility = planSceneVisibility(camera, projection, viewProjection, renderItems);
-    ensureSceneInstanceCapacity(frame, frameIndex_, visibility.visibleItemCount);
-    updateUniforms(frame, camera, viewProjection, elapsedSeconds);
-    checkVk(vkResetCommandPool(device_, frame.commandPool, 0), "vkResetCommandPool frame");
-    beginImGuiFrame(frameDeltaMs);
-    const auto cpuPrepareEnd = std::chrono::steady_clock::now();
-    auto cpuRecordEnd = cpuPrepareEnd;
-    auto cpuEnd = cpuPrepareEnd;
-    VkSemaphore renderFinished = swapchainRenderFinishedSemaphores_[imageIndex];
-    const FrameImageSyncSnapshot imageSyncSnapshot = captureFrameImageSyncState(imageIndex);
-    bool frameCommandsSubmitted = false;
+    bool retryScreenshotRequest = false;
+    bool injectedAcquireRecoverySmoke = false;
     try {
-        const bool useDepthPrepass = resolveDepthPrepassForFrame(visibility);
+        {
+            const std::scoped_lock lock{screenshotRequestMutex_};
+            if (screenshotPending_) {
+                screenshotPath = std::move(screenshotPath_);
+                screenshotPath_.clear();
+                screenshotPending_ = false;
+                retryScreenshotRequest = true;
+            }
+        }
+        if (retryScreenshotRequest) {
+            if (!swapchainTransferSrcSupported_) {
+                logger()->warn("Screenshot requested but swapchain images do not support TRANSFER_SRC usage");
+                retryScreenshotRequest = false;
+            } else if (!screenshotFormatSupported()) {
+                logger()->warn("Screenshot requested but swapchain format {} is not BGRA8/RGBA8 UNORM",
+                               static_cast<int>(swapchainFormat_));
+                retryScreenshotRequest = false;
+            } else {
+                const VkDeviceSize screenshotBytes = static_cast<VkDeviceSize>(swapchainExtent_.width) *
+                                                     static_cast<VkDeviceSize>(swapchainExtent_.height) * 4U;
+                if (screenshotReadback_.buffer != VK_NULL_HANDLE && screenshotReadback_.size < screenshotBytes) {
+                    destroyBuffer(screenshotReadback_);
+                }
+                if (screenshotReadback_.buffer == VK_NULL_HANDLE) {
+                    screenshotReadback_ = createBuffer(
+                        screenshotBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        false, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT);
+                    setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(screenshotReadback_.buffer),
+                                  "Screenshot Readback Buffer");
+                    vmaSetAllocationName(allocator_, screenshotReadback_.allocation,
+                                         "Screenshot Readback Allocation");
+                    screenshotReadback_.resourceId = resourceRegistry_.registerResource(
+                        GpuResourceKind::Buffer, "Screenshot Readback Buffer", screenshotReadback_.size);
+                }
+                screenshotThisFrame = true;
+                screenshotExtent = swapchainExtent_;
+                screenshotFormat = swapchainFormat_;
+            }
+        }
+
+        beginImGuiFrame(frameDeltaMs);
+        cpuPrepareEnd = std::chrono::steady_clock::now();
+        cpuRecordEnd = cpuPrepareEnd;
+        cpuEnd = cpuPrepareEnd;
+        if (acquireRecoverySmokeArmed_) {
+            acquireRecoverySmokeArmed_ = false;
+            injectedAcquireRecoverySmoke = true;
+            throw std::runtime_error("Injected post-acquire failure for recovery smoke");
+        }
         const std::size_t graphVariantIndex = FrameGraphVariantPolicy::index(useDepthPrepass, screenshotThisFrame);
         const FrameGraphVariant& graphVariant = frameGraphVariants_[graphVariantIndex];
         if (!graphVariant.graph.compiled()) {
@@ -122,10 +165,21 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
             restoreFrameFenceAfterSubmitFailure(frame, frameIndex_, submitResult);
             checkVk(submitResult, "vkQueueSubmit frame");
         }
-        frameCommandsSubmitted = true;
+        submissionProgress = FrameSubmissionProgress::CommandsSubmitted;
     } catch (...) {
-        if (!frameCommandsSubmitted) {
-            restoreFrameImageSyncState(imageIndex, imageSyncSnapshot);
+        if (frameFailureRequiresAcquireRecovery(submissionProgress)) {
+            if (retryScreenshotRequest && !screenshotPath.empty()) {
+                const std::scoped_lock lock{screenshotRequestMutex_};
+                if (!screenshotPending_) {
+                    screenshotPath_ = std::move(screenshotPath);
+                    screenshotPending_ = true;
+                }
+            }
+            recoverAcquiredFrame(frame, frameIndex_, imageIndex, imageSyncSnapshot);
+        }
+        if (injectedAcquireRecoverySmoke) {
+            logger()->info("Recovered injected post-acquire frame failure");
+            return;
         }
         throw;
     }

@@ -108,6 +108,8 @@ SandboxArgs parseArguments(int argc, char** argv) {
             args.help = true;
         } else if (arg == "--resize-smoke") {
             args.run.resizeSmoke = true;
+        } else if (arg == "--acquire-recovery-smoke") {
+            args.run.acquireRecoverySmoke = true;
         } else if (arg == "--world-scene") {
             args.worldScene = true;
         } else if (arg == "--frames") {
@@ -164,7 +166,7 @@ SandboxArgs parseArguments(int argc, char** argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--resize-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
+    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--resize-smoke] [--acquire-recovery-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
 }
 
 } // namespace

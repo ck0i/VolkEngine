@@ -26,6 +26,7 @@ public:
     [[nodiscard]] RenderStats stats() const override;
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const override;
     void requestScreenshot(std::filesystem::path path);
+    void armAcquireRecoverySmoke();
     void waitIdle();
 
 private:

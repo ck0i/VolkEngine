@@ -88,6 +88,17 @@ int main() {
     expectTrue("texture extent rejects invalid zero device limit",
                !ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{1U, 1U}, 0U));
 
+    using ve::vulkan_renderer_detail::FrameSubmissionProgress;
+    expectTrue("failure before acquire needs no acquire recovery",
+               !ve::vulkan_renderer_detail::frameFailureRequiresAcquireRecovery(
+                   FrameSubmissionProgress::BeforeAcquire));
+    expectTrue("failure after acquire requires image and semaphore recovery",
+               ve::vulkan_renderer_detail::frameFailureRequiresAcquireRecovery(
+                   FrameSubmissionProgress::ImageAcquired));
+    expectTrue("failure after successful submit leaves synchronization GPU-owned",
+               !ve::vulkan_renderer_detail::frameFailureRequiresAcquireRecovery(
+                   FrameSubmissionProgress::CommandsSubmitted));
+
     const VkSemaphore firstUploadSemaphore = fakeHandle<VkSemaphore>(1);
     const VkSemaphore secondUploadSemaphore = fakeHandle<VkSemaphore>(2);
     std::vector<TestPendingUpload> pendingUploads{{firstUploadSemaphore}, {VK_NULL_HANDLE}, {secondUploadSemaphore}};

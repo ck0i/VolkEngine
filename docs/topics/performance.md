@@ -31,7 +31,7 @@ VolkEngine's Vulkan renderer keeps public API in `VulkanRenderer.hpp` and implem
 | Area | Current behavior | Module owner |
 | --- | --- | --- |
 | Frames in flight | Two frame slots decouple CPU prep from GPU completion without unbounded latency. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.FrameResources.cpp` |
-| Presentation | `--no-vsync` prefers immediate mode for lowest present-queue latency when available. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.Swapchain.cpp` |
+| Presentation | `--no-vsync` prefers immediate mode for lowest present-queue latency when available. Throw-prone scene preparation runs before image acquisition; exceptional post-acquire/pre-submit failures recreate the swapchain and replace the signaled acquire semaphore before rethrowing. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.FrameResources.cpp`, `VulkanRenderer.Swapchain.cpp` |
 | Depth prepass | Default `Auto` mode compiles a static frame-graph superset and uses visible item/triangle thresholds with hysteresis; forced prepass uses a dedicated depth-only vertex shader with a position-only vertex input, while `--depth-prepass` and `--no-depth-prepass` force either path for comparisons. The camera projection is reverse-Z (near maps to depth 1, far to 0), so depth clears use 0 and scene/depth pipelines use `GREATER`/`GREATER_OR_EQUAL` tests for better far-range precision. | `Math.hpp`, `VulkanRenderer.Frame.cpp`, `VulkanRenderer.FrameResources.cpp`, `VulkanRenderer.Pipelines.cpp` |
 | Geometry | Generated and imported meshes are packed directly into one mapped staging buffer before upload to shared device-local vertex/index buffers, then full-float CPU mesh arrays are released; OBJ import first counts records to reserve attribute, vertex, index, face scratch, and lookup storage with renderer-range guards before the real parse, treats degenerate explicit normals as missing so generated normals prevent shader NaNs, skips scale-relative degenerate face triangles before index emission, and compacts skipped-only vertices before tangent/bounds calculation. CPU meshes keep full-float tangent-basis data only through import/tangent generation, while triangle-indexed tangent generation validates index ranges once before accumulation instead of branching per triangle. The Vulkan vertex stream packs normal/tangent attributes as `R16G16B16A16_SNORM` to cut vertex bandwidth. Renderer upload reorders triangle-list indices for post-transform vertex-cache locality, remaps vertices into first-use order for vertex-fetch locality, and derives imported-model scene bounds from loaded mesh bounds. | `VulkanRenderer.Meshes.cpp`, `VulkanRenderer.Pipelines.cpp`, `Geometry.cpp` |
 | Greedy meshing | Per-invocation face-visit scratch uses six packed `uint64_t` bitplanes (one bit per cell and face), reducing temporary state from 24 bytes per cell to 0.75 bytes per cell while preserving material-aware quad merging and boundary-neighbor behavior. | `GreedyMesher.cpp` |
@@ -49,12 +49,12 @@ VolkEngine's Vulkan renderer keeps public API in `VulkanRenderer.hpp` and implem
 
 ## Reading `RenderStats`
 
-`cpuFrameMs` is the renderer submit window: after swapchain acquire and screenshot-setup through queue-submit bookkeeping. It excludes present pacing, resize handling, and screenshot readback waits.
+`cpuFrameMs` is the renderer submit window: visibility/capacity preparation through queue-submit bookkeeping, including swapchain acquisition and screenshot/overlay setup. It excludes present pacing, resize handling, and screenshot readback waits.
 
 CPU bucket fields are mutually exclusive:
 
 - `cpuSceneBuildMs` — demo scene-list production.
-- `cpuPrepareMs` — visibility planning, mesh lookup, culling, capacity growth, and overlay stats refresh.
+- `cpuPrepareMs` — visibility planning, mesh lookup, culling, capacity growth, swapchain acquisition, screenshot preparation, and overlay stats refresh.
 - `cpuCommandRecordMs` — instance/indirect materialization, stat derivation, ImGui draw-data encoding, and Vulkan command recording.
 - `cpuQueueSubmitMs` — queue submit setup and submission bookkeeping.
 

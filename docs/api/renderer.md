@@ -127,6 +127,7 @@ Current public operations:
 - `meshBounds(SceneMeshId)` — returns the renderer-owned local-space bounds for a logical mesh; application scene producers can seed conservative item bounds without accessing Vulkan internals.
 - `stats()`, `deviceInfo()` — implement `IRenderer`.
 - `requestScreenshot(std::filesystem::path)` — queues one screenshot for the next `draw()`.
+- `armAcquireRecoverySmoke()` — diagnostics-only one-shot fault injection used by `RunOptions::acquireRecoverySmoke`; ordinary game-facing code should not call it.
 - `waitIdle()` — explicit idle synchronization point for shutdown/test boundaries, not for normal pacing.
 
 Game-facing code must stay at the `IRenderer` level and `RenderStats`/`RenderDeviceInfo` contracts.

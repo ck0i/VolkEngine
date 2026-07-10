@@ -42,19 +42,18 @@ Startup logs include rejected adapters and concrete rejection reasons.
 
 Each frame executes the same high-level sequence:
 
-1. Wait for the current frame fence.
+1. Wait for the current frame fence and retire frame-owned/deferred resources.
 2. Read the previous frame timestamp bucket when GPU timestamps are enabled.
-3. Acquire a swapchain image.
-4. Build/reuse the demo `SceneRenderList`.
-5. Compute camera matrices and build the CPU visibility plan.
-6. Grow mapped per-frame instance storage if required, then update mapped scene uniforms.
-7. Reset the current frame command pool.
-8. Begin optional ImGui frame work when the overlay is enabled.
-9. Record one primary command buffer.
-10. Submit once to the graphics queue with the expected wait stages.
-11. Present using the acquired image’s wait semaphore and, when required, rebuild swapchain state.
+3. Compute camera matrices and the CPU visibility plan, grow mapped instance storage if required, update uniforms, and reset the frame command pool.
+4. Acquire a swapchain image.
+5. Consume any pending screenshot request and begin optional ImGui work.
+6. Record one primary command buffer.
+7. Submit once to the graphics queue with the expected wait stages.
+8. Present using the acquired image’s per-image wait semaphore and, when required, rebuild swapchain state.
 
-Normal rendering does not call `vkDeviceWaitIdle`.
+Preparation that can be completed independently of a swapchain image runs before acquisition. If recording, allocation, ImGui preparation, or pre-submit bookkeeping fails after acquisition, the renderer restores tracked image state, releases the acquired image by recreating the swapchain, replaces the now-signaled per-frame acquire semaphore, and rethrows. A failed screenshot request is requeued unless a newer request has superseded it. This prevents reuse of a signaled binary semaphore and prevents an acquired image from being stranded.
+
+Normal rendering does not call `vkDeviceWaitIdle`; the device-idle recovery path is reserved for swapchain recreation and exceptional post-acquire rollback.
 
 ## Render passes
 
@@ -100,9 +99,8 @@ Swapchain images are preferred as UNORM because `tonemap.frag` normally applies 
 
 ## Screenshot path
 
-`VulkanRenderer::requestScreenshot(path)` queues one screenshot request.
-The next `draw()` consumes it, records an image-to-buffer transfer copy from the final swapchain image when supported, and waits on the submitting frame before writing disk.
-
+`VulkanRenderer::requestScreenshot(path)` queues one screenshot request with latest-request-wins coalescing while a request is still pending.
+The next `draw()` consumes it, records an image-to-buffer transfer copy from the final swapchain image when supported, and waits on the submitting frame before writing disk. A failure before queue submission returns the consumed path to the pending slot unless a newer request has already replaced it.
 Output is complete-before-publish:
 
 - writes binary PPM (P6) via a temporary file,

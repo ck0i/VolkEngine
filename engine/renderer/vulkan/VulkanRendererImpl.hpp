@@ -65,6 +65,17 @@ inline double bytesToMiB(const std::uint64_t bytes) {
     return forceMemoryDependency || currentLayout != newLayout || currentStage != newStage || currentAccess != newAccess;
 }
 
+
+enum class FrameSubmissionProgress : std::uint8_t {
+    BeforeAcquire,
+    ImageAcquired,
+    CommandsSubmitted,
+};
+
+[[nodiscard]] inline constexpr bool frameFailureRequiresAcquireRecovery(
+    const FrameSubmissionProgress progress) noexcept {
+    return progress == FrameSubmissionProgress::ImageAcquired;
+}
 struct TonemapPushConstants {
     float exposure = 1.0f;
     std::uint32_t applySrgbOetf = 1U;
@@ -456,6 +467,7 @@ public:
     [[nodiscard]] RenderStats stats() const { return stats_; }
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const { return deviceInfo_; }
     void requestScreenshot(std::filesystem::path path);
+    void armAcquireRecoverySmoke() noexcept { acquireRecoverySmokeArmed_ = true; }
     void waitIdle();
 
 private:
@@ -677,6 +689,9 @@ private:
     [[nodiscard]] bool resolveDepthPrepassForFrame(const SceneVisibilityPlan& visibility);
     void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback, const FrameGraphVariant& graphVariant);
     void restoreFrameFenceAfterSubmitFailure(FrameResources& frame, std::size_t frameIndex, VkResult submitResult);
+    void replaceFrameImageAvailableSemaphore(FrameResources& frame, std::size_t frameIndex);
+    void recoverAcquiredFrame(FrameResources& frame, std::size_t frameIndex, std::uint32_t imageIndex,
+                              const FrameImageSyncSnapshot& imageSyncSnapshot);
     [[nodiscard]] VkDeviceSize checkedSceneInstanceBufferSize(std::size_t capacity) const;
     void createFrameInstanceDataBuffer(FrameResources& frame, std::size_t frameIndex, std::size_t capacity);
     void updateFrameInstanceDataDescriptor(std::size_t frameIndex) const;
@@ -760,6 +775,8 @@ private:
     bool multiDrawIndirectEnabled_ = false;
     bool drawIndirectFirstInstanceEnabled_ = false;
     bool indirectSceneDrawsEnabled_ = false;
+    bool acquireRecoverySmokeArmed_ = false;
+    bool acquireRecoveryFailed_ = false;
     mutable std::mutex screenshotRequestMutex_;
     bool screenshotPending_ = false;
     std::filesystem::path screenshotPath_;

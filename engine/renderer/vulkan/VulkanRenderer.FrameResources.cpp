@@ -87,6 +87,18 @@ void VulkanRenderer::Impl::ensureSceneInstanceCapacity(FrameResources& frame, co
     logger()->info("Grew frame {} scene instance capacity to {} items ({:.2f} MiB)", frameIndex, frame.instanceCapacity, bytesToMiB(frame.instanceData.size));
 }
 
+void VulkanRenderer::Impl::replaceFrameImageAvailableSemaphore(FrameResources& frame, const std::size_t frameIndex) {
+    VkSemaphore replacement = VK_NULL_HANDLE;
+    VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    checkVk(vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &replacement), "vkCreateSemaphore imageAvailable");
+    setObjectName(VK_OBJECT_TYPE_SEMAPHORE, handleToUint64(replacement),
+                  "Frame " + std::to_string(frameIndex) + " Image Available Semaphore");
+    if (frame.imageAvailable != VK_NULL_HANDLE) {
+        vkDestroySemaphore(device_, frame.imageAvailable, nullptr);
+    }
+    frame.imageAvailable = replacement;
+}
+
 void VulkanRenderer::Impl::createFrameResources() {
     std::array<VkDescriptorSetLayout, kMaxFramesInFlight> sceneLayouts{};
     sceneLayouts.fill(sceneSetLayout_);
@@ -174,9 +186,7 @@ void VulkanRenderer::Impl::createFrameResources() {
         writes[2].pBufferInfo = &instanceBufferInfo;
         vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-        VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        checkVk(vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &frame.imageAvailable), "vkCreateSemaphore imageAvailable");
-        setObjectName(VK_OBJECT_TYPE_SEMAPHORE, handleToUint64(frame.imageAvailable), frameName + " Image Available Semaphore");
+        replaceFrameImageAvailableSemaphore(frame, i);
 
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;

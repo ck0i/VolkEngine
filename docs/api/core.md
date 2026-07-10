@@ -32,6 +32,7 @@ Execution controls used by `Application::run()`.
 
 - `maxFrames`: `0` runs until close; nonzero exits after that many frames.
 - `resizeSmoke`: triggers the built-in resize smoke path.
+- `acquireRecoverySmoke`: injects one post-acquire/pre-submit renderer failure; the renderer must recover internally and render subsequent frames. Intended for synchronization smoke testing.
 - `screenshotPath`: non-empty path requests a one-shot PPM screenshot.
 
 ## `DepthPrepassMode`

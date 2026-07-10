@@ -76,13 +76,19 @@ Automated Linux smoke run:
 ./out/build/linux-debug/VolkEngineSandbox --frames 120 --resize-smoke
 ```
 
+Acquire/semaphore recovery smoke run:
+
+```sh
+./out/build/linux-debug/VolkEngineSandbox --frames 3 --acquire-recovery-smoke --screenshot /tmp/volk-recovery.ppm --no-imgui
+```
+
 World-backed extraction smoke run:
 
 ```sh
 ./out/build/linux-debug/VolkEngineSandbox --world-scene --frames 120 --no-imgui
 ```
 
-Common flags: `--frames N`, `--world-scene`, `--resize-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
+Common flags: `--frames N`, `--world-scene`, `--resize-smoke`, `--acquire-recovery-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
 
 Controls: `Esc` closes; `WASD` moves; `Q/E` move down/up; arrow keys look; hold right mouse button for captured mouse-look.
 

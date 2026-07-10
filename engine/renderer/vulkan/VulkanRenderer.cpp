@@ -30,6 +30,10 @@ void VulkanRenderer::requestScreenshot(std::filesystem::path path) {
     impl_->requestScreenshot(std::move(path));
 }
 
+void VulkanRenderer::armAcquireRecoverySmoke() {
+    impl_->armAcquireRecoverySmoke();
+}
+
 void VulkanRenderer::waitIdle() {
     impl_->waitIdle();
 }

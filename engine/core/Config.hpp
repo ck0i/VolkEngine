@@ -99,6 +99,7 @@ namespace config_detail {
 struct RunOptions {
     std::uint64_t maxFrames = 0;
     bool resizeSmoke = false;
+    bool acquireRecoverySmoke = false;
     std::filesystem::path screenshotPath;
 };
 
