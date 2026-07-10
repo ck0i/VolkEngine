@@ -4,6 +4,7 @@
 #include "core/Config.hpp"
 #include "core/Time.hpp"
 #include "platform/Window.hpp"
+#include "renderer/SceneRenderer.hpp"
 #include "renderer/vulkan/VulkanRenderer.hpp"
 
 namespace ve {
@@ -18,6 +19,7 @@ private:
     Window window_;
     Camera camera_;
     VulkanRenderer renderer_;
+    DemoSceneRenderer sceneRenderer_;
     Clock clock_;
 };
 

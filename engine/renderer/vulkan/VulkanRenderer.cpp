@@ -9,8 +9,13 @@ VulkanRenderer::VulkanRenderer(Window& window, EngineConfig config)
 
 VulkanRenderer::~VulkanRenderer() = default;
 
-void VulkanRenderer::draw(const Camera& camera, const double elapsedSeconds, const double frameDeltaMs) {
-    impl_->draw(camera, elapsedSeconds, frameDeltaMs);
+void VulkanRenderer::draw(const Camera& camera, const SceneRenderList& scene, const double sceneBuildMs,
+                          const double elapsedSeconds, const double frameDeltaMs) {
+    impl_->draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs);
+}
+
+MeshBounds VulkanRenderer::meshBounds(const SceneMeshId mesh) const {
+    return impl_->meshBounds(mesh);
 }
 
 RenderStats VulkanRenderer::stats() const {

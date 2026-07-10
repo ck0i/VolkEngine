@@ -9,7 +9,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | `engine/core` | Application lifecycle, config, clock, camera, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW window, input, framebuffer resize state, Vulkan surface creation. | `Window`. |
 | `engine/renderer` | Renderer contracts, scene submission data, sandbox scene implementation, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `DemoSceneRenderer` declarations, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
-| `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
+| `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
 | `engine/renderer/vulkan/VulkanRenderer.cpp` | Thin forwarding wrapper over `VulkanRenderer::Impl`. | Delegates each public call to private implementation. |
@@ -57,8 +57,8 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 
 1. `Clock::tick()` returns elapsed and delta time.
 2. `Window::updateCamera()` applies keyboard/mouse input to `Camera`.
-3. `Application::run()` calls `IRenderer::draw(camera, elapsedSeconds, frameDeltaMs)`.
-4. `Frame.cpp` calls `DemoSceneRenderer::build(...)` to create `SceneRenderList`.
+3. `Application` updates its world/demo producer and builds a caller-owned `SceneRenderList`.
+4. `Application::run()` calls `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)`; the renderer borrows the list only for that call.
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
 6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.
 7. `RenderStats` and `RenderDeviceInfo` expose what path was used and how the last submitted frame behaved.

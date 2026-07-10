@@ -72,6 +72,14 @@ const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshForBatch(const st
     return sceneMeshes_[meshIndex];
 }
 
+MeshBounds VulkanRenderer::Impl::meshBounds(const SceneMeshId mesh) const {
+    const std::size_t meshIndex = sceneMeshBatchIndex(mesh);
+    if (meshIndex >= sceneMeshBounds_.size()) {
+        throw std::runtime_error("Scene mesh bounds index out of range");
+    }
+    return sceneMeshBounds_[meshIndex];
+}
+
 VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::array<MeshData, kSceneMeshBatchCount>& meshes) {
     MeshUpload upload{};
     for (const MeshData& mesh : meshes) {
@@ -169,7 +177,9 @@ void VulkanRenderer::Impl::createMeshes() {
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(8, 16);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = createPlaneMesh(12.0f, 12.0f);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)] = loadObjMesh(config_.assetDirectory / "models" / "imported_showcase.obj");
-        sceneRenderer_.setImportedModelBounds(meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)].bounds);
+        for (std::size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex) {
+            sceneMeshBounds_[meshIndex] = meshes[meshIndex].bounds;
+        }
         meshUpload = stageMeshUpload(meshes);
         for (MeshData& mesh : meshes) {
             mesh = {};

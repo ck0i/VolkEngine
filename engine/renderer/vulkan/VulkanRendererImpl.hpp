@@ -424,7 +424,9 @@ public:
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
 
-    void draw(const Camera& camera, double elapsedSeconds, double frameDeltaMs);
+    void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
+              double elapsedSeconds, double frameDeltaMs);
+    [[nodiscard]] MeshBounds meshBounds(SceneMeshId mesh) const;
     [[nodiscard]] RenderStats stats() const { return stats_; }
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const { return deviceInfo_; }
     void requestScreenshot(std::filesystem::path path);
@@ -810,6 +812,7 @@ private:
     Buffer sceneVertexBuffer_;
     Buffer sceneIndexBuffer_;
     std::array<GpuMesh, kSceneMeshBatchCount> sceneMeshes_{};
+    std::array<MeshBounds, kSceneMeshBatchCount> sceneMeshBounds_{};
     std::array<std::uint32_t, kSceneMeshBatchCount> sceneMeshTriangleCounts_{};
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     bool timestampsEnabled_ = false;
@@ -820,7 +823,6 @@ private:
     RenderDeviceInfo deviceInfo_{};
     std::array<FrameGraphVariant, 4> frameGraphVariants_{};
     GpuResourceRegistry resourceRegistry_{};
-    DemoSceneRenderer sceneRenderer_{};
     struct VisibleSceneWork {
         enum class Kind : std::uint8_t {
             Item,

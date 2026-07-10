@@ -3,6 +3,7 @@
 #include "core/Log.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <spdlog/spdlog.h>
 
@@ -24,13 +25,13 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
 
 
 Application::Application(EngineConfig config)
-    : config_(std::move(config)), window_(config_), renderer_(window_, config_) {
+    : config_(std::move(config)), window_(config_), camera_{}, renderer_(window_, config_), sceneRenderer_{}, clock_{} {
     const VkExtent2D extent = window_.framebufferExtent();
     if (extent.height > 0) {
         camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
     }
+    sceneRenderer_.setImportedModelBounds(renderer_.meshBounds(SceneMeshId::ImportedModel));
 }
-
 int Application::run(const RunOptions& options) {
     logger()->info("Entering main loop");
     double titleUpdateSeconds = 0.0;
@@ -59,7 +60,16 @@ int Application::run(const RunOptions& options) {
             screenshotRequested = true;
         }
 
-        renderer_.draw(camera_, timing.elapsedSeconds, timing.deltaSeconds * 1000.0);
+        const auto sceneBuildStart = std::chrono::steady_clock::now();
+        const SceneRenderList& renderItems = sceneRenderer_.build(
+            timing.elapsedSeconds,
+            config_.materialGridRows,
+            config_.materialGridColumns,
+            config_.materialGridTileRows,
+            config_.materialGridTileColumns);
+        const double sceneBuildMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - sceneBuildStart).count();
+        renderer_.draw(camera_, renderItems, sceneBuildMs, timing.elapsedSeconds, timing.deltaSeconds * 1000.0);
         titleUpdateSeconds += timing.deltaSeconds;
         ++titleUpdateFrames;
         if (titleUpdateSeconds >= 0.5) {

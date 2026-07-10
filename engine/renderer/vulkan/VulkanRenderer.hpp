@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Config.hpp"
+#include "renderer/SceneRenderer.hpp"
 #include "renderer/Renderer.hpp"
 
 #include <filesystem>
@@ -19,7 +20,9 @@ public:
     VulkanRenderer(VulkanRenderer&&) = delete;
     VulkanRenderer& operator=(VulkanRenderer&&) = delete;
 
-    void draw(const Camera& camera, double elapsedSeconds, double frameDeltaMs) override;
+    void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
+              double elapsedSeconds, double frameDeltaMs) override;
+    [[nodiscard]] MeshBounds meshBounds(SceneMeshId mesh) const;
     [[nodiscard]] RenderStats stats() const override;
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const override;
     void requestScreenshot(std::filesystem::path path);

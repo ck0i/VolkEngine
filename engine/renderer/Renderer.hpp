@@ -5,6 +5,8 @@
 #include <string>
 
 namespace ve {
+struct SceneRenderList;
+
 
 enum class RenderBackend {
     Vulkan
@@ -78,7 +80,8 @@ struct RenderStats {
 class IRenderer {
 public:
     virtual ~IRenderer() = default;
-    virtual void draw(const Camera& camera, double elapsedSeconds, double frameDeltaMs) = 0;
+    virtual void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
+                      double elapsedSeconds, double frameDeltaMs) = 0;
     [[nodiscard]] virtual RenderStats stats() const = 0;
     [[nodiscard]] virtual const RenderDeviceInfo& deviceInfo() const = 0;
 };

@@ -97,6 +97,32 @@ void expectVec3Nearly(std::string_view context, const ve::Vec3& actual, const ve
 }
 
 
+
+class RecordingRenderer final : public ve::IRenderer {
+public:
+    void draw(const ve::Camera&, const ve::SceneRenderList& scene, const double sceneBuildMs,
+              const double elapsedSeconds, const double frameDeltaMs) override {
+        scene_ = &scene;
+        sceneBuildMs_ = sceneBuildMs;
+        elapsedSeconds_ = elapsedSeconds;
+        frameDeltaMs_ = frameDeltaMs;
+    }
+
+    [[nodiscard]] ve::RenderStats stats() const override { return {}; }
+    [[nodiscard]] const ve::RenderDeviceInfo& deviceInfo() const override { return deviceInfo_; }
+
+    [[nodiscard]] const ve::SceneRenderList* scene() const { return scene_; }
+    [[nodiscard]] double sceneBuildMs() const { return sceneBuildMs_; }
+    [[nodiscard]] double elapsedSeconds() const { return elapsedSeconds_; }
+    [[nodiscard]] double frameDeltaMs() const { return frameDeltaMs_; }
+
+private:
+    const ve::SceneRenderList* scene_ = nullptr;
+    double sceneBuildMs_ = 0.0;
+    double elapsedSeconds_ = 0.0;
+    double frameDeltaMs_ = 0.0;
+    ve::RenderDeviceInfo deviceInfo_{};
+};
 } // namespace
 
 int main() {
@@ -107,6 +133,20 @@ int main() {
     expectEqual("RenderStats::triangleCount holds >uint32_t::max() without narrowing", renderStats.triangleCount, widerTriangleCount);
     renderStats.sceneTriangleCount = widerTriangleCount;
     expectEqual("RenderStats::sceneTriangleCount holds >uint32_t::max() without narrowing", renderStats.sceneTriangleCount, widerTriangleCount);
+    {
+        ve::SceneRenderList callerOwnedList;
+        callerOwnedList.push({});
+        callerOwnedList[0].mesh = ve::SceneMeshId::ImportedModel;
+        ve::Camera camera;
+        RecordingRenderer recordingRenderer;
+        recordingRenderer.draw(camera, callerOwnedList, 1.75, 12.5, 16.0);
+        expectEqual("renderer submission borrows caller-owned list", recordingRenderer.scene(), &callerOwnedList);
+        expectEqual("renderer submission preserves scene build telemetry", recordingRenderer.sceneBuildMs(), 1.75);
+        expectEqual("renderer submission preserves elapsed time", recordingRenderer.elapsedSeconds(), 12.5);
+        expectEqual("renderer submission preserves frame delta", recordingRenderer.frameDeltaMs(), 16.0);
+        expectEqual("renderer submission preserves item order", static_cast<int>((*recordingRenderer.scene())[0].mesh),
+                    static_cast<int>(ve::SceneMeshId::ImportedModel));
+    }
 
     expectEqual("requiredItemCount(4, 5)", DemoSceneRenderer::requiredItemCount(4U, 5U), static_cast<std::size_t>(4U * 5U + DemoSceneRenderer::kFixedItemCount));
     expectEqual("requiredItemCount(31, 66)", DemoSceneRenderer::requiredItemCount(31U, 66U), static_cast<std::size_t>(31U * 66U + DemoSceneRenderer::kFixedItemCount));

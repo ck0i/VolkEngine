@@ -1,8 +1,13 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
+#include <cmath>
 
 namespace ve {
 
-void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSeconds, const double frameDeltaMs) {
+void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& renderItems, const double sceneBuildMs,
+                                 const double elapsedSeconds, const double frameDeltaMs) {
+    if (!std::isfinite(sceneBuildMs) || sceneBuildMs < 0.0) {
+        throw std::runtime_error("Scene build duration must be finite and non-negative");
+    }
     FrameResources& frame = frames_[frameIndex_];
     checkVk(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences frame");
     retireDeferredPipelineSets();
@@ -59,8 +64,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSecond
     }
 
     const auto cpuStart = std::chrono::steady_clock::now();
-    const SceneRenderList& renderItems = sceneRenderer_.build(elapsedSeconds, config_.materialGridRows, config_.materialGridColumns, config_.materialGridTileRows, config_.materialGridTileColumns);
-    const auto cpuSceneEnd = std::chrono::steady_clock::now();
+    const auto cpuSceneEnd = cpuStart;
     const Mat4 projection = camera.projectionMatrix();
     const Mat4 viewProjection = projection * camera.viewMatrix();
     SceneVisibilityPlan visibility = planSceneVisibility(camera, projection, viewProjection, renderItems);
@@ -158,8 +162,8 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSecond
     }
 
 
-    stats_.cpuFrameMs = std::chrono::duration<double, std::milli>(cpuEnd - cpuStart).count();
-    stats_.cpuSceneBuildMs = std::chrono::duration<double, std::milli>(cpuSceneEnd - cpuStart).count();
+    stats_.cpuFrameMs = sceneBuildMs + std::chrono::duration<double, std::milli>(cpuEnd - cpuStart).count();
+    stats_.cpuSceneBuildMs = sceneBuildMs;
     stats_.cpuPrepareMs = std::chrono::duration<double, std::milli>(cpuPrepareEnd - cpuSceneEnd).count();
     stats_.cpuCommandRecordMs = std::chrono::duration<double, std::milli>(cpuRecordEnd - cpuPrepareEnd).count();
     stats_.cpuQueueSubmitMs = std::chrono::duration<double, std::milli>(cpuEnd - cpuRecordEnd).count();

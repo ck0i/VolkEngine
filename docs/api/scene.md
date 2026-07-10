@@ -60,8 +60,7 @@ Contract:
 
 ## `SceneRenderList`
 
-A reusable vector-backed render-list plus optional material-grid metadata.
-
+A reusable vector-backed render-list plus optional material-grid metadata. The application/world producer owns the list; the renderer borrows it synchronously for one draw call and does not retain it.
 List operations:
 
 - `clear()` — clears items and invalidates grid metadata.
@@ -110,8 +109,7 @@ The aggregate tile radius is for culling, not item LOD.
 
 ## `DemoSceneRenderer`
 
-Sandbox scene builder used by `VulkanRenderer`.
-
+Sandbox-only scene builder used by `Application`; it is not owned or invoked by the renderer backend.
 Public API:
 
 - `kFixedItemCount = 7`.

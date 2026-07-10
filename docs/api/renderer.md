@@ -25,15 +25,15 @@ empty columns. Omit both to build the bounds internally.
 class IRenderer {
 public:
     virtual ~IRenderer() = default;
-    virtual void draw(const Camera& camera, double elapsedSeconds, double frameDeltaMs) = 0;
+    virtual void draw(const Camera& camera, const SceneRenderList& scene,
+                      double sceneBuildMs, double elapsedSeconds, double frameDeltaMs) = 0;
     [[nodiscard]] virtual RenderStats stats() const = 0;
     [[nodiscard]] virtual const RenderDeviceInfo& deviceInfo() const = 0;
 };
 ```
+Submits one frame using camera state, a caller-owned `SceneRenderList`, and frame timing. The list is borrowed synchronously for the duration of the call and is never retained by the renderer. Current concrete behavior includes visibility planning, instance/indirect materialization, command recording, submit, and present.
 
-### `draw`
-
-Submits one frame using camera state and frame timing. Current concrete behavior includes scene-list build, visibility planning, instance/indirect materialization, command recording, submit, and present.
+`sceneBuildMs` reports the caller’s scene-list construction time for telemetry. It must be finite and non-negative. The renderer includes it in `cpuFrameMs` and publishes it as `cpuSceneBuildMs`; `cpuPrepareMs` and later buckets remain renderer-side timings.
 
 ### `stats`
 
@@ -124,6 +124,7 @@ Current public operations:
 - copy construction/assignment are deleted.
 - move construction/assignment are deleted.
 - `draw(...)` — implements `IRenderer`.
+- `meshBounds(SceneMeshId)` — returns the renderer-owned local-space bounds for a logical mesh; application scene producers can seed conservative item bounds without accessing Vulkan internals.
 - `stats()`, `deviceInfo()` — implement `IRenderer`.
 - `requestScreenshot(std::filesystem::path)` — queues one screenshot for the next `draw()`.
 - `waitIdle()` — explicit idle synchronization point for shutdown/test boundaries, not for normal pacing.
