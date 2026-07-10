@@ -108,6 +108,19 @@ int main() {
         const FrameGraph::ResourceLifetime swapchainLifetime = graph.lifetime(swapchain);
         expectEqual("swapchain lifetime starts at tonemap", swapchainLifetime.firstPass.index, tonemapPass.index);
         expectEqual("swapchain lifetime ends at screenshot", swapchainLifetime.lastPass.index, screenshotPass.index);
+        const auto& barrierPlan = graph.barrierPlan();
+        expectEqual("barrier plan contains first-use and changed-state intents", barrierPlan.size(), static_cast<std::size_t>(7));
+        expectEqual("first barrier intent is depth prepass write", barrierPlan[0].pass.index, depthPass.index);
+        expectEqual("first barrier intent targets depth", barrierPlan[0].resource.index, depth.index);
+        expectEqual("depth read transition follows depth write", barrierPlan[1].pass.index, hdrPass.index);
+        expectEqual("depth read transition records previous write", barrierPlan[1].hasPrevious, true);
+        expectEqual("hdr sampled transition follows hdr write", barrierPlan[3].pass.index, tonemapPass.index);
+        expectEqual("final present transition is emitted last", barrierPlan.back().finalTransition, true);
+        expectEqual("final transition targets swapchain", barrierPlan.back().resource.index, swapchain.index);
+        expectThrowsRuntimeError("invalidated barrier plan unavailable", [&] {
+            graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
+            (void)graph.barrierPlan();
+        });
         graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
         expectEqual("graph mutation invalidates execution plan", graph.compiled(), false);
         expectThrowsRuntimeError("invalidated lifetime unavailable", [&] {

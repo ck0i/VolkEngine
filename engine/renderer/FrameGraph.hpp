@@ -70,6 +70,17 @@ public:
         bool used = false;
     };
 
+    struct BarrierIntent {
+        ResourceHandle resource{};
+        PassHandle pass{};
+        FrameGraphAccess access = FrameGraphAccess::Read;
+        FrameGraphUsage usage = FrameGraphUsage::SampledImage;
+        FrameGraphAccess previousAccess = FrameGraphAccess::Read;
+        FrameGraphUsage previousUsage = FrameGraphUsage::SampledImage;
+        bool hasPrevious = false;
+        bool finalTransition = false;
+    };
+
     [[nodiscard]] ResourceHandle addResource(ResourceDesc desc) {
         if (resources_.size() >= static_cast<std::size_t>(kInvalidIndex)) {
             throw std::runtime_error("FrameGraph resource id range exhausted");
@@ -79,6 +90,7 @@ public:
         compiled_ = false;
         executionOrder_.clear();
         resourceLifetimes_.clear();
+        barrierIntents_.clear();
         return handle;
     }
 
@@ -91,6 +103,7 @@ public:
         compiled_ = false;
         executionOrder_.clear();
         resourceLifetimes_.clear();
+        barrierIntents_.clear();
         return handle;
     }
 
@@ -109,6 +122,7 @@ public:
         compiled_ = false;
         executionOrder_.clear();
         resourceLifetimes_.clear();
+        barrierIntents_.clear();
     }
 
     [[nodiscard]] bool hasEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) const {
@@ -143,6 +157,7 @@ public:
         compiled_ = false;
         executionOrder_.clear();
         resourceLifetimes_.clear();
+        barrierIntents_.clear();
         std::vector<std::vector<const Edge*>> edgesByPass(passes_.size());
         std::vector<std::vector<const Edge*>> edgesByResource(resources_.size());
         for (const Edge& edge : edges_) {
@@ -261,6 +276,53 @@ public:
                 executionOrder_[lastUses[resourceIndex]],
                 true};
         }
+
+        barrierIntents_.clear();
+        for (std::size_t resourceIndex = 0; resourceIndex < resources_.size(); ++resourceIndex) {
+            std::vector<const Edge*> orderedEdges = edgesByResource[resourceIndex];
+            std::stable_sort(orderedEdges.begin(), orderedEdges.end(), [&](const Edge* lhs, const Edge* rhs) {
+                return passPositions[lhs->pass.index] < passPositions[rhs->pass.index];
+            });
+
+            const Edge* previous = nullptr;
+            for (const Edge* edge : orderedEdges) {
+                if (previous == nullptr || previous->access != edge->access || previous->usage != edge->usage) {
+                    barrierIntents_.push_back(BarrierIntent{
+                        ResourceHandle{static_cast<Index>(resourceIndex)},
+                        edge->pass,
+                        edge->access,
+                        edge->usage,
+                        previous != nullptr ? previous->access : FrameGraphAccess::Read,
+                        previous != nullptr ? previous->usage : FrameGraphUsage::Present,
+                        previous != nullptr,
+                        false});
+                }
+                previous = edge;
+            }
+
+            const ResourceDesc& resourceDesc = resources_[resourceIndex];
+            if (previous != nullptr && resourceDesc.hasFinalUsage &&
+                (previous->access != FrameGraphAccess::Read || previous->usage != resourceDesc.finalUsage)) {
+                barrierIntents_.push_back(BarrierIntent{
+                    ResourceHandle{static_cast<Index>(resourceIndex)},
+                    PassHandle{},
+                    FrameGraphAccess::Read,
+                    resourceDesc.finalUsage,
+                    previous->access,
+                    previous->usage,
+                    true,
+                    true});
+            }
+        }
+        std::stable_sort(barrierIntents_.begin(), barrierIntents_.end(), [&](const BarrierIntent& lhs, const BarrierIntent& rhs) {
+            if (lhs.finalTransition != rhs.finalTransition) {
+                return !lhs.finalTransition;
+            }
+            if (lhs.finalTransition) {
+                return lhs.resource.index < rhs.resource.index;
+            }
+            return passPositions[lhs.pass.index] < passPositions[rhs.pass.index];
+        });
         compiled_ = true;
     }
 
@@ -286,6 +348,12 @@ public:
         }
         return resourceLifetimes_[static_cast<std::size_t>(resource.index)];
     }
+    [[nodiscard]] const std::vector<BarrierIntent>& barrierPlan() const {
+        if (!compiled_) {
+            throw std::runtime_error("FrameGraph has not been compiled");
+        }
+        return barrierIntents_;
+    }
 
 private:
     void addEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) {
@@ -303,6 +371,7 @@ private:
         compiled_ = false;
         executionOrder_.clear();
         resourceLifetimes_.clear();
+        barrierIntents_.clear();
     }
 
     void validatePass(PassHandle handle) const {
@@ -322,6 +391,7 @@ private:
     std::vector<Edge> edges_;
     std::vector<PassHandle> executionOrder_;
     std::vector<ResourceLifetime> resourceLifetimes_;
+    std::vector<BarrierIntent> barrierIntents_;
     bool compiled_ = false;
 };
 

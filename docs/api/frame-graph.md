@@ -109,6 +109,7 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 - `compiled()`
 - `executionOrder() -> const std::vector<PassHandle>&` — compiled stable pass order; empty while invalidated.
 - `lifetime(resource) -> const ResourceLifetime&` — first/last compiled pass and `used`; throws while the graph is invalidated.
+- `barrierPlan() -> const std::vector<BarrierIntent>&` — available after compilation and may be empty; pass-associated intents follow execution order and final transitions follow them. It is cleared when the graph is invalidated.
 
 ## Current renderer use
 
@@ -119,3 +120,5 @@ The Vulkan backend caches separate graph topologies at startup:
 - `Auto` caches four combinations; `ForceOn` and `ForceOff` cache only the valid depth combinations.
 
 Each frame selects the matching cached topology using the resolved depth-prepass state and whether a screenshot readback is active. Vulkan barriers and command recording remain explicit backend responsibilities; the selected graph supplies the matching pass descriptors and final-usage metadata.
+
+`BarrierIntent` is declarative synchronization metadata, not a Vulkan barrier. It records the selected resource usage, the previous usage when known, the destination pass (or an invalid pass for a final transition), and whether the intent is a final transition. Vulkan state mapping and command emission remain owned by `VulkanRenderer`.
