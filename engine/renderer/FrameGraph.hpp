@@ -290,7 +290,8 @@ public:
 
             const Edge* previous = nullptr;
             for (const Edge* edge : orderedEdges) {
-                if (previous == nullptr || previous->access != edge->access || previous->usage != edge->usage) {
+                if (previous == nullptr || previous->access != edge->access || previous->usage != edge->usage ||
+                    (previous->access == FrameGraphAccess::Write && edge->access == FrameGraphAccess::Write)) {
                     barrierIntents_.push_back(BarrierIntent{
                         ResourceHandle{static_cast<Index>(resourceIndex)},
                         edge->pass,

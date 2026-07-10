@@ -236,6 +236,14 @@ int main() {
         expectEqual("hazard plan retains read-before-write WAR order", graph.executionOrder()[0].index, readPass.index);
         expectEqual("hazard plan retains first WAW writer", graph.executionOrder()[1].index, firstWrite.index);
         expectEqual("hazard plan retains second WAW writer", graph.executionOrder()[2].index, secondWrite.index);
+        const FrameGraph::BarrierIntent& secondWriteIntent = graph.barrierIntent(
+            secondWrite, image, FrameGraphAccess::Write, FrameGraphUsage::ColorAttachment);
+        expectEqual("same-state WAW emits a second barrier intent", secondWriteIntent.pass.index, secondWrite.index);
+        expectEqual("same-state WAW records a previous access", secondWriteIntent.hasPrevious, true);
+        expectEqual("same-state WAW records the previous write access",
+                    static_cast<int>(secondWriteIntent.previousAccess), static_cast<int>(FrameGraphAccess::Write));
+        expectEqual("same-state WAW records the previous write usage",
+                    static_cast<int>(secondWriteIntent.previousUsage), static_cast<int>(FrameGraphUsage::ColorAttachment));
     }
     {
         FrameGraph graph;
