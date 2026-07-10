@@ -165,9 +165,16 @@ add_custom_target(VolkEngineRuntimeShaders
             "$<TARGET_FILE_DIR:VolkEngineSandbox>/shaders"
     DEPENDS ${VOLKENGINE_SHADER_OUTPUTS}
     COMMENT "Copying compiled shaders next to sandbox executable")
+add_custom_target(VolkEngineRuntimeAssets
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${VOLKENGINE_ASSET_SOURCE_DIR}"
+            "$<TARGET_FILE_DIR:VolkEngineSandbox>/assets"
+    COMMENT "Copying runtime assets next to sandbox executable")
+add_dependencies(VolkEngineRuntimeAssets VolkEngineAssets)
 add_dependencies(VolkEngineRuntimeShaders VolkEngineShaders)
 add_dependencies(VolkEngineRuntimeShaders VolkEngineAssets)
 add_dependencies(VolkEngineSandbox VolkEngineRuntimeShaders)
+add_dependencies(VolkEngineSandbox VolkEngineRuntimeAssets)
 volkengine_target_warnings(VolkEngineSandbox)
 
 enable_testing()

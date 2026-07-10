@@ -19,10 +19,10 @@ CMake finds `glslc` and compiles root shader files under `engine/shaders/`:
 Outputs are written to `${binaryDir}/shaders/*.spv` with `--target-env=vulkan1.3`. Compiler depfiles track includes under `engine/shaders/common/`, so editing shared GLSL triggers the correct recompiles.
 
 Important targets:
-
-- `VolkEngineShaders` — SPIR-V outputs.
+- `VolkEngineShaders` — SPIR-V outputs in the build tree.
 - `VolkEngineRuntimeShaders` — copies compiled SPIR-V beside `VolkEngineSandbox`.
-- `VolkEngineAssets` — copies `assets/` to the build runtime asset directory.
+- `VolkEngineAssets` — stages source assets into the build tree.
+- `VolkEngineRuntimeAssets` — copies assets beside `VolkEngineSandbox`, matching `EngineConfig::assetDirectory`.
 
 ## Runtime shader validation
 
