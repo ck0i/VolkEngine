@@ -80,11 +80,6 @@ void VulkanRenderer::Impl::createSwapchain() {
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if ((support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0U) {
-        createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    } else {
-        logger()->warn("Swapchain images do not support TRANSFER_DST usage; continuing with color-attachment usage only");
-    }
     swapchainTransferSrcSupported_ = (support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U;
     if (swapchainTransferSrcSupported_) {
         createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
