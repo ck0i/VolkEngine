@@ -234,6 +234,37 @@ int main() {
     }
 
     {
+        ve::InputTracker frameInput;
+        ve::InputTracker simulationInput;
+        frameInput.keyEvent(ve::InputKey::Space, true);
+        frameInput.beginCapture();
+        frameInput.cursorPosition(10.0, 10.0);
+        frameInput.cursorPosition(13.0, 8.0);
+        frameInput.scrollEvent(0.0, 1.0);
+        simulationInput.accumulate(frameInput.consume());
+        simulationInput.accumulate(frameInput.consume());
+
+        const ve::InputState firstStep = simulationInput.consume();
+        expectTrue("pending input preserves key edge until a simulation step",
+                   firstStep.pressed(ve::InputKey::Space));
+        expectTrue("pending input preserves final held state",
+                   firstStep.held(ve::InputKey::Space));
+        expectTrue("pending input accumulates cursor motion across render frames",
+                   firstStep.cursorDeltaX == 3.0 && firstStep.cursorDeltaY == -2.0);
+        expectTrue("pending input accumulates scroll across render frames",
+                   firstStep.scrollDeltaX == 0.0 && firstStep.scrollDeltaY == 1.0);
+
+        const ve::InputState secondStep = simulationInput.consume();
+        expectTrue("later fixed substep receives held input without repeated edge",
+                   secondStep.held(ve::InputKey::Space) &&
+                   !secondStep.pressed(ve::InputKey::Space));
+        expectTrue("later fixed substep receives no repeated cursor motion",
+                   secondStep.cursorDeltaX == 0.0 && secondStep.cursorDeltaY == 0.0);
+        expectTrue("later fixed substep receives no repeated scroll motion",
+                   secondStep.scrollDeltaX == 0.0 && secondStep.scrollDeltaY == 0.0);
+    }
+
+    {
         ve::InputTracker tracker;
         tracker.keyEvent(ve::InputKey::A, true);
         tracker.mouseButtonEvent(ve::InputMouseButton::Right, true);

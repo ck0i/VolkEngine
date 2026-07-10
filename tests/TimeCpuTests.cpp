@@ -39,6 +39,20 @@ void expectThrowsRuntimeError(const std::string_view context, F&& callable) {
     }
 }
 
+template <typename F>
+void expectThrowsInvalidArgument(const std::string_view context, F&& callable) {
+    try {
+        callable();
+        std::cerr << "[FAILED] " << context << ": expected invalid_argument but no exception thrown\n";
+        ++gFailureCount;
+    } catch (const std::invalid_argument&) {
+        // expected
+    } catch (...) {
+        std::cerr << "[FAILED] " << context << ": expected invalid_argument but threw a different exception\n";
+        ++gFailureCount;
+    }
+}
+
 } // namespace
 
 int main() {
@@ -111,6 +125,90 @@ int main() {
     expectNear("non-finite simulation state resets safely",
                ve::advanceSimulationSeconds(std::numeric_limits<double>::quiet_NaN(), 0.016, 0.05),
                0.0);
+
+    {
+        ve::FixedStepClock fixedClock{0.01, 0.1, 3U};
+        const ve::FixedStepBatch partial = fixedClock.advance(0.005);
+        expectTrue("partial fixed frame emits no step", partial.stepCount == 0U);
+        expectNear("partial fixed frame retains time", partial.retainedSeconds, 0.005);
+        expectNear("partial fixed frame interpolation", partial.interpolationAlpha, 0.5);
+
+        const ve::FixedStepBatch completed = fixedClock.advance(0.005);
+        expectTrue("two partial frames emit one fixed step", completed.stepCount == 1U);
+        expectNear("first fixed step reports fixed elapsed time", completed.firstStepElapsedSeconds, 0.01);
+        expectNear("fixed step duration remains constant", completed.stepSeconds, 0.01);
+        expectNear("completed fixed step consumes remainder", completed.retainedSeconds, 0.0);
+
+        fixedClock.reset();
+        const double belowStep = std::nextafter(0.01, 0.0);
+        const ve::FixedStepBatch boundary = fixedClock.advance(belowStep);
+        expectTrue("time immediately below one step emits no update", boundary.stepCount == 0U);
+        expectNear("substep boundary does not create simulation time", boundary.retainedSeconds, belowStep);
+    }
+
+    {
+        ve::FixedStepClock fixedClock{0.01, 0.1, 3U};
+        const ve::FixedStepBatch hitch = fixedClock.advance(0.08);
+        expectTrue("hitch obeys substep budget", hitch.stepCount == 3U);
+        expectNear("hitch retains unconsumed simulation debt", hitch.retainedSeconds, 0.05);
+        expectNear("hitch advances only executed steps", fixedClock.elapsedSeconds(), 0.03);
+        expectNear("backlogged interpolation is bounded", hitch.interpolationAlpha, 1.0);
+
+        const ve::FixedStepBatch catchUp = fixedClock.advance(0.0);
+        expectTrue("retained debt catches up on later frame", catchUp.stepCount == 3U);
+        expectNear("catch-up retains remaining debt", catchUp.retainedSeconds, 0.02);
+        expectNear("catch-up elapsed remains monotonic", fixedClock.elapsedSeconds(), 0.06);
+
+        const ve::FixedStepBatch drained = fixedClock.advance(0.0);
+        expectTrue("remaining debt drains deterministically", drained.stepCount == 2U);
+        expectNear("drained fixed clock has no remainder", drained.retainedSeconds, 0.0);
+        expectNear("drained fixed clock recovers full accepted time", fixedClock.elapsedSeconds(), 0.08);
+    }
+
+    {
+        ve::FixedStepClock fixedClock{0.01, 0.1, 3U};
+        const ve::FixedStepBatch capped = fixedClock.advance(0.5);
+        expectTrue("accumulator cap still obeys substep budget", capped.stepCount == 3U);
+        expectNear("accumulator cap reports dropped wall time", capped.droppedSeconds, 0.4);
+        expectNear("accumulator cap retains bounded debt", capped.retainedSeconds, 0.07);
+        fixedClock.reset();
+        expectNear("fixed clock reset clears elapsed time", fixedClock.elapsedSeconds(), 0.0);
+        expectNear("fixed clock reset clears retained time", fixedClock.retainedSeconds(), 0.0);
+
+        const ve::FixedStepBatch invalid = fixedClock.advance(std::numeric_limits<double>::quiet_NaN());
+        expectTrue("non-finite frame delta emits no steps", invalid.stepCount == 0U);
+        expectNear("non-finite frame delta retains no time", invalid.retainedSeconds, 0.0);
+    }
+
+    {
+        const double maximum = std::numeric_limits<double>::max();
+        ve::FixedStepClock fixedClock{maximum / 4.0, maximum / 2.0, 2U};
+        static_cast<void>(fixedClock.advance(maximum / 2.0));
+        const ve::FixedStepBatch saturated = fixedClock.advance(maximum / 2.0);
+        expectTrue("extreme fixed-step batch emits both representable steps", saturated.stepCount == 2U);
+        expectTrue("extreme first callback timestamp remains finite",
+                   std::isfinite(saturated.elapsedSecondsForStep(0U)));
+        expectTrue("extreme later callback timestamp saturates instead of overflowing",
+                   std::isfinite(saturated.elapsedSecondsForStep(1U)) &&
+                   saturated.elapsedSecondsForStep(1U) == maximum);
+    }
+
+    expectThrowsInvalidArgument("zero fixed step is rejected", [] {
+        ve::FixedStepClock invalid{0.0, 0.1, 3U};
+        (void)invalid;
+    });
+    expectThrowsInvalidArgument("short fixed accumulator is rejected", [] {
+        ve::FixedStepClock invalid{0.02, 0.01, 3U};
+        (void)invalid;
+    });
+    expectThrowsInvalidArgument("precision-stalled accumulator is rejected", [] {
+        ve::FixedStepClock invalid{0.01, std::numeric_limits<double>::max(), 3U};
+        (void)invalid;
+    });
+    expectThrowsInvalidArgument("zero fixed substep budget is rejected", [] {
+        ve::FixedStepClock invalid{0.01, 0.1, 0U};
+        (void)invalid;
+    });
 
     if (gFailureCount == 0) {
         return 0;

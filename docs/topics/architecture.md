@@ -57,10 +57,10 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 
 ## Runtime data flow
 
-1. `Clock::tick()` returns elapsed and delta time.
-2. `Window::updateCamera()` applies keyboard/mouse input to `Camera`.
-3. `Application::run(options)` updates the demo producer; the world overload accepts a caller-prepared `World`, or invokes its same-thread update callback after clamped simulation timing and camera input.
-4. Both run paths extract/build a `SceneRenderList` and call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows it synchronously, and the world extractor overwrites its snapshot on the next build.
+1. `Clock::tick()` samples wall elapsed/delta time; `Window::pollInput()` consumes one event-driven frame snapshot.
+2. `Window::updateCamera()` applies that snapshot at render rate with a bounded wall delta.
+3. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. World callbacks receive each step synchronously; pending input edges/motion reach only the first emitted step while held state persists.
+4. Both run paths extract/build the latest `SceneRenderList` and call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows it synchronously, and the world extractor overwrites its snapshot on the next build.
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
 6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.
 7. `RenderStats` and `RenderDeviceInfo` expose what path was used and how the last submitted frame behaved.

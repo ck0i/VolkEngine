@@ -94,6 +94,7 @@ public:
     void mouseButtonEvent(InputMouseButton button, bool down) noexcept;
     void cursorPosition(double x, double y) noexcept;
     void scrollEvent(double xOffset, double yOffset) noexcept;
+    void accumulate(const InputState& state) noexcept;
     void beginCapture() noexcept;
     void endCapture() noexcept;
     void focusLost() noexcept;

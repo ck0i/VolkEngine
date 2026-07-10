@@ -77,6 +77,42 @@ void InputTracker::scrollEvent(const double xOffset, const double yOffset) noexc
     }
 }
 
+void InputTracker::accumulate(const InputState& state) noexcept {
+    heldKeys_ = state.heldKeys_;
+    pressedKeys_ |= state.pressedKeys_;
+    releasedKeys_ |= state.releasedKeys_;
+    heldMouseButtons_ = state.heldMouseButtons_;
+    pressedMouseButtons_ |= state.pressedMouseButtons_;
+    releasedMouseButtons_ |= state.releasedMouseButtons_;
+
+    if (std::isfinite(state.cursorX) && std::isfinite(state.cursorY)) {
+        cursorX_ = state.cursorX;
+        cursorY_ = state.cursorY;
+        hasCursorPosition_ = true;
+    }
+
+    const double accumulatedCursorX = cursorDeltaX_ + state.cursorDeltaX;
+    const double accumulatedCursorY = cursorDeltaY_ + state.cursorDeltaY;
+    if (std::isfinite(accumulatedCursorX) && std::isfinite(accumulatedCursorY)) {
+        cursorDeltaX_ = accumulatedCursorX;
+        cursorDeltaY_ = accumulatedCursorY;
+    } else {
+        cursorDeltaX_ = 0.0;
+        cursorDeltaY_ = 0.0;
+    }
+
+    const double accumulatedScrollX = scrollDeltaX_ + state.scrollDeltaX;
+    const double accumulatedScrollY = scrollDeltaY_ + state.scrollDeltaY;
+    if (std::isfinite(accumulatedScrollX) && std::isfinite(accumulatedScrollY)) {
+        scrollDeltaX_ = accumulatedScrollX;
+        scrollDeltaY_ = accumulatedScrollY;
+    } else {
+        scrollDeltaX_ = 0.0;
+        scrollDeltaY_ = 0.0;
+    }
+    cursorCaptured_ = state.cursorCaptured;
+}
+
 void InputTracker::beginCapture() noexcept {
     cursorCaptured_ = true;
     cursorDeltaX_ = 0.0;

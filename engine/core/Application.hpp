@@ -27,6 +27,8 @@ private:
                     WorldInputUpdateCallback inputUpdate,
                     const RunOptions& options);
     EngineConfig config_;
+    FixedStepClock simulationClock_;
+    InputTracker simulationInputTracker_;
     GlfwRuntime glfwRuntime_;
     Window window_;
     Camera camera_;
@@ -34,7 +36,6 @@ private:
     DemoSceneRenderer sceneRenderer_;
     WorldSceneExtractor worldSceneExtractor_;
     Clock clock_;
-    double simulationElapsedSeconds_ = 0.0;
 };
 
 } // namespace ve

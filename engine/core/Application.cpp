@@ -25,7 +25,11 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
 
 
 Application::Application(EngineConfig config)
-    : config_(std::move(config)), glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{}, renderer_(window_, config_),
+    : config_(std::move(config)),
+      simulationClock_(config_.fixedSimulationStepSeconds,
+                       config_.maximumSimulationAccumulatedSeconds,
+                       config_.maximumSimulationSubsteps),
+      simulationInputTracker_{}, glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{}, renderer_(window_, config_),
       sceneRenderer_{}, worldSceneExtractor_{}, clock_{} {
     const VkExtent2D extent = window_.framebufferExtent();
     if (extent.width > 0U && extent.height > 0U) {
@@ -71,22 +75,26 @@ int Application::runInternal(World* world,
             window_.setSize(config_.initialWidth, config_.initialHeight);
         }
 
-        const double previousSimulationElapsedSeconds = simulationElapsedSeconds_;
-        simulationElapsedSeconds_ = advanceSimulationSeconds(simulationElapsedSeconds_, timing.deltaSeconds, 0.05);
-        const double simulationDelta = simulationElapsedSeconds_ - previousSimulationElapsedSeconds;
         const InputState input = window_.pollInput();
-        window_.updateCamera(camera_, input, static_cast<float>(simulationDelta));
+        const double cameraDeltaSeconds = clampDeltaSeconds(timing.deltaSeconds, 0.05);
+        window_.updateCamera(camera_, input, static_cast<float>(cameraDeltaSeconds));
+        simulationInputTracker_.accumulate(input);
+        const FixedStepBatch simulationBatch = simulationClock_.advance(timing.deltaSeconds);
+        for (std::uint32_t stepIndex = 0; stepIndex < simulationBatch.stepCount; ++stepIndex) {
+            const InputState stepInput = simulationInputTracker_.consume();
+            const double stepElapsedSeconds = simulationBatch.elapsedSecondsForStep(stepIndex);
+            if (world != nullptr) {
+                if (inputUpdate != nullptr) {
+                    inputUpdate(*world, stepInput, stepElapsedSeconds, simulationBatch.stepSeconds);
+                } else if (update != nullptr) {
+                    update(*world, stepElapsedSeconds, simulationBatch.stepSeconds);
+                }
+            }
+        }
+
         const VkExtent2D extent = window_.framebufferExtent();
         if (extent.width > 0U && extent.height > 0U) {
             camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
-        }
-
-        if (world != nullptr) {
-            if (inputUpdate != nullptr) {
-                inputUpdate(*world, input, simulationElapsedSeconds_, simulationDelta);
-            } else if (update != nullptr) {
-                update(*world, simulationElapsedSeconds_, simulationDelta);
-            }
         }
 
         if (!screenshotRequested && !options.screenshotPath.empty()) {
@@ -97,7 +105,7 @@ int Application::runInternal(World* world,
         const auto sceneBuildStart = std::chrono::steady_clock::now();
         const SceneRenderList& renderItems = world != nullptr
             ? worldSceneExtractor_.build(*world)
-            : sceneRenderer_.build(simulationElapsedSeconds_,
+            : sceneRenderer_.build(simulationClock_.elapsedSeconds(),
                                    config_.materialGridRows,
                                    config_.materialGridColumns,
                                    config_.materialGridTileRows,
@@ -131,6 +139,10 @@ int Application::runInternal(World* world,
     }
 
     renderer_.waitIdle();
+    logger()->info("Simulation advanced {:.3f} s at {:.3f} ms fixed steps ({:.3f} ms retained)",
+                   simulationClock_.elapsedSeconds(),
+                   simulationClock_.stepSeconds() * 1000.0,
+                   simulationClock_.retainedSeconds() * 1000.0);
     const RenderStats finalStats = renderer_.stats();
     const RenderDeviceInfo& finalDevice = renderer_.deviceInfo();
     std::array<char, 128> finalGpu{};

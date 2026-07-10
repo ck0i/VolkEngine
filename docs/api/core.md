@@ -17,6 +17,9 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `indirectSceneDraws` | `true` | Request multi-draw indirect; backend falls back when features are missing. |
 | `debugOverlay` | `true` | Enables Dear ImGui backend and overlay when compiled in. |
 | `gpuTimestamps` | `true` | Requests timestamp queries; unsupported/disabled results keep `gpuTimestampsValid = false`. |
+| `fixedSimulationStepSeconds` | `1 / 60` | Finite positive gameplay/world update interval. |
+| `maximumSimulationAccumulatedSeconds` | `0.25` | Finite backlog cap, at least one fixed step; excess wall time is dropped to prevent unbounded catch-up. |
+| `maximumSimulationSubsteps` | `8` | Positive per-render-frame update budget that bounds simulation CPU work while retaining bounded debt. |
 | `materialGridRows`, `materialGridColumns` | `4`, `5` | Demo material-grid dimensions. |
 | `materialGridTileRows`, `materialGridTileColumns` | `16`, `16` | Demo grid tile dimensions for culling acceleration. |
 | `depthPrepassMode` | `DepthPrepassMode::Auto` | Adaptive prepass selection by visible scene complexity; `ForceOn` and `ForceOff` are deterministic overrides. |
@@ -49,8 +52,8 @@ config.validation = true;
 ve::Application app{config};
 return app.run(ve::RunOptions{.maxFrames = 120});
 ```
-`Application` owns the main `Window`, `Camera`, concrete `VulkanRenderer` facade, demo/world scene extractors, and `Clock`. It builds the per-frame scene submission and passes it to the renderer; the backend only borrows that list during `draw()`. Private split internals stay behind `VulkanRenderer::Impl`.
-`run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback once per frame after clamped simulation timing and camera input. `runWithInput(world, update, options)` additionally passes a read-only reference to the `InputState` value snapshot used for that frame's camera update, including held/pressed/released transitions, cursor motion, and two-axis scroll deltas. Both callback paths then extract the read-only world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
+`Application` owns the main `Window`, `Camera`, concrete `VulkanRenderer` facade, demo/world scene extractors, wall `Clock`, and `FixedStepClock`. It builds the per-frame scene submission and passes it to the renderer; the backend only borrows that list during `draw()`. Private split internals stay behind `VulkanRenderer::Impl`.
+`run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback zero or more times per rendered frame using the configured fixed step. `runWithInput(world, update, options)` additionally passes a read-only `InputState` snapshot to each substep. Input transitions and accumulated cursor/scroll motion are retained across render frames that emit no simulation update, delivered once to the first available substep, then consumed; held state persists for later substeps. Camera input remains render-rate and uses the bounded wall delta. Both world callback paths then extract the latest world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
 
 ## `Camera`
 
@@ -77,6 +80,8 @@ The default constructor anchors to `std::chrono::steady_clock::now()`. For deter
 Samples must be nondecreasing. A timestamp earlier than the previous sample throws `std::runtime_error` before mutating clock state, so a rejected sample cannot poison elapsed time or frame indexing. Runtime `tick()` remains the production path and delegates to the same monotonic sampling logic.
 
 `clampDeltaSeconds(deltaSeconds, maximumSeconds)` is a pure simulation helper. A finite positive delta passes through up to a finite positive maximum; negative, zero, NaN, or infinite inputs produce zero, while finite hitches cap at the maximum. This does not change the raw wall-clock timing reported by `Clock`, so telemetry and renderer frame metrics retain the original delta. `advanceSimulationSeconds(currentSeconds, deltaSeconds, maximumDeltaSeconds)` accumulates the bounded delta for gameplay and scene timelines, resets a non-finite current value to zero, and saturates finite addition overflow at `std::numeric_limits<double>::max()`.
+
+`FixedStepClock` decouples gameplay/world updates from render cadence. It accumulates finite positive wall deltas, emits constant-duration `FixedStepBatch` updates, retains unconsumed debt across frames, caps both retained time and substeps per render frame, and reports dropped time plus a bounded interpolation alpha. Invalid construction parameters throw before platform startup. `reset()` clears elapsed and retained state.
 
 ## `World`
 

@@ -37,6 +37,47 @@ struct FrameTiming {
     return currentSeconds + stepSeconds;
 }
 
+struct FixedStepBatch {
+    std::uint32_t stepCount = 0;
+    double firstStepElapsedSeconds = 0.0;
+    double stepSeconds = 0.0;
+    double interpolationAlpha = 0.0;
+    double retainedSeconds = 0.0;
+    double droppedSeconds = 0.0;
+
+    [[nodiscard]] constexpr double elapsedSecondsForStep(const std::uint32_t stepIndex) const noexcept {
+        const double offsetSeconds = static_cast<double>(stepIndex) * stepSeconds;
+        return advanceSimulationSeconds(firstStepElapsedSeconds, offsetSeconds, offsetSeconds);
+    }
+};
+
+class FixedStepClock {
+public:
+    static constexpr double kDefaultStepSeconds = 1.0 / 60.0;
+    static constexpr double kDefaultMaximumAccumulatedSeconds = 0.25;
+    static constexpr std::uint32_t kDefaultMaximumSubsteps = 8;
+
+    FixedStepClock();
+    FixedStepClock(double stepSeconds,
+                   double maximumAccumulatedSeconds,
+                   std::uint32_t maximumSubsteps);
+
+    [[nodiscard]] FixedStepBatch advance(double frameDeltaSeconds) noexcept;
+    void reset() noexcept;
+
+    [[nodiscard]] double elapsedSeconds() const noexcept { return elapsedSeconds_; }
+    [[nodiscard]] double retainedSeconds() const noexcept { return accumulatedSeconds_; }
+    [[nodiscard]] double stepSeconds() const noexcept { return stepSeconds_; }
+    [[nodiscard]] std::uint32_t maximumSubsteps() const noexcept { return maximumSubsteps_; }
+
+private:
+    double stepSeconds_ = kDefaultStepSeconds;
+    double maximumAccumulatedSeconds_ = kDefaultMaximumAccumulatedSeconds;
+    std::uint32_t maximumSubsteps_ = kDefaultMaximumSubsteps;
+    double accumulatedSeconds_ = 0.0;
+    double elapsedSeconds_ = 0.0;
+};
+
 class Clock {
 public:
     Clock();

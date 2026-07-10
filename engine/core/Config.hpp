@@ -32,6 +32,9 @@ struct EngineConfig {
     bool indirectSceneDraws = true;
     bool debugOverlay = true;
     bool gpuTimestamps = true;
+    double fixedSimulationStepSeconds = 1.0 / 60.0;
+    double maximumSimulationAccumulatedSeconds = 0.25;
+    std::uint32_t maximumSimulationSubsteps = 8;
     std::uint32_t materialGridRows = 4;
     std::uint32_t materialGridColumns = 5;
     std::uint32_t materialGridTileRows = 16;
