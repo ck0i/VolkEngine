@@ -70,6 +70,11 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
             tile.itemCount > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max() - plan.visibleItemCount)) {
             return false;
         }
+        // Sphere tiles are logically homogeneous but camera-dependent LOD is per item.
+        // Fall back to the tile's item loop while retaining its accepted frustum result.
+        if (tile.commonMesh == SceneMeshId::Sphere) {
+            return false;
+        }
         const std::size_t meshIndex = meshBatchIndexFor(tile.commonMesh, tile.boundsCenter, tile.maxItemBoundsRadius, tile.boundsRadius);
         if (tile.itemCount > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max() - plan.meshInstanceCounts[meshIndex])) {
             return false;

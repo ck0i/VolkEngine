@@ -101,11 +101,11 @@ Precomputed culling/homogeneity record:
 
 - row/column begin/end bounds.
 - aggregate `boundsCenter` and `boundsRadius` for tile frustum tests.
-- `maxItemBoundsRadius` for conservative sphere LOD when a homogeneous tile is accepted as one work record.
+- `maxItemBoundsRadius` — conservative aggregate radius retained for tile metadata; sphere LOD selection remains per item.
 - `itemCount`.
 - `commonMesh` and `homogeneousMesh`.
 
-The aggregate tile radius is for culling, not item LOD.
+The aggregate tile radius is for culling, not item LOD. Fully accepted homogeneous sphere tiles reuse the tile frustum result but still classify each sphere independently into high/medium/low mesh batches.
 
 ## `DemoSceneRenderer`
 
