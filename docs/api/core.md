@@ -87,6 +87,7 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 - `reserveComponents<T>(capacity)` reserves dense component/entity storage for `T`; `componentCapacity<T>()` reports the dense capacity without changing component semantics.
 - `each<Ts...>(function)` iterates a one-or-more-component query as `(Entity, Ts&...)`; the `const World` overload supplies `(Entity, const Ts&...)` without permitting mutation. Component types must be distinct, unqualified object types.
 - Multi-component queries probe the smallest dense pool, skip non-matches, and preserve callback argument order from the template parameter list. This keeps sparse-set joins bounded by the least-populated required component while maintaining a stable callback contract.
+- Structural mutations (`createEntity`, `destroyEntity`, `clear`, `emplace`, `remove`, reservations, and move construction/assignment) throw `std::logic_error` while any `each` callback is active. Component field writes, nested queries, and const-query reads remain allowed; the guard is released when callbacks return or throw.
 - `WorldSceneTransform` and `WorldSceneRenderable` are the explicit world-owned render extraction components. `WorldSceneExtractor` joins them into renderer-facing `SceneRenderItem` records; extraction ordering is deterministic by entity handle, independent of dense-pool swap-and-pop order.
 - `clear()` destroys all entities and component storage.
 

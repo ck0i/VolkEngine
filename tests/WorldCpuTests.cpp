@@ -129,6 +129,90 @@ int main() {
             constThreeComponentCount += position.value == 10 && health.value == 80 && armor.value == 7 ? 1 : 0;
         });
     expectTrue("const three-component query exposes read-only matches", constThreeComponentCount == 1);
+
+    {
+        ve::World guardedWorld;
+        const ve::World::Entity guardedFirst = guardedWorld.createEntity();
+        const ve::World::Entity guardedSecond = guardedWorld.createEntity();
+        guardedWorld.emplace<Position>(guardedFirst, 1);
+        guardedWorld.emplace<Position>(guardedSecond, 2);
+
+        expectThrows("query rejects entity destruction", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity entity, Position&) {
+                (void)guardedWorld.destroyEntity(entity);
+            });
+        });
+        expectThrows("query rejects entity creation", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) {
+                (void)guardedWorld.createEntity();
+            });
+        });
+        expectThrows("query rejects component insertion", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity entity, Position&) {
+                guardedWorld.emplace<Health>(entity, 40);
+            });
+        });
+        expectThrows("query rejects component removal", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity entity, Position&) {
+                (void)guardedWorld.remove<Position>(entity);
+            });
+        });
+        expectThrows("query rejects entity reservation", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) {
+                guardedWorld.reserveEntities(64U);
+            });
+        });
+        expectThrows("query rejects component reservation", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) {
+                guardedWorld.reserveComponents<Health>(8U);
+            });
+        });
+        expectThrows("query rejects clear", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) {
+                guardedWorld.clear();
+            });
+        });
+        expectThrows("query rejects move assignment", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) {
+                guardedWorld = ve::World{};
+            });
+        });
+        expectThrows("query rejects move construction", [&] {
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) {
+                ve::World moved{std::move(guardedWorld)};
+                (void)moved;
+            });
+        });
+        expectTrue("rejected query mutations preserve world", guardedWorld.entityCount() == 2U &&
+                                                               guardedWorld.componentCount<Position>() == 2U &&
+                                                               guardedWorld.alive(guardedFirst) &&
+                                                               guardedWorld.alive(guardedSecond));
+
+        const ve::World& constGuardedWorld = guardedWorld;
+        expectThrows("const query rejects mutation through alias", [&] {
+            constGuardedWorld.each<Position>([&](const ve::World::Entity entity, const Position&) {
+                (void)guardedWorld.destroyEntity(entity);
+            });
+        });
+
+        int nestedVisitCount = 0;
+        int nestedInnerVisitCount = 0;
+        guardedWorld.each<Position>([&](const ve::World::Entity, Position& position) {
+            position.value += 10;
+            ++nestedVisitCount;
+            guardedWorld.each<Position>([&](const ve::World::Entity, Position&) { ++nestedInnerVisitCount; });
+        });
+        expectTrue("nested queries permit component writes", nestedVisitCount == 2 && nestedInnerVisitCount == 4 &&
+                                                           guardedWorld.tryGet<Position>(guardedFirst)->value == 11);
+
+        expectThrows("query guard unwinds callback exceptions", [&] {
+            guardedWorld.each<Position>([](const ve::World::Entity, Position&) {
+                throw std::logic_error("callback failure");
+            });
+        });
+        expectTrue("mutation works after callback exception", guardedWorld.remove<Position>(guardedFirst) &&
+                                                               guardedWorld.componentCount<Position>() == 1U);
+    }
     {
         ve::World smallerFirstWorld;
         const ve::World::Entity queryFirst = smallerFirstWorld.createEntity();
@@ -172,6 +256,9 @@ int main() {
     }
     ve::World movedWorld = std::move(world);
     expectTrue("moving a world preserves entity handles", movedWorld.alive(recycled) && movedWorld.tryGet<Position>(recycled)->value == 30);
+    expectTrue("moved-from world is empty", world.entityCount() == 0U && world.componentCount<Position>() == 0U);
+    const ve::World::Entity movedFromReplacement = world.createEntity();
+    expectTrue("moved-from world can be reused", world.entityCount() == 1U && world.alive(movedFromReplacement));
     movedWorld.clear();
     expectTrue("clear invalidates all entity handles", !movedWorld.alive(recycled) && movedWorld.entityCount() == 0U && movedWorld.componentCount<Position>() == 0U);
 

@@ -57,11 +57,36 @@ public:
     World() = default;
     World(const World&) = delete;
     World& operator=(const World&) = delete;
-    World(World&&) noexcept = default;
-    World& operator=(World&&) noexcept = default;
+    World(World&& other) {
+        other.ensureStructuralMutationAllowed();
+        slots_ = std::move(other.slots_);
+        freeIndices_ = std::move(other.freeIndices_);
+        pools_ = std::move(other.pools_);
+        aliveCount_ = other.aliveCount_;
+        other.slots_.clear();
+        other.freeIndices_.clear();
+        other.pools_.clear();
+        other.aliveCount_ = 0U;
+    }
+    World& operator=(World&& other) {
+        ensureStructuralMutationAllowed();
+        other.ensureStructuralMutationAllowed();
+        if (this != &other) {
+            slots_ = std::move(other.slots_);
+            freeIndices_ = std::move(other.freeIndices_);
+            pools_ = std::move(other.pools_);
+            aliveCount_ = other.aliveCount_;
+            other.slots_.clear();
+            other.freeIndices_.clear();
+            other.pools_.clear();
+            other.aliveCount_ = 0U;
+        }
+        return *this;
+    }
     ~World() = default;
 
     [[nodiscard]] Entity createEntity() {
+        ensureStructuralMutationAllowed();
         if (!freeIndices_.empty()) {
             const Index index = freeIndices_.back();
             freeIndices_.pop_back();
@@ -82,6 +107,7 @@ public:
     }
 
     [[nodiscard]] bool destroyEntity(const Entity entity) {
+        ensureStructuralMutationAllowed();
         if (!alive(entity)) {
             return false;
         }
@@ -102,6 +128,7 @@ public:
     }
 
     void clear() {
+        ensureStructuralMutationAllowed();
         freeIndices_.reserve(slots_.size());
         pools_.clear();
         aliveCount_ = 0;
@@ -126,6 +153,7 @@ public:
     }
 
     void reserveEntities(const std::size_t capacity) {
+        ensureStructuralMutationAllowed();
         if (capacity > static_cast<std::size_t>(kInvalidIndex)) {
             throw std::invalid_argument("World entity capacity exceeds index range");
         }
@@ -139,6 +167,7 @@ public:
 
     template <typename T>
     void reserveComponents(const std::size_t capacity) {
+        ensureStructuralMutationAllowed();
         static_assert(detail::validWorldComponentType<T>, "World components must be object types");
         getOrCreatePool<T>().reserve(capacity);
     }
@@ -152,6 +181,7 @@ public:
 
     template <typename T, typename... Args>
     T& emplace(const Entity entity, Args&&... args) {
+        ensureStructuralMutationAllowed();
         static_assert(!std::is_const_v<T> && !std::is_reference_v<T>, "World components must be object types");
         ensureAlive(entity);
         ComponentPool<T>& pool = getOrCreatePool<T>();
@@ -188,6 +218,7 @@ public:
 
     template <typename T>
     bool remove(const Entity entity) {
+        ensureStructuralMutationAllowed();
         if (!alive(entity)) {
             return false;
         }
@@ -213,6 +244,7 @@ public:
         if (!available) {
             return;
         }
+        QueryScope queryScope(*this);
 
         std::array<std::size_t, sizeof...(Components)> poolSizes{};
         std::size_t sizeIndex = 0U;
@@ -239,6 +271,7 @@ public:
         if (!available) {
             return;
         }
+        QueryScope queryScope(*this);
 
         std::array<std::size_t, sizeof...(Components)> poolSizes{};
         std::size_t sizeIndex = 0U;
@@ -255,6 +288,21 @@ public:
 
 private:
     static constexpr Index kInvalidDenseIndex = kInvalidIndex;
+
+    class QueryScope final {
+    public:
+        explicit QueryScope(const World& world) noexcept : world_(world) {
+            ++world_.activeQueryCount_;
+        }
+        QueryScope(const QueryScope&) = delete;
+        QueryScope& operator=(const QueryScope&) = delete;
+        ~QueryScope() {
+            --world_.activeQueryCount_;
+        }
+
+    private:
+        const World& world_;
+    };
 
     struct Slot {
         std::uint32_t generation = 1;
@@ -436,6 +484,12 @@ private:
         return it == pools_.end() ? nullptr : static_cast<const ComponentPool<T>*>(it->second.get());
     }
 
+    void ensureStructuralMutationAllowed() const {
+        if (activeQueryCount_ != 0U) {
+            throw std::logic_error("World structural mutation is forbidden during a query");
+        }
+    }
+
     void ensureAlive(const Entity entity) const {
         if (!alive(entity)) {
             throw std::invalid_argument("World entity is not alive");
@@ -444,6 +498,7 @@ private:
 
     std::vector<Slot> slots_;
     std::vector<Index> freeIndices_;
+    mutable std::size_t activeQueryCount_ = 0U;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentPool>> pools_;
     std::size_t aliveCount_ = 0;
 };
