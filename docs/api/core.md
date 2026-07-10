@@ -84,6 +84,7 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 - `tryGet<T>(entity)`, `contains<T>(entity)`, `remove<T>(entity)`, and `componentCount<T>()` provide component access.
 - `each<Ts...>(function)` iterates a one-or-more-component query as `(Entity, Ts&...)`; the `const World` overload supplies `(Entity, const Ts&...)` without permitting mutation. Component types must be distinct, unqualified object types.
 - Multi-component queries probe the smallest dense pool, skip non-matches, and preserve callback argument order from the template parameter list. This keeps sparse-set joins bounded by the least-populated required component while maintaining a stable callback contract.
+- `WorldSceneTransform` and `WorldSceneRenderable` are the explicit world-owned render extraction components. `WorldSceneExtractor` joins them into renderer-facing `SceneRenderItem` records; extraction ordering is deterministic by entity handle, independent of dense-pool swap-and-pop order.
 - `clear()` destroys all entities and component storage.
 
 ## File IO helpers

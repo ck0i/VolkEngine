@@ -1,10 +1,45 @@
 #include "renderer/SceneRenderer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
 namespace ve {
+namespace {
+
+[[nodiscard]] bool finiteVec3(const Vec3 value) noexcept {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+[[nodiscard]] bool finiteMatrix(const Mat4& matrix) noexcept {
+    for (const float value : matrix.m) {
+        if (!std::isfinite(value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool affineMatrix(const Mat4& matrix) noexcept {
+    return matrix.m[3] == 0.0F && matrix.m[7] == 0.0F && matrix.m[11] == 0.0F && matrix.m[15] == 1.0F;
+}
+
+[[nodiscard]] Vec3 transformPoint(const Mat4& matrix, const Vec3 point) noexcept {
+    return {matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
+            matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
+            matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]};
+}
+
+[[nodiscard]] float conservativeRadiusScale(const Mat4& matrix) noexcept {
+    float sum = 0.0f;
+    for (const std::size_t index : {0U, 1U, 2U, 4U, 5U, 6U, 8U, 9U, 10U}) {
+        sum += matrix.m[index] * matrix.m[index];
+    }
+    return std::sqrt(sum);
+}
+
+} // namespace
 
 void SceneRenderList::clear() noexcept {
     items_.clear();
@@ -113,6 +148,46 @@ bool SceneRenderList::indexInMaterialGridRange(const std::size_t index) const no
     }
     const std::size_t gridItemCount = rowCount * columnCount;
     return index - materialGridRange_.firstItem < gridItemCount;
+}
+
+const SceneRenderList& WorldSceneExtractor::build(const World& world) {
+    pendingItems_.clear();
+    world.each<WorldSceneTransform, WorldSceneRenderable>(
+        [&](const World::Entity entity, const WorldSceneTransform& transform, const WorldSceneRenderable& renderable) {
+            const MeshBounds& bounds = renderable.localBounds;
+            if (!renderable.visible || !bounds.valid || bounds.radius < 0.0f ||
+                !finiteVec3(bounds.center) || !std::isfinite(bounds.radius) || !finiteMatrix(transform.model) ||
+                !affineMatrix(transform.model)) {
+                return;
+            }
+
+            const Vec3 worldCenter = transformPoint(transform.model, bounds.center);
+            const float worldRadius = bounds.radius * conservativeRadiusScale(transform.model);
+            if (!finiteVec3(worldCenter) || !std::isfinite(worldRadius)) {
+                return;
+            }
+
+            pendingItems_.push_back(PendingItem{entity,
+                                                SceneRenderItem{worldCenter,
+                                                                worldRadius,
+                                                                renderable.mesh,
+                                                                transform.model,
+                                                                renderable.material}});
+        });
+
+    std::sort(pendingItems_.begin(), pendingItems_.end(), [](const PendingItem& lhs, const PendingItem& rhs) {
+        if (lhs.entity.index != rhs.entity.index) {
+            return lhs.entity.index < rhs.entity.index;
+        }
+        return lhs.entity.generation < rhs.entity.generation;
+    });
+
+    renderList_.clear();
+    renderList_.reserve(pendingItems_.size());
+    for (const PendingItem& pending : pendingItems_) {
+        renderList_.push(pending.item);
+    }
+    return renderList_;
 }
 
 std::size_t DemoSceneRenderer::requiredItemCount(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns) {

@@ -2,7 +2,7 @@
 
 Header: `engine/renderer/SceneRenderer.hpp`; sandbox implementation: `engine/renderer/SceneRenderer.cpp`.
 
-The current scene API is renderer-facing data, not an ECS. It exists to feed the Vulkan backend compact mesh/material/bounds records and to exercise batching/culling in the sandbox.
+The scene API provides renderer-facing data plus a CPU-only `WorldSceneExtractor` bridge. The bridge converts explicit world transform/renderable components into an extractor-owned, reusable `SceneRenderList`; Vulkan remains behind the renderer boundary.
 
 ## `SceneMeshId`
 
@@ -60,7 +60,7 @@ Contract:
 
 ## `SceneRenderList`
 
-A reusable vector-backed render-list plus optional material-grid metadata. The application/world producer owns the list; the renderer borrows it synchronously for one draw call and does not retain it.
+A reusable vector-backed render-list plus optional material-grid metadata. `WorldSceneExtractor` owns and reuses its list; callers may borrow the `const SceneRenderList&` returned by `build()` until the next build or extractor destruction. The renderer borrows it synchronously for one draw call and does not retain it.
 List operations:
 
 - `clear()` — clears items and invalidates grid metadata.
@@ -83,6 +83,14 @@ Material-grid metadata:
 If grid metadata is missing or stale, the renderer falls back to generic per-item visibility scanning.
 
 Hot read-only accessors stay inline in `SceneRenderer.hpp`; heavier mutation and tile-rebuild code lives in `SceneRenderer.cpp` to keep the public header small without adding per-frame visibility access overhead.
+
+## `WorldSceneTransform`, `WorldSceneRenderable`, and `WorldSceneExtractor`
+
+`WorldSceneTransform` stores an affine-capable model matrix. `WorldSceneRenderable` stores a mesh id, shader material, local `MeshBounds`, and a visibility flag. The application/world producer owns these components in `World`; `WorldSceneExtractor` owns a reusable scratch buffer and render list.
+
+`WorldSceneExtractor::build(const World&)` joins entities carrying both components, skips invisible entries, missing/invalid bounds, non-finite matrices, and non-affine/projective matrices, then emits world-space `SceneRenderItem` records. Bounds centers are transformed by the model matrix. Radius scaling uses the Frobenius norm of the model's linear 3x3 portion, conservatively covering non-uniform scale and shear; affine matrices are required because projective homogeneous division is not part of scene-bound extraction.
+
+Extraction sorts pending records by `{Entity::index, Entity::generation}` before pushing them, because ECS dense pools use swap-and-pop and do not promise stable iteration order. The returned list is reused and cleared on each build; the renderer borrows it synchronously and does not retain it.
 
 ## `SceneGridRange`
 

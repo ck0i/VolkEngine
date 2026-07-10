@@ -6,9 +6,9 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 
 | Path | Responsibility | Public surface |
 | --- | --- | --- |
-| `engine/core` | Application lifecycle, config, clock, camera, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `Camera`, `Clock`, helper functions. |
+| `engine/core` | Application lifecycle, config, clock, camera, world/entity-component storage, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `World`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW process runtime, window, input, framebuffer resize state, Vulkan surface creation. | `GlfwRuntime`, `Window`. |
-| `engine/renderer` | Renderer contracts, scene submission data, sandbox scene implementation, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `DemoSceneRenderer` declarations, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
+| `engine/renderer` | Renderer contracts, world-to-scene extraction, scene submission data, sandbox scene implementation, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `WorldSceneExtractor`, `DemoSceneRenderer` declarations, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
@@ -35,6 +35,7 @@ graph TD
 ```
 
 - `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
+- `World` owns generational entities and component pools. World renderable components (`WorldSceneTransform`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns a reusable render-list snapshot and the scratch records used to build it.
 - `GlfwRuntime` owns GLFW process initialization/termination. `Window` borrows the runtime and owns only its native window handle; one runtime is allowed per process and GLFW calls remain on the main thread.
 - `VulkanRenderer` owns runtime Vulkan behavior via private `Impl`, but keeps ownership boundaries explicit:
   - `VulkanRenderer.hpp` remains the backend API entry boundary.
@@ -58,8 +59,8 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 
 1. `Clock::tick()` returns elapsed and delta time.
 2. `Window::updateCamera()` applies keyboard/mouse input to `Camera`.
-3. `Application` updates its world/demo producer and builds a caller-owned `SceneRenderList`.
-4. `Application::run()` calls `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)`; the renderer borrows the list only for that call.
+3. `Application` updates its demo producer and builds a reusable `SceneRenderList`; world-backed producers can use `WorldSceneExtractor` to create the same renderer-facing snapshot.
+4. `Application::run()` calls `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)`; the renderer borrows the list only for that call, while an extractor-owned list remains valid until its next build.
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
 6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.
 7. `RenderStats` and `RenderDeviceInfo` expose what path was used and how the last submitted frame behaved.
@@ -78,5 +79,5 @@ Its private `Impl` keeps Vulkan internals isolated from application code, which 
 - One renderer backend exists: Vulkan.
 - The renderer interface is intentionally small: `draw`, `stats`, and `deviceInfo` (plus explicit screenshot/idle hooks).
 - The frame graph is metadata/validation, not yet a transient-resource allocator or barrier owner.
-- Scene submission is data-oriented and demo-focused; it is not a general ECS or streaming scene system yet.
+- World-to-scene extraction is explicit and CPU-side; it is an ECS bridge, not yet a general streaming scene system.
 - Descriptor indexing support is reported as capability metadata, but bindless descriptors are not enabled until the resource model needs them.

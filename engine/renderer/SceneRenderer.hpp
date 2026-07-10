@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Math.hpp"
+#include "core/World.hpp"
 #include "renderer/Geometry.hpp"
 
 #include <cstddef>
@@ -108,6 +109,31 @@ private:
     bool materialGridTilesCoverRange_ = false;
     std::uint64_t materialGridTileRevision_ = 0;
     std::vector<SceneGridTile> materialGridTiles_{};
+};
+
+struct WorldSceneTransform {
+    Mat4 model = Mat4::identity();
+};
+
+struct WorldSceneRenderable {
+    SceneMeshId mesh = SceneMeshId::Cube;
+    RenderMaterial material{};
+    MeshBounds localBounds{};
+    bool visible = true;
+};
+
+class WorldSceneExtractor final {
+public:
+    [[nodiscard]] const SceneRenderList& build(const World& world);
+
+private:
+    struct PendingItem {
+        World::Entity entity;
+        SceneRenderItem item;
+    };
+
+    std::vector<PendingItem> pendingItems_;
+    SceneRenderList renderList_;
 };
 
 class DemoSceneRenderer {

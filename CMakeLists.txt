@@ -198,6 +198,16 @@ target_include_directories(VolkEngineSceneRendererTest
 volkengine_target_warnings(VolkEngineSceneRendererTest)
 add_test(NAME SceneRendererCpu
     COMMAND VolkEngineSceneRendererTest)
+
+add_executable(VolkEngineWorldSceneCpuTest
+    tests/WorldSceneCpuTests.cpp
+    engine/renderer/SceneRenderer.cpp)
+target_include_directories(VolkEngineWorldSceneCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineWorldSceneCpuTest)
+add_test(NAME WorldSceneCpu
+    COMMAND VolkEngineWorldSceneCpuTest)
 add_executable(VolkEngineFrameGraphCpuTest
     tests/FrameGraphCpuTests.cpp)
 target_include_directories(VolkEngineFrameGraphCpuTest
