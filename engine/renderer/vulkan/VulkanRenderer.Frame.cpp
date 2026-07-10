@@ -484,7 +484,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
 
         VkRenderingAttachmentInfo sceneDepthAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         sceneDepthAttachment.imageView = depth_.view;
-        sceneDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        sceneDepthAttachment.imageLayout = depthAttachmentLayout(useDepthPrepass ? FrameGraphAccess::Read : FrameGraphAccess::Write);
         sceneDepthAttachment.loadOp = useDepthPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
         sceneDepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         sceneDepthAttachment.clearValue.depthStencil = {0.0f, 0};

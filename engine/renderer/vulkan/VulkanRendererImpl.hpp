@@ -53,6 +53,11 @@ inline constexpr double kImGuiDiagnosticsRefreshIntervalSeconds = 0.25;
 inline double bytesToMiB(const std::uint64_t bytes) {
     return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
+[[nodiscard]] inline constexpr VkImageLayout depthAttachmentLayout(const FrameGraphAccess access) noexcept {
+    return access == FrameGraphAccess::Read
+        ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+        : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+}
 
 struct TonemapPushConstants {
     float exposure = 1.0f;

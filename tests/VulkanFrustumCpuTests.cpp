@@ -67,6 +67,10 @@ int main() {
                 ve::vulkan_renderer_detail::classifySphereAgainstFrustum(frustum, {0.0f, 0.0f, -kFar * 1.01f}, 0.001f),
                 ve::vulkan_renderer_detail::FrustumSphereClassification::Outside);
 
+    expectTrue("depth write uses attachment-optimal layout",
+               ve::vulkan_renderer_detail::depthAttachmentLayout(ve::FrameGraphAccess::Write) == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+    expectTrue("depth read uses combined read-only layout",
+               ve::vulkan_renderer_detail::depthAttachmentLayout(ve::FrameGraphAccess::Read) == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     expectTrue("texture extent accepts equal device limit",
                ve::vulkan_renderer_detail::textureExtentFitsDeviceLimit(VkExtent2D{4096U, 2048U}, 4096U));
     expectTrue("texture extent rejects width above device limit",

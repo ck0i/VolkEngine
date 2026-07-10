@@ -12,7 +12,7 @@ VulkanRenderer::Impl::ImageSyncState VulkanRenderer::Impl::imageSyncStateFor(con
         };
     case FrameGraphUsage::DepthAttachment:
         return ImageSyncState{
-            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            depthAttachmentLayout(access),
             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
             access == FrameGraphAccess::Write ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
         };
