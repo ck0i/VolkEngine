@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -38,6 +40,8 @@ inline constexpr bool validWorldComponentTypes =
 } // namespace ve::detail
 
 namespace ve {
+
+class WorldCommandBuffer;
 
 class World final {
 public:
@@ -287,6 +291,8 @@ public:
     }
 
 private:
+    friend class WorldCommandBuffer;
+
     static constexpr Index kInvalidDenseIndex = kInvalidIndex;
 
     class QueryScope final {
@@ -501,6 +507,115 @@ private:
     mutable std::size_t activeQueryCount_ = 0U;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentPool>> pools_;
     std::size_t aliveCount_ = 0;
+};
+
+class WorldCommandBuffer final {
+public:
+    struct PlaybackResult {
+        std::size_t applied = 0U;
+        std::size_t rejected = 0U;
+    };
+
+    WorldCommandBuffer() = default;
+    WorldCommandBuffer(const WorldCommandBuffer&) = delete;
+    WorldCommandBuffer& operator=(const WorldCommandBuffer&) = delete;
+    WorldCommandBuffer(WorldCommandBuffer&& other) {
+        if (other.playbackActive_) {
+            throw std::logic_error("Cannot move a World command buffer during playback");
+        }
+        pending_ = std::move(other.pending_);
+        executing_ = std::move(other.executing_);
+        nextCommand_ = std::exchange(other.nextCommand_, 0U);
+    }
+    WorldCommandBuffer& operator=(WorldCommandBuffer&& other) {
+        if (this != &other) {
+            if (playbackActive_ || other.playbackActive_) {
+                throw std::logic_error("Cannot move a World command buffer during playback");
+            }
+            pending_ = std::move(other.pending_);
+            executing_ = std::move(other.executing_);
+            nextCommand_ = std::exchange(other.nextCommand_, 0U);
+        }
+        return *this;
+    }
+    ~WorldCommandBuffer() = default;
+
+    void destroy(const World::Entity entity) {
+        pending_.emplace_back([entity](World& world) {
+            return world.alive(entity) && world.destroyEntity(entity);
+        });
+    }
+
+    template <typename T>
+    void remove(const World::Entity entity) {
+        static_assert(detail::validWorldComponentType<T>, "World components must be object types");
+        pending_.emplace_back([entity](World& world) {
+            return world.alive(entity) && world.remove<T>(entity);
+        });
+    }
+
+    template <typename T>
+    void emplace(const World::Entity entity, T ownedValue) {
+        static_assert(detail::validWorldComponentType<T>, "World components must be object types");
+        static_assert(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>,
+                      "World components must be nothrow move constructible and assignable");
+        pending_.emplace_back([entity, value = std::move(ownedValue)](World& world) mutable {
+            if (!world.alive(entity) || world.contains<T>(entity)) {
+                return false;
+            }
+            world.emplace<T>(entity, std::move(value));
+            return true;
+        });
+    }
+
+    [[nodiscard]] PlaybackResult playback(World& world) {
+        world.ensureStructuralMutationAllowed();
+        if (playbackActive_) {
+            throw std::logic_error("Recursive World command buffer playback is forbidden");
+        }
+        playbackActive_ = true;
+        try {
+            if (executing_.empty()) {
+                executing_.swap(pending_);
+                nextCommand_ = 0U;
+            }
+
+            PlaybackResult result;
+            while (nextCommand_ < executing_.size()) {
+                std::move_only_function<bool(World&)>& command = executing_[nextCommand_++];
+                if (command(world)) {
+                    ++result.applied;
+                } else {
+                    ++result.rejected;
+                }
+            }
+            executing_.clear();
+            nextCommand_ = 0U;
+            playbackActive_ = false;
+            return result;
+        } catch (...) {
+            if (nextCommand_ == executing_.size()) {
+                executing_.clear();
+                nextCommand_ = 0U;
+            }
+            playbackActive_ = false;
+            throw;
+        }
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return size() == 0U;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept {
+        return pending_.size() + executing_.size() - nextCommand_;
+    }
+
+private:
+    std::vector<std::move_only_function<bool(World&)>> pending_;
+    std::vector<std::move_only_function<bool(World&)>> executing_;
+    bool playbackActive_ = false;
+    std::size_t nextCommand_ = 0U;
 };
 
 } // namespace ve

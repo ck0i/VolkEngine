@@ -35,7 +35,7 @@ graph TD
 ```
 
 - `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
-- `World` owns generational entities and component pools. World renderable components (`WorldSceneTransform`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns a reusable render-list snapshot and the scratch records used to build it.
+- `World` owns generational entities and component pools. Caller-owned `WorldCommandBuffer` instances stage owned structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns a reusable render-list snapshot and the scratch records used to build it.
 - `GlfwRuntime` owns GLFW process initialization/termination. `Window` borrows the runtime and owns only its native window handle; one runtime is allowed per process and GLFW calls remain on the main thread.
 - `VulkanRenderer` owns runtime Vulkan behavior via private `Impl`, but keeps ownership boundaries explicit:
   - `VulkanRenderer.hpp` remains the backend API entry boundary.

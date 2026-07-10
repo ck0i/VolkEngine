@@ -1,8 +1,34 @@
 #include "core/World.hpp"
 
+#include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <new>
 #include <string_view>
 #include <utility>
+
+namespace {
+bool gFailNextAllocation = false;
+}
+
+void* operator new(const std::size_t size) {
+    if (gFailNextAllocation) {
+        gFailNextAllocation = false;
+        throw std::bad_alloc{};
+    }
+    if (void* allocation = std::malloc(size); allocation != nullptr) {
+        return allocation;
+    }
+    throw std::bad_alloc{};
+}
+
+void operator delete(void* allocation) noexcept {
+    std::free(allocation);
+}
+
+void operator delete(void* allocation, std::size_t) noexcept {
+    std::free(allocation);
+}
 
 namespace {
 
@@ -39,6 +65,82 @@ struct Health {
 
 struct Armor {
     int value = 0;
+};
+
+struct MoveOnlyPayload {
+    std::unique_ptr<int> value;
+};
+
+struct ReentrantPayload {
+    ve::WorldCommandBuffer* commands = nullptr;
+    ve::World::Entity target{};
+
+    ReentrantPayload() = default;
+    ReentrantPayload(ve::WorldCommandBuffer* commandBuffer, const ve::World::Entity targetEntity) noexcept
+        : commands(commandBuffer), target(targetEntity) {}
+    ReentrantPayload(const ReentrantPayload&) = delete;
+    ReentrantPayload& operator=(const ReentrantPayload&) = delete;
+    ReentrantPayload(ReentrantPayload&& other) noexcept : commands(other.commands), target(other.target) {
+        enqueueOnMove(other);
+    }
+    ReentrantPayload& operator=(ReentrantPayload&& other) noexcept {
+        commands = other.commands;
+        target = other.target;
+        enqueueOnMove(other);
+        return *this;
+    }
+
+    static inline bool enqueueEnabled = false;
+
+private:
+    static void enqueueOnMove(ReentrantPayload& source) noexcept {
+        if (enqueueEnabled) {
+            enqueueEnabled = false;
+            source.commands->remove<Armor>(source.target);
+        }
+    }
+};
+
+struct RecursivePlaybackPayload {
+    ve::WorldCommandBuffer* commands = nullptr;
+    ve::World* world = nullptr;
+
+    RecursivePlaybackPayload() = default;
+    RecursivePlaybackPayload(ve::WorldCommandBuffer* commandBuffer, ve::World* targetWorld) noexcept
+        : commands(commandBuffer), world(targetWorld) {}
+    RecursivePlaybackPayload(const RecursivePlaybackPayload&) = delete;
+    RecursivePlaybackPayload& operator=(const RecursivePlaybackPayload&) = delete;
+    RecursivePlaybackPayload(RecursivePlaybackPayload&& other) noexcept
+        : commands(other.commands), world(other.world) {
+        attemptPlayback();
+    }
+    RecursivePlaybackPayload& operator=(RecursivePlaybackPayload&& other) noexcept {
+        commands = other.commands;
+        world = other.world;
+        attemptPlayback();
+        return *this;
+    }
+
+    static inline bool playbackEnabled = false;
+    static inline bool playbackRejected = false;
+    static inline bool observedEmpty = false;
+    static inline std::size_t observedSize = 0U;
+
+private:
+    void attemptPlayback() noexcept {
+        if (!playbackEnabled) {
+            return;
+        }
+        playbackEnabled = false;
+        observedEmpty = commands->empty();
+        observedSize = commands->size();
+        try {
+            (void)commands->playback(*world);
+        } catch (const std::logic_error&) {
+            playbackRejected = true;
+        } catch (...) {
+        }
+    }
 };
 
 struct LvaluePositionVisitor {
@@ -212,6 +314,121 @@ int main() {
         });
         expectTrue("mutation works after callback exception", guardedWorld.remove<Position>(guardedFirst) &&
                                                                guardedWorld.componentCount<Position>() == 1U);
+    }
+    {
+        ve::World commandWorld;
+        ve::WorldCommandBuffer commands;
+        const ve::World::Entity firstCommandEntity = commandWorld.createEntity();
+        const ve::World::Entity secondCommandEntity = commandWorld.createEntity();
+        commandWorld.emplace<Position>(firstCommandEntity, 10);
+        commandWorld.emplace<Armor>(firstCommandEntity, 3);
+        commandWorld.emplace<Position>(secondCommandEntity, 20);
+
+        commandWorld.each<Position>([&](const ve::World::Entity entity, Position&) {
+            if (entity == firstCommandEntity) {
+                commands.remove<Armor>(entity);
+                commands.emplace<Health>(entity, Health{25});
+            } else {
+                commands.destroy(entity);
+            }
+            expectTrue("deferred mutations remain invisible during a query",
+                       commandWorld.alive(entity) && commandWorld.contains<Position>(entity));
+        });
+        expectTrue("query records every deferred mutation", commands.size() == 3U);
+        const ve::WorldCommandBuffer::PlaybackResult applied = commands.playback(commandWorld);
+        expectTrue("deferred playback reports applied commands",
+                   applied.applied == 3U && applied.rejected == 0U && commands.empty());
+        expectTrue("deferred component changes apply after playback",
+                   !commandWorld.contains<Armor>(firstCommandEntity) &&
+                       commandWorld.tryGet<Health>(firstCommandEntity) != nullptr &&
+                       commandWorld.tryGet<Health>(firstCommandEntity)->value == 25);
+        expectTrue("deferred destruction applies after playback", !commandWorld.alive(secondCommandEntity));
+
+        commands.destroy(firstCommandEntity);
+        commands.remove<Position>(firstCommandEntity);
+        commands.emplace<Armor>(firstCommandEntity, Armor{9});
+        const ve::WorldCommandBuffer::PlaybackResult conflicts = commands.playback(commandWorld);
+        expectTrue("FIFO destruction rejects later commands for the stale handle",
+                   conflicts.applied == 1U && conflicts.rejected == 2U && !commandWorld.alive(firstCommandEntity));
+
+        const ve::World::Entity recycledCommandEntity = commandWorld.createEntity();
+        expectTrue("deferred stale handle slot is recycled with a new generation",
+                   recycledCommandEntity.index == firstCommandEntity.index &&
+                       recycledCommandEntity.generation != firstCommandEntity.generation);
+        commands.emplace<Position>(firstCommandEntity, Position{99});
+        const ve::WorldCommandBuffer::PlaybackResult stale = commands.playback(commandWorld);
+        expectTrue("deferred stale generation cannot mutate recycled entity",
+                   stale.applied == 0U && stale.rejected == 1U &&
+                       !commandWorld.contains<Position>(recycledCommandEntity));
+
+        commands.emplace<MoveOnlyPayload>(
+            recycledCommandEntity, MoveOnlyPayload{std::make_unique<int>(77)});
+        const ve::WorldCommandBuffer::PlaybackResult owned = commands.playback(commandWorld);
+        const MoveOnlyPayload* payload = commandWorld.tryGet<MoveOnlyPayload>(recycledCommandEntity);
+        expectTrue("deferred component command owns move-only payload",
+                   owned.applied == 1U && payload != nullptr && payload->value != nullptr &&
+                       *payload->value == 77);
+
+        commandWorld.emplace<Armor>(recycledCommandEntity, 12);
+        commands.emplace<ReentrantPayload>(
+            recycledCommandEntity, ReentrantPayload{&commands, recycledCommandEntity});
+        ReentrantPayload::enqueueEnabled = true;
+        const ve::WorldCommandBuffer::PlaybackResult reentrant = commands.playback(commandWorld);
+        expectTrue("commands appended during playback wait for the next batch",
+                   reentrant.applied == 1U && commands.size() == 1U &&
+                       commandWorld.contains<Armor>(recycledCommandEntity));
+        const ve::WorldCommandBuffer::PlaybackResult appended = commands.playback(commandWorld);
+        expectTrue("next playback applies reentrant command",
+                   appended.applied == 1U && appended.rejected == 0U && commands.empty() &&
+                       !commandWorld.contains<Armor>(recycledCommandEntity));
+
+        commands.emplace<RecursivePlaybackPayload>(
+            recycledCommandEntity, RecursivePlaybackPayload{&commands, &commandWorld});
+        RecursivePlaybackPayload::playbackRejected = false;
+        RecursivePlaybackPayload::observedEmpty = false;
+        RecursivePlaybackPayload::observedSize = 1U;
+        RecursivePlaybackPayload::playbackEnabled = true;
+        const ve::WorldCommandBuffer::PlaybackResult recursive = commands.playback(commandWorld);
+        expectTrue("recursive playback is rejected without disturbing outer batch",
+                   recursive.applied == 1U && RecursivePlaybackPayload::playbackRejected &&
+                       RecursivePlaybackPayload::observedEmpty &&
+                       RecursivePlaybackPayload::observedSize == 0U && commands.empty() &&
+                       commandWorld.contains<RecursivePlaybackPayload>(recycledCommandEntity));
+
+        ve::World failureWorld;
+        const ve::World::Entity failureEntity = failureWorld.createEntity();
+        failureWorld.emplace<Position>(failureEntity, 5);
+        ve::WorldCommandBuffer failingCommands;
+        failingCommands.emplace<Health>(failureEntity, Health{60});
+        failingCommands.remove<Position>(failureEntity);
+        bool allocationFailurePropagated = false;
+        gFailNextAllocation = true;
+        try {
+            (void)failingCommands.playback(failureWorld);
+        } catch (const std::bad_alloc&) {
+            allocationFailurePropagated = true;
+        }
+        expectTrue("throwing command is consumed and leaves FIFO tail pending",
+                   allocationFailurePropagated && failingCommands.size() == 1U &&
+                       failureWorld.contains<Position>(failureEntity) &&
+                       !failureWorld.contains<Health>(failureEntity));
+
+        ve::WorldCommandBuffer resumedCommands{std::move(failingCommands)};
+        expectTrue("moving paused buffer resets moved-from cursor",
+                   failingCommands.empty() && failingCommands.size() == 0U && resumedCommands.size() == 1U);
+        const ve::WorldCommandBuffer::PlaybackResult resumed = resumedCommands.playback(failureWorld);
+        expectTrue("moved paused buffer resumes unattempted FIFO tail",
+                   resumed.applied == 1U && resumed.rejected == 0U && resumedCommands.empty() &&
+                       !failureWorld.contains<Position>(failureEntity));
+
+        ve::WorldCommandBuffer emptyCommands;
+        expectThrows("empty command playback is rejected during a query", [&] {
+            commandWorld.each<MoveOnlyPayload>([&](const ve::World::Entity, MoveOnlyPayload&) {
+                (void)emptyCommands.playback(commandWorld);
+            });
+        });
+        expectTrue("query rejection leaves empty command buffer reusable",
+                   emptyCommands.playback(commandWorld).applied == 0U && emptyCommands.empty());
     }
     {
         ve::World smallerFirstWorld;
