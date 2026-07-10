@@ -11,6 +11,13 @@ struct FrameTiming {
     std::uint64_t frameIndex = 0;
 };
 
+[[nodiscard]] constexpr double clampDeltaSeconds(const double deltaSeconds, const double maximumSeconds) noexcept {
+    if (maximumSeconds <= 0.0 || deltaSeconds <= 0.0) {
+        return 0.0;
+    }
+    return deltaSeconds < maximumSeconds ? deltaSeconds : maximumSeconds;
+}
+
 class Clock {
 public:
     Clock();

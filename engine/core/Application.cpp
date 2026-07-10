@@ -2,7 +2,6 @@
 
 #include "core/Log.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <spdlog/spdlog.h>
@@ -48,8 +47,8 @@ int Application::run(const RunOptions& options) {
             window_.setSize(config_.initialWidth, config_.initialHeight);
         }
 
-        const double clampedDelta = std::min(timing.deltaSeconds, 0.05);
-        window_.updateCamera(camera_, static_cast<float>(clampedDelta));
+        const double simulationDelta = clampDeltaSeconds(timing.deltaSeconds, 0.05);
+        window_.updateCamera(camera_, static_cast<float>(simulationDelta));
         const VkExtent2D extent = window_.framebufferExtent();
         if (extent.height > 0) {
             camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));

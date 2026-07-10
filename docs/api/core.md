@@ -71,6 +71,8 @@ Defaults: position `(0, 1.6, 5)`, yaw `-90°`, pitch `-12°`, vertical FOV `65°
 
 It uses `std::chrono::steady_clock` and increments the frame index per tick.
 
+`clampDeltaSeconds(deltaSeconds, maximumSeconds)` is a pure simulation helper. It clamps negative or hitch-sized deltas to a non-negative maximum without changing the raw wall-clock timing reported by `Clock`; telemetry and renderer frame metrics retain the original delta.
+
 ## File IO helpers
 
 - `readBinaryFile(path) -> std::vector<std::byte>`
