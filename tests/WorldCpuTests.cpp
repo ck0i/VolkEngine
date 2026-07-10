@@ -72,6 +72,35 @@ int main() {
     int lvalueVisitorSum = 0;
     readOnlyWorld.each<Position>(LvaluePositionVisitor{&lvalueVisitorSum});
     expectTrue("const iteration supports lvalue-qualified visitors", lvalueVisitorSum == 30);
+    int matchedPositionSum = 0;
+    int matchedHealthSum = 0;
+    world.each<Position, Health>([&](const ve::World::Entity, Position& position, Health& health) {
+        matchedPositionSum += position.value;
+        matchedHealthSum += health.value;
+    });
+    expectTrue("two-component query joins only matching entities", matchedPositionSum == 10 && matchedHealthSum == 80);
+    const ve::World& constQueryWorld = world;
+    int constQueryCount = 0;
+    constQueryWorld.each<Position, Health>([&](const ve::World::Entity, const Position& position, const Health& health) {
+        constQueryCount += position.value == 10 && health.value == 80 ? 1 : 0;
+    });
+    expectTrue("const two-component query exposes read-only matches", constQueryCount == 1);
+    {
+        ve::World smallerFirstWorld;
+        const ve::World::Entity queryFirst = smallerFirstWorld.createEntity();
+        const ve::World::Entity querySecond = smallerFirstWorld.createEntity();
+        smallerFirstWorld.emplace<Position>(queryFirst, 3);
+        smallerFirstWorld.emplace<Health>(queryFirst, 30);
+        smallerFirstWorld.emplace<Health>(querySecond, 40);
+        int smallerFirstPositionSum = 0;
+        int smallerFirstHealthSum = 0;
+        smallerFirstWorld.each<Position, Health>([&](const ve::World::Entity, Position& position, Health& health) {
+            smallerFirstPositionSum += position.value;
+            smallerFirstHealthSum += health.value;
+        });
+        expectTrue("two-component query preserves callback order when first pool is smaller",
+                   smallerFirstPositionSum == 3 && smallerFirstHealthSum == 30);
+    }
 
     expectTrue("component removal succeeds", world.remove<Health>(first));
     expectTrue("component removal clears lookup", !world.contains<Health>(first) && world.componentCount<Health>() == 0U);

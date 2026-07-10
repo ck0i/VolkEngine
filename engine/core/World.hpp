@@ -165,6 +165,52 @@ public:
         }
     }
 
+    template <typename T, typename U, typename Function>
+    void each(Function&& function) {
+        static_assert(!std::is_same_v<T, U>, "World multi-component queries require distinct component types");
+        ComponentPool<T>* first = findPool<T>();
+        ComponentPool<U>* second = findPool<U>();
+        if (first == nullptr || second == nullptr) {
+            return;
+        }
+        if (first->size() <= second->size()) {
+            first->each([&](const Entity entity, T& component) {
+                if (U* other = second->tryGet(entity.index)) {
+                    function(entity, component, *other);
+                }
+            });
+        } else {
+            second->each([&](const Entity entity, U& component) {
+                if (T* other = first->tryGet(entity.index)) {
+                    function(entity, *other, component);
+                }
+            });
+        }
+    }
+
+    template <typename T, typename U, typename Function>
+    void each(Function&& function) const {
+        static_assert(!std::is_same_v<T, U>, "World multi-component queries require distinct component types");
+        const ComponentPool<T>* first = findPool<T>();
+        const ComponentPool<U>* second = findPool<U>();
+        if (first == nullptr || second == nullptr) {
+            return;
+        }
+        if (first->size() <= second->size()) {
+            first->each([&](const Entity entity, const T& component) {
+                if (const U* other = second->tryGet(entity.index)) {
+                    function(entity, component, *other);
+                }
+            });
+        } else {
+            second->each([&](const Entity entity, const U& component) {
+                if (const T* other = first->tryGet(entity.index)) {
+                    function(entity, *other, component);
+                }
+            });
+        }
+    }
+
 private:
     static constexpr Index kInvalidDenseIndex = kInvalidIndex;
 
