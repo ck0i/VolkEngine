@@ -1,4 +1,5 @@
 #include "core/FileSystem.hpp"
+#include <cstdint>
 #include <string>
 
 #if defined(_WIN32)
@@ -8,6 +9,8 @@
 #include <windows.h>
 #elif defined(__linux__)
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 
@@ -42,6 +45,19 @@ std::filesystem::path resolveExecutablePath() {
             return std::filesystem::path{std::string(buffer.data(), static_cast<std::size_t>(copied))};
         }
         buffer.resize(buffer.size() * 2);
+    }
+#elif defined(__APPLE__)
+    std::vector<char> buffer(256);
+    for (;;) {
+        std::uint32_t bufferSize = static_cast<std::uint32_t>(buffer.size());
+        const int result = _NSGetExecutablePath(buffer.data(), &bufferSize);
+        if (result == 0) {
+            return std::filesystem::path{buffer.data()};
+        }
+        if (result != -1 || bufferSize <= buffer.size()) {
+            throw std::runtime_error("Failed to resolve executable path");
+        }
+        buffer.resize(bufferSize);
     }
 #else
     return std::filesystem::current_path();

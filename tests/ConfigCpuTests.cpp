@@ -33,6 +33,9 @@ int main() {
     expectFalse("negative exposure is invalid", ve::isValidExposure(-1.0f));
     expectFalse("infinite exposure is invalid", ve::isValidExposure(std::numeric_limits<float>::infinity()));
     expectFalse("NaN exposure is invalid", ve::isValidExposure(std::nanf("")));
+    const std::filesystem::path executableRoot = ve::executableDirectory();
+    expectTrue("executable directory is absolute", executableRoot.is_absolute());
+    expectFalse("executable directory is not empty", executableRoot.empty());
     const ve::EngineConfig defaults{};
     expectTrue("default albedo texture is asset-relative", defaults.groundAlbedoTexture == "textures/ground_albedo.png");
     expectTrue("default normal texture is asset-relative", defaults.groundNormalTexture == "textures/ground_normal.png");
