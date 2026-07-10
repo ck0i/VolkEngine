@@ -1,9 +1,19 @@
 #include "renderer/SceneRenderer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+
+#if defined(_WIN32)
+#include <bcrypt.h>
+#elif defined(__linux__)
+#include <cerrno>
+#include <sys/random.h>
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#include <cstdlib>
+#endif
 
 namespace ve {
 namespace {
@@ -136,6 +146,59 @@ namespace {
     return true;
 }
 
+constexpr std::size_t sceneEntityIdByteCount = 16U;
+constexpr std::size_t sceneEntityIdGenerationAttempts = 16U;
+
+void fillSceneEntityIdBytes(std::array<std::uint8_t, sceneEntityIdByteCount>& bytes) {
+#if defined(_WIN32)
+    if (BCryptGenRandom(nullptr,
+                        bytes.data(),
+                        static_cast<ULONG>(bytes.size()),
+                        BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+        throw std::runtime_error("BCryptGenRandom failed while generating scene entity ID");
+    }
+#elif defined(__linux__)
+    std::size_t bytesRead = 0U;
+    while (bytesRead < bytes.size()) {
+        const auto result = getrandom(bytes.data() + bytesRead, bytes.size() - bytesRead, 0);
+        if (result > 0) {
+            bytesRead += static_cast<std::size_t>(result);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        throw std::runtime_error("getrandom failed while generating scene entity ID");
+    }
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+    arc4random_buf(bytes.data(), bytes.size());
+#else
+    throw std::runtime_error("No operating-system CSPRNG is available for scene entity ID generation");
+#endif
+}
+
+[[nodiscard]] SceneEntityId sceneEntityIdFromUuidV4Bytes(
+    std::array<std::uint8_t, sceneEntityIdByteCount>& bytes) noexcept {
+    bytes[6] = static_cast<std::uint8_t>((bytes[6] & 0x0FU) | 0x40U);
+    bytes[8] = static_cast<std::uint8_t>((bytes[8] & 0x3FU) | 0x80U);
+
+    std::uint64_t high = 0U;
+    std::uint64_t low = 0U;
+    for (std::size_t index = 0U; index < 8U; ++index) {
+        high = (high << 8U) | bytes[index];
+        low = (low << 8U) | bytes[index + 8U];
+    }
+    return {high, low};
+}
+
+[[nodiscard]] bool worldContainsSceneEntityId(const World& world, const SceneEntityId id) {
+    bool assigned = false;
+    world.each<WorldSceneIdentity>([&](const World::Entity, const WorldSceneIdentity& identity) {
+        assigned = assigned || identity.id == id;
+    });
+    return assigned;
+}
+
 void validateWorldSceneIdentity(const World& world, const World::Entity entity, const SceneEntityId id) {
     if (!world.alive(entity)) {
         throw std::invalid_argument("Scene identity entity must be live");
@@ -199,6 +262,18 @@ World::Entity findWorldSceneEntity(const World& world, const SceneEntityId id) {
         match = entity;
     });
     return match;
+}
+SceneEntityId generateWorldSceneEntityId(const World& world) {
+    std::array<std::uint8_t, sceneEntityIdByteCount> bytes{};
+    for (std::size_t attempt = 0U; attempt < sceneEntityIdGenerationAttempts; ++attempt) {
+        fillSceneEntityIdBytes(bytes);
+        const SceneEntityId candidate = sceneEntityIdFromUuidV4Bytes(bytes);
+
+        if (!worldContainsSceneEntityId(world, candidate)) {
+            return candidate;
+        }
+    }
+    throw std::runtime_error("Unable to generate a collision-free scene entity ID");
 }
 
 void SceneRenderList::clear() noexcept {

@@ -2,6 +2,7 @@
 #include "renderer/Renderer.hpp"
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <cmath>
 #include <exception>
@@ -133,6 +134,55 @@ int main() {
     expectEqual("RenderStats::triangleCount holds >uint32_t::max() without narrowing", renderStats.triangleCount, widerTriangleCount);
     renderStats.sceneTriangleCount = widerTriangleCount;
     expectEqual("RenderStats::sceneTriangleCount holds >uint32_t::max() without narrowing", renderStats.sceneTriangleCount, widerTriangleCount);
+    {
+        ve::World world;
+        const ve::World::Entity entity = world.createEntity();
+        const ve::SceneEntityId generated = ve::generateWorldSceneEntityId(world);
+        expectEqual("generated world scene ID is valid", generated.valid(), true);
+        expectEqual("generated world scene ID has UUIDv4 version nibble",
+                    (generated.high >> 12U) & 0xFU, 4ULL);
+        expectEqual("generated world scene ID has RFC UUID variant bits",
+                    generated.low >> 62U, 2ULL);
+        expectEqual("generated world scene ID is not already assigned",
+                    ve::findWorldSceneEntity(world, generated) == ve::World::Entity{}, true);
+
+        ve::setWorldSceneIdentity(world, entity, generated);
+        expectEqual("generated world scene ID can be looked up after assignment",
+                    ve::findWorldSceneEntity(world, generated) == entity, true);
+
+        const ve::SceneEntityId nextGenerated = ve::generateWorldSceneEntityId(world);
+        expectEqual("next generated world scene ID differs from assigned ID",
+                    nextGenerated != generated, true);
+        expectEqual("next generated world scene ID is unassigned",
+                    ve::findWorldSceneEntity(world, nextGenerated) == ve::World::Entity{}, true);
+    }
+
+    {
+        constexpr std::size_t generatedIdCount = 64U;
+        std::array<ve::SceneEntityId, generatedIdCount> generatedIds{};
+        ve::World world;
+
+        for (std::size_t index = 0U; index < generatedIds.size(); ++index) {
+            const ve::SceneEntityId generated = ve::generateWorldSceneEntityId(world);
+            expectEqual("batch generated world scene ID is valid", generated.valid(), true);
+            expectEqual("batch generated world scene ID has UUIDv4 version nibble",
+                        (generated.high >> 12U) & 0xFU, 4ULL);
+            expectEqual("batch generated world scene ID has RFC UUID variant bits",
+                        generated.low >> 62U, 2ULL);
+            expectEqual("batch generated world scene ID is unassigned",
+                        ve::findWorldSceneEntity(world, generated) == ve::World::Entity{}, true);
+            for (std::size_t priorIndex = 0U; priorIndex < index; ++priorIndex) {
+                expectEqual("batch generated world scene ID does not collide with assigned ID",
+                            generated != generatedIds[priorIndex], true);
+            }
+
+            const ve::World::Entity entity = world.createEntity();
+            ve::setWorldSceneIdentity(world, entity, generated);
+            generatedIds[index] = generated;
+            expectEqual("batch generated world scene ID lookup finds assigned entity",
+                        ve::findWorldSceneEntity(world, generated) == entity, true);
+        }
+    }
     {
         ve::SceneRenderList callerOwnedList;
         callerOwnedList.push({});

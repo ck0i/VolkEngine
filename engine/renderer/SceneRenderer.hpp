@@ -135,6 +135,7 @@ struct WorldSceneIdentity {
 void setWorldSceneIdentity(World& world, World::Entity entity, SceneEntityId id, std::string_view name = {});
 [[nodiscard]] bool clearWorldSceneIdentity(World& world, World::Entity entity);
 [[nodiscard]] World::Entity findWorldSceneEntity(const World& world, SceneEntityId id);
+[[nodiscard]] SceneEntityId generateWorldSceneEntityId(const World& world);
 
 struct WorldSceneTransform {
     TransformTRS current{};

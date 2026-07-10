@@ -91,13 +91,15 @@ void validateConfig(const ve::EngineConfig &config) {
 
 void populateWorldScene(ve::World &world) {
     const ve::World::Entity pivot = world.createEntity();
-    ve::setWorldSceneIdentity(world, pivot, ve::SceneEntityId{0U, 1U}, "Sandbox Pivot");
+    const ve::SceneEntityId pivotId = ve::generateWorldSceneEntityId(world);
+    ve::setWorldSceneIdentity(world, pivot, pivotId, "Sandbox Pivot");
     auto &pivotTransform = world.emplace<ve::WorldSceneTransform>(pivot);
     pivotTransform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {1.0f, 1.0f, 1.0f}};
     world.emplace<SpinController>(pivot);
 
     const ve::World::Entity cube = world.createEntity();
-    ve::setWorldSceneIdentity(world, cube, ve::SceneEntityId{0U, 2U}, "Sandbox Cube");
+    const ve::SceneEntityId cubeId = ve::generateWorldSceneEntityId(world);
+    ve::setWorldSceneIdentity(world, cube, cubeId, "Sandbox Cube");
     auto &transform = world.emplace<ve::WorldSceneTransform>(cube);
     transform.current = ve::TransformTRS{{0.85f, 0.0f, 0.0f}, {}, {0.75f, 0.75f, 0.75f}};
     ve::setWorldSceneParent(world, cube, pivot);

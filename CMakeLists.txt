@@ -223,6 +223,16 @@ target_include_directories(VolkEngineScenePersistenceCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
 volkengine_target_warnings(VolkEngineScenePersistenceCpuTest)
+if(WIN32)
+    foreach(target IN ITEMS
+            VolkEngine
+            VolkEngineSceneRendererTest
+            VolkEngineWorldSceneCpuTest
+            VolkEngineScenePersistenceCpuTest)
+        target_link_libraries(${target} PRIVATE bcrypt)
+    endforeach()
+endif()
+
 add_test(NAME ScenePersistenceCpu
     COMMAND VolkEngineScenePersistenceCpuTest)
 
