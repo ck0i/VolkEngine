@@ -121,6 +121,6 @@ The Vulkan backend caches separate graph topologies at startup:
 - screenshot-enabled versus screenshot-disabled are independent variant bits.
 - `Auto` caches four combinations; `ForceOn` and `ForceOff` cache only the valid depth combinations.
 
-Each frame selects the matching cached topology using the resolved depth-prepass state and whether a screenshot readback is active. Vulkan barriers and command recording remain explicit backend responsibilities; the selected graph supplies matching pass descriptors, final-usage metadata, and destination states for the migrated final-present, screenshot-readback, and HDR-sampling transitions. Live resource state remains the source of truth for barrier source scopes.
+Each frame selects the matching cached topology using the resolved depth-prepass state and whether a screenshot readback is active. Vulkan barriers and command recording remain explicit backend responsibilities; the selected graph supplies matching pass descriptors, final-usage metadata, and destination states for the migrated depth-read, final-present, screenshot-readback, and HDR-sampling transitions. Live resource state remains the source of truth for barrier source scopes.
 
 `BarrierIntent` is declarative synchronization metadata, not a Vulkan barrier. It records the selected resource usage, the previous usage when known, the destination pass (or an invalid pass for a final transition), and whether the intent is a final transition. Vulkan state mapping and command emission remain owned by `VulkanRenderer`.

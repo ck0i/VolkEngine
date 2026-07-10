@@ -416,8 +416,16 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
             vkCmdEndRendering(frame.commandBuffer);
         }
 
+        const FrameGraph::BarrierIntent& depthReadIntent = graphVariant.graph.barrierIntent(
+            graphVariant.passes.hdrScene,
+            graphVariant.resources.depth,
+            FrameGraphAccess::Read,
+            FrameGraphUsage::DepthAttachment);
+        if (depthReadIntent.finalTransition) {
+            throw std::runtime_error("Selected frame graph depth-read intent cannot be final");
+        }
         transitionImageTracked(frame.commandBuffer, depth_.image, depth_.syncState,
-                               imageSyncStateFor(FrameGraphAccess::Read, FrameGraphUsage::DepthAttachment),
+                               imageSyncStateFor(depthReadIntent.access, depthReadIntent.usage),
                                VK_IMAGE_ASPECT_DEPTH_BIT);
     } else {
         transitionImageTracked(frame.commandBuffer, depth_.image, depth_.syncState,
