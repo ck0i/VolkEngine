@@ -212,6 +212,18 @@ target_include_directories(VolkEngineWorldSceneCpuTest
 volkengine_target_warnings(VolkEngineWorldSceneCpuTest)
 add_test(NAME WorldSceneCpu
     COMMAND VolkEngineWorldSceneCpuTest)
+
+add_executable(VolkEngineWorldSchedulerCpuTest
+    tests/WorldSchedulerCpuTests.cpp
+    engine/platform/Input.cpp
+    engine/core/Camera.cpp)
+target_include_directories(VolkEngineWorldSchedulerCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineWorldSchedulerCpuTest)
+add_test(NAME WorldSchedulerCpu
+    COMMAND VolkEngineWorldSchedulerCpuTest)
+
 add_executable(VolkEngineFrameGraphCpuTest
     tests/FrameGraphCpuTests.cpp)
 target_include_directories(VolkEngineFrameGraphCpuTest

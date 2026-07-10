@@ -55,6 +55,17 @@ return app.run(ve::RunOptions{.maxFrames = 120});
 `Application` owns the main `Window`, `Camera`, concrete `VulkanRenderer` facade, demo/world scene extractors, wall `Clock`, and `FixedStepClock`. It builds the per-frame scene submission and passes it to the renderer; the backend only borrows that list during `draw()`. Private split internals stay behind `VulkanRenderer::Impl`.
 `run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback zero or more times per rendered frame using the configured fixed step. `runWithInput(world, update, options)` additionally passes a read-only `InputState` snapshot to each substep. Input transitions and accumulated cursor/scroll motion are retained across render frames that emit no simulation update, delivered once to the first available substep, then consumed; held state persists for later substeps. Camera input remains render-rate and uses the bounded wall delta. Both world callback paths then extract the latest world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
 
+### `WorldSystemScheduler`
+
+`WorldSystemScheduler` replaces a monolithic world callback with a compiled, deterministic fixed-step system plan. Systems register an owned, case-sensitive name, a non-owning callback/context pair, and owned dependency names. Registration rejects empty/duplicate names, null callbacks, and malformed duplicate dependencies without changing the registry.
+
+`compile()` resolves dependencies and performs a stable topological sort: every named dependency executes first, and otherwise-ready systems use registration index as the tie-break. Missing dependencies throw `std::invalid_argument`; cycles throw `std::runtime_error`. Either failure leaves no published plan. Registry mutation invalidates a prior plan, and `execute()` rejects uncompiled or recursive use.
+
+Each callback receives `(context, world, commands, input, simulationElapsedSeconds, simulationDeltaSeconds)`. Systems run single-threaded in compiled order. The restricted `CommandWriter` records `destroy`, `remove<T>`, and owned `emplace<T>` operations but cannot trigger playback or discard work mid-step. The scheduler plays its buffer once after all systems in the fixed step, so structural changes become visible only at that boundary. A system/playback exception propagates and discards scheduler-owned deferred work for the failed step. `reserveSystems()` and `reserveDeferredCommandSlots()` move registry and command-vector growth out of steady execution; callback work and type-erased component payload storage may still allocate. With no allocating callback or command capture, compiled ordering and dispatch allocate nothing.
+The `CommandWriter&` is valid only for the callback invocation and is non-copyable/non-movable; systems must not retain its address.
+
+`Application::run(world, scheduler, options)` requires a compiled scheduler before entering the platform loop. It retains the same accumulated input, fixed-step timing, transform-history prepare/capture, exception invalidation, and presentation interpolation used by callback-based world runs. Callback/context storage is non-owning and must remain alive through the run.
+
 ## `Camera`
 
 Mutable camera used by the window input layer and renderer.

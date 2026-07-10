@@ -87,6 +87,7 @@ World-backed extraction smoke run:
 ```sh
 ./out/build/linux-debug/VolkEngineSandbox --world-scene --frames 120 --no-imgui
 ```
+This path compiles and runs the sandbox's named `spin` world system through `WorldSystemScheduler`, then performs interpolated world extraction and normal Vulkan submission.
 
 Common flags: `--frames N`, `--world-scene`, `--resize-smoke`, `--acquire-recovery-smoke`, `--screenshot FILE.ppm`, `--hot-reload-shaders`, `--grid-rows N`, `--grid-columns N`, `--auto-depth-prepass`, `--depth-prepass`, `--no-depth-prepass`, `--indirect-draws`, `--no-indirect-draws`, `--imgui`, `--no-imgui`, `--gpu-timestamps`, `--no-gpu-timestamps`, `--width N`, `--height N`, `--exposure F`, `--vsync`, `--no-vsync`, `--validation`, `--no-validation`, and `--help`.
 `--help` / `-h` is terminal: it prints usage and exits successfully without initializing GLFW or Vulkan, even when copied trailing arguments are malformed or unknown.

@@ -35,7 +35,7 @@ graph TD
 ```
 
 - `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
-- `World` owns generational entities and component pools. Caller-owned `WorldCommandBuffer` instances stage owned structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns a reusable render-list snapshot and the scratch records used to build it.
+- `World` owns generational entities and component pools. `WorldSystemScheduler` owns a compiled deterministic system order and one deferred command buffer; system callbacks and contexts remain caller-owned. Caller-owned standalone `WorldCommandBuffer` instances stage structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns a reusable render-list snapshot and transform history.
 - `GlfwRuntime` owns GLFW process initialization/termination. `Window` borrows the runtime and owns only its native window handle; one runtime is allowed per process and GLFW calls remain on the main thread.
 - `VulkanRenderer` owns runtime Vulkan behavior via private `Impl`, but keeps ownership boundaries explicit:
   - `VulkanRenderer.hpp` remains the backend API entry boundary.
@@ -59,7 +59,7 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 
 1. `Clock::tick()` samples wall elapsed/delta time; `Window::pollInput()` consumes one event-driven frame snapshot.
 2. `Window::updateCamera()` applies that snapshot at render rate with a bounded wall delta.
-3. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. Before and after each successful world callback, `WorldSceneExtractor` maintains full-generation previous/current TRS history; pending input edges/motion reach only the first emitted step while held state persists.
+3. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. For scheduler-backed worlds, `WorldSceneExtractor` prepares TRS history, compiled systems execute single-threaded in dependency order, the scheduler plays structural commands once, and the extractor captures the successful state. Pending input edges/motion reach only the first emitted step while held state persists; failures discard scheduler commands, invalidate presentation history, and propagate.
 4. The world run path builds a presentation snapshot with retained-debt alpha, interpolating translation/scale and shortest-path quaternion rotation one completed fixed step behind simulation. New/recycled/teleported entities reset their history. Both run paths then call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows the reusable list synchronously.
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
 6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.

@@ -558,6 +558,23 @@ public:
     }
     ~WorldCommandBuffer() = default;
 
+    void reserve(const std::size_t commandCount) {
+        if (playbackActive_) {
+            throw std::logic_error("Cannot reserve a World command buffer during playback");
+        }
+        pending_.reserve(commandCount);
+        executing_.reserve(commandCount);
+    }
+
+    void discard() noexcept {
+        if (playbackActive_) {
+            return;
+        }
+        pending_.clear();
+        executing_.clear();
+        nextCommand_ = 0U;
+    }
+
     void destroy(const World::Entity entity) {
         pending_.emplace_back([entity](World& world) {
             return world.alive(entity) && world.destroyEntity(entity);

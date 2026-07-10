@@ -10,6 +10,8 @@
 
 namespace ve {
 
+class WorldSystemScheduler;
+
 class Application {
 public:
     explicit Application(EngineConfig config);
@@ -20,11 +22,13 @@ public:
     int run(World& world, const RunOptions& options);
     int run(World& world, WorldUpdateCallback update, const RunOptions& options);
     int runWithInput(World& world, WorldInputUpdateCallback update, const RunOptions& options);
+    int run(World& world, WorldSystemScheduler& scheduler, const RunOptions& options);
 
 private:
     int runInternal(World* world,
                     WorldUpdateCallback update,
                     WorldInputUpdateCallback inputUpdate,
+                    WorldSystemScheduler* scheduler,
                     const RunOptions& options);
     EngineConfig config_;
     FixedStepClock simulationClock_;

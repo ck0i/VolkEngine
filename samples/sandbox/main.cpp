@@ -1,4 +1,6 @@
 #include "core/Application.hpp"
+#include "core/WorldScheduler.hpp"
+
 #include "core/Log.hpp"
 #include "renderer/SceneRenderer.hpp"
 
@@ -95,7 +97,7 @@ void populateWorldScene(ve::World& world) {
     world.emplace<SpinController>(cube);
 }
 
-void updateWorldScene(ve::World& world, const ve::InputState& input, const double, const double deltaSeconds) {
+void updateWorldScene(void*, ve::World& world, ve::WorldSystemScheduler::CommandWriter&, const ve::InputState& input, const double, const double deltaSeconds) {
     world.each<ve::WorldSceneTransform, SpinController>(
         [&](const ve::World::Entity, ve::WorldSceneTransform& transform, SpinController& spin) {
             if (input.pressed(ve::InputKey::Space)) {
@@ -197,7 +199,11 @@ int main(int argc, char** argv) {
         }
         ve::World world;
         populateWorldScene(world);
-        return app.runWithInput(world, &updateWorldScene, args.run);
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1);
+        scheduler.addSystem("spin", &updateWorldScene);
+        scheduler.compile();
+        return app.run(world, scheduler, args.run);
     } catch (const std::exception& e) {
         ve::logger()->critical("Fatal error: {}", e.what());
         std::cerr << "Fatal error: " << e.what() << '\n';

@@ -1,10 +1,12 @@
 #include "core/Application.hpp"
+#include "core/WorldScheduler.hpp"
 
 #include "core/Log.hpp"
 
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <stdexcept>
 #include <spdlog/spdlog.h>
 
 namespace ve {
@@ -38,24 +40,32 @@ Application::Application(EngineConfig config)
     sceneRenderer_.setImportedModelBounds(renderer_.meshBounds(SceneMeshId::ImportedModel));
 }
 int Application::run(const RunOptions& options) {
-    return runInternal(nullptr, nullptr, nullptr, options);
+    return runInternal(nullptr, nullptr, nullptr, nullptr, options);
 }
 
 int Application::run(World& world, const RunOptions& options) {
-    return runInternal(&world, nullptr, nullptr, options);
+    return runInternal(&world, nullptr, nullptr, nullptr, options);
 }
 
 int Application::run(World& world, const WorldUpdateCallback update, const RunOptions& options) {
-    return runInternal(&world, update, nullptr, options);
+    return runInternal(&world, update, nullptr, nullptr, options);
 }
 
 int Application::runWithInput(World& world, const WorldInputUpdateCallback update, const RunOptions& options) {
-    return runInternal(&world, nullptr, update, options);
+    return runInternal(&world, nullptr, update, nullptr, options);
+}
+
+int Application::run(World& world, WorldSystemScheduler& scheduler, const RunOptions& options) {
+    if (!scheduler.compiled()) {
+        throw std::logic_error("Application requires a compiled World system scheduler");
+    }
+    return runInternal(&world, nullptr, nullptr, &scheduler, options);
 }
 
 int Application::runInternal(World* world,
                              const WorldUpdateCallback update,
                              const WorldInputUpdateCallback inputUpdate,
+                             WorldSystemScheduler* const scheduler,
                              const RunOptions& options) {
     logger()->info("Entering main loop");
     if (options.acquireRecoverySmoke) {
@@ -83,10 +93,12 @@ int Application::runInternal(World* world,
         for (std::uint32_t stepIndex = 0; stepIndex < simulationBatch.stepCount; ++stepIndex) {
             const InputState stepInput = simulationInputTracker_.consume();
             const double stepElapsedSeconds = simulationBatch.elapsedSecondsForStep(stepIndex);
-            if (world != nullptr && (inputUpdate != nullptr || update != nullptr)) {
+            if (world != nullptr && (scheduler != nullptr || inputUpdate != nullptr || update != nullptr)) {
                 worldSceneExtractor_.prepareSimulationStep(*world);
                 try {
-                    if (inputUpdate != nullptr) {
+                    if (scheduler != nullptr) {
+                        (void)scheduler->execute(*world, stepInput, stepElapsedSeconds, simulationBatch.stepSeconds);
+                    } else if (inputUpdate != nullptr) {
                         inputUpdate(*world, stepInput, stepElapsedSeconds, simulationBatch.stepSeconds);
                     } else {
                         update(*world, stepElapsedSeconds, simulationBatch.stepSeconds);
