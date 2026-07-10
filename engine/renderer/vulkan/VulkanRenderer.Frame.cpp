@@ -319,7 +319,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
             throw std::runtime_error("Scene instance materialization did not match visibility counts");
         }
         std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
-        if (sortKeys.size() > 1U) {
+        if (!useDepthPrepass && sortKeys.size() > 1U) {
             std::sort(sortKeys.begin(), sortKeys.end(), [](const InstanceSortKey& lhs, const InstanceSortKey& rhs) {
                 return lhs.depth < rhs.depth;
             });
