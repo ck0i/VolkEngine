@@ -2,8 +2,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace ve {
+void Camera::setAspect(const float aspect) {
+    if (!std::isfinite(aspect) || aspect <= 0.0f) {
+        throw std::runtime_error("Camera aspect ratio must be finite and positive");
+    }
+    aspect_ = aspect;
+}
 
 void Camera::update(const float forwardInput, const float rightInput, const float upInput, const float yawDelta, const float pitchDelta, const float dt) {
     const float lookSensitivity = 90.0f;

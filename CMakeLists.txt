@@ -256,6 +256,16 @@ volkengine_target_warnings(VolkEngineVulkanFrustumCpuTest)
 add_test(NAME VulkanFrustumCpu
     COMMAND VolkEngineVulkanFrustumCpuTest)
 
+add_executable(VolkEngineCameraCpuTest
+    tests/CameraCpuTests.cpp
+    engine/core/Camera.cpp)
+target_include_directories(VolkEngineCameraCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineCameraCpuTest)
+add_test(NAME CameraCpu
+    COMMAND VolkEngineCameraCpuTest)
+
 add_executable(VolkEngineInputCpuTest
     tests/InputCpuTests.cpp
     engine/core/Camera.cpp
