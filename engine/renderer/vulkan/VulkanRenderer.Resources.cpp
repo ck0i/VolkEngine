@@ -271,6 +271,10 @@ void VulkanRenderer::Impl::createSampler() {
     normalSamplerInfo.maxAnisotropy = 1.0f;
     checkVk(vkCreateSampler(device_, &normalSamplerInfo, nullptr, &normalTextureSampler_), "vkCreateSampler normal texture");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(normalTextureSampler_), "Linear Repeat Normal Texture Sampler");
+    VkSamplerCreateInfo ormSamplerInfo = textureSamplerInfo;
+    ormSamplerInfo.maxLod = samplerMaxLod(groundOrmTexture_.mipLevels);
+    checkVk(vkCreateSampler(device_, &ormSamplerInfo, nullptr, &ormTextureSampler_), "vkCreateSampler ORM texture");
+    setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(ormTextureSampler_), "Linear Repeat ORM Texture Sampler");
 }
 
 void VulkanRenderer::Impl::createDescriptorLayouts() {

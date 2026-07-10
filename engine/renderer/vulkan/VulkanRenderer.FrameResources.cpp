@@ -150,7 +150,7 @@ void VulkanRenderer::Impl::createFrameResources() {
         materialTextureInfos[1].sampler = normalTextureSampler_;
         materialTextureInfos[1].imageView = groundNormalTexture_.view;
         materialTextureInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        materialTextureInfos[2].sampler = textureSampler_;
+        materialTextureInfos[2].sampler = ormTextureSampler_;
         materialTextureInfos[2].imageView = groundOrmTexture_.view;
         materialTextureInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         std::array<VkWriteDescriptorSet, 3> writes{};

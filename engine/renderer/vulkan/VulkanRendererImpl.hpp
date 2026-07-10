@@ -781,6 +781,7 @@ private:
     VkSampler linearSampler_ = VK_NULL_HANDLE;
     VkSampler textureSampler_ = VK_NULL_HANDLE;
     VkSampler normalTextureSampler_ = VK_NULL_HANDLE;
+    VkSampler ormTextureSampler_ = VK_NULL_HANDLE;
     bool samplerAnisotropyEnabled_ = false;
     float maxSamplerAnisotropy_ = 1.0f;
 

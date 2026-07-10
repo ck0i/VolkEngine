@@ -155,6 +155,10 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
         vkDestroySampler(device_, normalTextureSampler_, nullptr);
         normalTextureSampler_ = VK_NULL_HANDLE;
     }
+    if (ormTextureSampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, ormTextureSampler_, nullptr);
+        ormTextureSampler_ = VK_NULL_HANDLE;
+    }
     if (graphicsCommandPool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(device_, graphicsCommandPool_, nullptr);
         graphicsCommandPool_ = VK_NULL_HANDLE;
