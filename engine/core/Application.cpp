@@ -25,7 +25,7 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
 
 
 Application::Application(EngineConfig config)
-    : config_(std::move(config)), window_(config_), camera_{}, renderer_(window_, config_), sceneRenderer_{}, clock_{} {
+    : config_(std::move(config)), glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{}, renderer_(window_, config_), sceneRenderer_{}, clock_{} {
     const VkExtent2D extent = window_.framebufferExtent();
     if (extent.width > 0U && extent.height > 0U) {
         camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));

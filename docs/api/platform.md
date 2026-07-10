@@ -2,18 +2,21 @@
 
 Headers: `engine/platform/Window.hpp`, `engine/platform/Input.hpp`.
 
-`Window` is the GLFW-backed platform seam. It owns the `GLFWwindow*`, collects native input, tracks framebuffer resize state, and creates Vulkan surfaces for the backend. The GLFW-free `CameraInput` mapper is the deterministic engine-side input policy.
+`GlfwRuntime` owns GLFW's process-global initialization. `Window` owns one `GLFWwindow*`, collects native input, tracks framebuffer resize state, and creates Vulkan surfaces for the backend. The GLFW-free `CameraInput` mapper is the deterministic engine-side input policy.
 
 ## Construction and lifetime
 
 ```cpp
 ve::EngineConfig config{};
-ve::Window window{config};
+ve::GlfwRuntime glfwRuntime{};
+ve::Window window{glfwRuntime, config};
 ```
 
-- Constructor creates the GLFW window from `EngineConfig`.
-- Destructor destroys the GLFW window.
-- Copy construction/assignment are deleted.
+- `GlfwRuntime` calls `glfwInit()` exactly once for its lifetime and throws if initialization fails.
+- Only one `GlfwRuntime` may be active in a process; GLFW has one process-global instance and must be initialized and terminated on the main thread.
+- `Window` requires a live `GlfwRuntime`, creates its GLFW window from `EngineConfig`, and destroys only that window.
+- The runtime must outlive every `Window` that borrows it.
+- `GlfwRuntime` and `Window` copy/move operations are deleted.
 
 ## Event loop
 

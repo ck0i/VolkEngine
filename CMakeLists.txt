@@ -294,6 +294,15 @@ volkengine_target_warnings(VolkEngineInputCpuTest)
 add_test(NAME InputCpu
     COMMAND VolkEngineInputCpuTest)
 
+add_executable(VolkEnginePlatformLifecycleCpuTest
+    tests/PlatformLifecycleCpuTests.cpp)
+target_include_directories(VolkEnginePlatformLifecycleCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEnginePlatformLifecycleCpuTest)
+add_test(NAME PlatformLifecycleCpu
+    COMMAND VolkEnginePlatformLifecycleCpuTest)
+
 add_executable(VolkEngineTimeCpuTest
     tests/TimeCpuTests.cpp
     engine/core/Time.cpp)

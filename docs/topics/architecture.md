@@ -7,7 +7,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | Path | Responsibility | Public surface |
 | --- | --- | --- |
 | `engine/core` | Application lifecycle, config, clock, camera, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `Camera`, `Clock`, helper functions. |
-| `engine/platform` | GLFW window, input, framebuffer resize state, Vulkan surface creation. | `Window`. |
+| `engine/platform` | GLFW process runtime, window, input, framebuffer resize state, Vulkan surface creation. | `GlfwRuntime`, `Window`. |
 | `engine/renderer` | Renderer contracts, scene submission data, sandbox scene implementation, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `DemoSceneRenderer` declarations, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
@@ -21,6 +21,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 ```mermaid
 graph TD
     App[Application] --> Window[Window]
+    App --> GlfwRuntime[GlfwRuntime]
     App --> Camera[Camera]
     App --> Clock[Clock]
     App -->|owns| Renderer[VulkanRenderer]
@@ -33,8 +34,8 @@ graph TD
     Impl --> Resources[Long-lived resources/registries]
 ```
 
-- `Application` owns `Window`, `Camera`, `Clock`, and a renderer implementation.
-- `Window` owns the GLFW handle and exposes events, size, title, camera input, and surface creation.
+- `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
+- `GlfwRuntime` owns GLFW process initialization/termination. `Window` borrows the runtime and owns only its native window handle; one runtime is allowed per process and GLFW calls remain on the main thread.
 - `VulkanRenderer` owns runtime Vulkan behavior via private `Impl`, but keeps ownership boundaries explicit:
   - `VulkanRenderer.hpp` remains the backend API entry boundary.
   - `VulkanRenderer.cpp` remains a minimal forwarding wrapper.

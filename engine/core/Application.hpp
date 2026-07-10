@@ -16,6 +16,7 @@ public:
 
 private:
     EngineConfig config_;
+    GlfwRuntime glfwRuntime_;
     Window window_;
     Camera camera_;
     VulkanRenderer renderer_;

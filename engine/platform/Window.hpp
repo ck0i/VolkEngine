@@ -10,13 +10,26 @@ struct GLFWwindow;
 
 namespace ve {
 
+class GlfwRuntime final {
+public:
+    GlfwRuntime();
+    ~GlfwRuntime();
+
+    GlfwRuntime(const GlfwRuntime&) = delete;
+    GlfwRuntime& operator=(const GlfwRuntime&) = delete;
+    GlfwRuntime(GlfwRuntime&&) = delete;
+    GlfwRuntime& operator=(GlfwRuntime&&) = delete;
+};
+
 class Window {
 public:
-    explicit Window(const EngineConfig& config);
+    explicit Window(GlfwRuntime& runtime, const EngineConfig& config);
     ~Window();
 
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
+    Window(Window&&) = delete;
+    Window& operator=(Window&&) = delete;
 
     void pollEvents();
     void waitEvents();

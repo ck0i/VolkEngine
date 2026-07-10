@@ -6,12 +6,13 @@
 #include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>
 
-#include <stdexcept>
 #include <limits>
+#include <stdexcept>
 
 namespace ve {
 namespace {
-int g_windowCount = 0;
+
+bool g_glfwRuntimeActive = false;
 
 void validateWindowDimensions(const std::uint32_t width, const std::uint32_t height) {
     constexpr std::uint32_t kMaxGlfwWindowExtent = static_cast<std::uint32_t>(std::numeric_limits<int>::max());
@@ -19,27 +20,34 @@ void validateWindowDimensions(const std::uint32_t width, const std::uint32_t hei
         throw std::runtime_error("Window dimensions must be positive and fit GLFW's int extent range");
     }
 }
+
+} // namespace
+
+GlfwRuntime::GlfwRuntime() {
+    if (g_glfwRuntimeActive) {
+        throw std::runtime_error("Only one GlfwRuntime may be active per process");
+    }
+    if (glfwInit() != GLFW_TRUE) {
+        throw std::runtime_error("Failed to initialize GLFW");
+    }
+    g_glfwRuntimeActive = true;
 }
 
-Window::Window(const EngineConfig& config) {
+GlfwRuntime::~GlfwRuntime() {
+    g_glfwRuntimeActive = false;
+    glfwTerminate();
+}
+
+Window::Window(GlfwRuntime&, const EngineConfig& config) {
     validateWindowDimensions(config.initialWidth, config.initialHeight);
-    const bool ownsGlfwInit = g_windowCount == 0;
-    if (ownsGlfwInit) {
-        if (glfwInit() != GLFW_TRUE) {
-            throw std::runtime_error("Failed to initialize GLFW");
-        }
-    }
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    window_ = glfwCreateWindow(static_cast<int>(config.initialWidth), static_cast<int>(config.initialHeight), config.applicationName.c_str(), nullptr, nullptr);
+    window_ = glfwCreateWindow(static_cast<int>(config.initialWidth), static_cast<int>(config.initialHeight),
+                               config.applicationName.c_str(), nullptr, nullptr);
     if (!window_) {
-        if (ownsGlfwInit) {
-            glfwTerminate();
-        }
         throw std::runtime_error("Failed to create GLFW window");
     }
-    ++g_windowCount;
 
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, framebufferResizeCallback);
@@ -50,10 +58,6 @@ Window::~Window() {
     if (window_) {
         glfwDestroyWindow(window_);
         window_ = nullptr;
-    }
-    --g_windowCount;
-    if (g_windowCount == 0) {
-        glfwTerminate();
     }
 }
 
