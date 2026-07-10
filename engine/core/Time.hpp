@@ -21,7 +21,9 @@ struct FrameTiming {
 class Clock {
 public:
     Clock();
+    explicit Clock(std::chrono::steady_clock::time_point start);
     [[nodiscard]] FrameTiming tick();
+    [[nodiscard]] FrameTiming tickAt(std::chrono::steady_clock::time_point now);
 
 private:
     using TimePoint = std::chrono::steady_clock::time_point;

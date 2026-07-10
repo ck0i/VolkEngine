@@ -268,7 +268,8 @@ add_test(NAME InputCpu
     COMMAND VolkEngineInputCpuTest)
 
 add_executable(VolkEngineTimeCpuTest
-    tests/TimeCpuTests.cpp)
+    tests/TimeCpuTests.cpp
+    engine/core/Time.cpp)
 target_include_directories(VolkEngineTimeCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")

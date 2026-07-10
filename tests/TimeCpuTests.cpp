@@ -1,7 +1,9 @@
 #include "core/Time.hpp"
 
 #include <cmath>
+#include <chrono>
 #include <iostream>
+#include <stdexcept>
 #include <string_view>
 
 namespace {
@@ -15,10 +17,61 @@ void expectNear(const std::string_view context, const double actual, const doubl
     }
 }
 
+template <typename F>
+void expectThrowsRuntimeError(const std::string_view context, F&& callable) {
+    try {
+        callable();
+        std::cerr << "[FAILED] " << context << ": expected runtime_error but no exception thrown\n";
+        ++gFailureCount;
+    } catch (const std::runtime_error&) {
+        // expected
+    } catch (...) {
+        std::cerr << "[FAILED] " << context << ": expected runtime_error but threw a different exception\n";
+        ++gFailureCount;
+    }
+}
+
 } // namespace
 
 int main() {
     expectNear("normal delta passes through", ve::clampDeltaSeconds(1.0 / 120.0, 0.05), 1.0 / 120.0);
+    using Clock = std::chrono::steady_clock;
+    const Clock::time_point anchor{};
+    ve::Clock clock{anchor};
+    const ve::FrameTiming first = clock.tickAt(anchor);
+    expectNear("anchored first delta is zero", first.deltaSeconds, 0.0);
+    expectNear("anchored first elapsed is zero", first.elapsedSeconds, 0.0);
+    if (first.frameIndex != 0U) {
+        std::cerr << "[FAILED] anchored first frame index expected 0 but got " << first.frameIndex << '\n';
+        ++gFailureCount;
+    }
+
+    const ve::FrameTiming second = clock.tickAt(anchor + std::chrono::milliseconds(16));
+    expectNear("anchored 16ms delta", second.deltaSeconds, 0.016);
+    expectNear("anchored 16ms elapsed", second.elapsedSeconds, 0.016);
+    if (second.frameIndex != 1U) {
+        std::cerr << "[FAILED] anchored second frame index expected 1 but got " << second.frameIndex << '\n';
+        ++gFailureCount;
+    }
+
+    const ve::FrameTiming third = clock.tickAt(anchor + std::chrono::milliseconds(40));
+    expectNear("anchored accumulated delta", third.deltaSeconds, 0.024);
+    expectNear("anchored accumulated elapsed", third.elapsedSeconds, 0.040);
+    if (third.frameIndex != 2U) {
+        std::cerr << "[FAILED] anchored third frame index expected 2 but got " << third.frameIndex << '\n';
+        ++gFailureCount;
+    }
+
+    expectThrowsRuntimeError("backward clock sample is rejected", [&] {
+        (void)clock.tickAt(anchor + std::chrono::milliseconds(24));
+    });
+    const ve::FrameTiming afterRejectedSample = clock.tickAt(anchor + std::chrono::milliseconds(56));
+    expectNear("clock state survives rejected sample", afterRejectedSample.deltaSeconds, 0.016);
+    expectNear("clock elapsed survives rejected sample", afterRejectedSample.elapsedSeconds, 0.056);
+    if (afterRejectedSample.frameIndex != 3U) {
+        std::cerr << "[FAILED] post-rejection frame index expected 3 but got " << afterRejectedSample.frameIndex << '\n';
+        ++gFailureCount;
+    }
     expectNear("hitch delta is capped", ve::clampDeltaSeconds(0.5, 0.05), 0.05);
     expectNear("negative delta is rejected", ve::clampDeltaSeconds(-0.25, 0.05), 0.0);
     expectNear("non-positive maximum disables simulation", ve::clampDeltaSeconds(0.05, 0.0), 0.0);

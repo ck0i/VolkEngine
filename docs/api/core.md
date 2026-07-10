@@ -70,7 +70,9 @@ Defaults: position `(0, 1.6, 5)`, yaw `-90°`, pitch `-12°`, vertical FOV `65°
 - `elapsedSeconds`
 - `frameIndex`
 
-It uses `std::chrono::steady_clock` and increments the frame index per tick.
+The default constructor anchors to `std::chrono::steady_clock::now()`. For deterministic simulation and tests, `Clock` also accepts an explicit steady-clock anchor and exposes `tickAt(time_point)`. The first sample at the anchor returns zero delta, zero elapsed time, and frame index zero; each accepted sample increments the frame index.
+
+Samples must be nondecreasing. A timestamp earlier than the previous sample throws `std::runtime_error` before mutating clock state, so a rejected sample cannot poison elapsed time or frame indexing. Runtime `tick()` remains the production path and delegates to the same monotonic sampling logic.
 
 `clampDeltaSeconds(deltaSeconds, maximumSeconds)` is a pure simulation helper. It clamps negative or hitch-sized deltas to a non-negative maximum without changing the raw wall-clock timing reported by `Clock`; telemetry and renderer frame metrics retain the original delta.
 
