@@ -121,6 +121,11 @@ int main() {
         expectEqual("final barrier query returns present intent", static_cast<int>(finalIntent.usage), static_cast<int>(FrameGraphUsage::Present));
         expectEqual("final barrier query identifies final transition", finalIntent.finalTransition, true);
         expectEqual("final barrier query has no destination pass", finalIntent.pass.valid(), false);
+        const FrameGraph::BarrierIntent& screenshotIntent = graph.barrierIntent(
+            screenshotPass, swapchain, FrameGraphAccess::Read, FrameGraphUsage::TransferSource);
+        expectEqual("screenshot intent targets screenshot pass", screenshotIntent.pass.index, screenshotPass.index);
+        expectEqual("screenshot intent is not final", screenshotIntent.finalTransition, false);
+        expectEqual("screenshot intent records previous color write", static_cast<int>(screenshotIntent.previousUsage), static_cast<int>(FrameGraphUsage::ColorAttachment));
         expectThrowsRuntimeError("invalidated barrier plan unavailable", [&] {
             graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
             (void)graph.barrierPlan();

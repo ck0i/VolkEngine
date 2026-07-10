@@ -15,9 +15,12 @@ bool VulkanRenderer::Impl::screenshotFormatSupported() const {
     return swapchainFormat_ == VK_FORMAT_B8G8R8A8_UNORM || swapchainFormat_ == VK_FORMAT_R8G8B8A8_UNORM;
 }
 
-void VulkanRenderer::Impl::recordScreenshotCopy(const VkCommandBuffer commandBuffer, const std::uint32_t imageIndex, const Buffer& readback) {
+void VulkanRenderer::Impl::recordScreenshotCopy(const VkCommandBuffer commandBuffer,
+                                                 const std::uint32_t imageIndex,
+                                                 const Buffer& readback,
+                                                 const ImageSyncState destinationState) {
     transitionImageTracked(commandBuffer, swapchainImages_[imageIndex], swapchainStates_[imageIndex],
-                           imageSyncStateFor(FrameGraphAccess::Read, FrameGraphUsage::TransferSource),
+                           destinationState,
                            VK_IMAGE_ASPECT_COLOR_BIT);
 
     VkBufferImageCopy region{};

@@ -656,7 +656,7 @@ private:
     void updateUniforms(FrameResources& frame, const Camera& camera, const Mat4& viewProjection, double elapsedSeconds);
     void readBackGpuTimestamp(std::uint32_t frameIndex);
     [[nodiscard]] bool screenshotFormatSupported() const;
-    void recordScreenshotCopy(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Buffer& readback);
+    void recordScreenshotCopy(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Buffer& readback, ImageSyncState destinationState);
     void writeScreenshotPpm(const Buffer& readback, VkExtent2D extent, VkFormat format, const std::filesystem::path& path) const;
 
     [[nodiscard]] bool validationLayerAvailable() const;

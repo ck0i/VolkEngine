@@ -492,8 +492,17 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
 
     if (screenshotReadback != nullptr) {
         const FrameGraph::PassDesc& screenshotPass = graphVariant.graph.pass(graphVariant.passes.screenshotReadback);
+        const FrameGraph::BarrierIntent& screenshotIntent = graphVariant.graph.barrierIntent(
+            graphVariant.passes.screenshotReadback,
+            graphVariant.resources.swapchain,
+            FrameGraphAccess::Read,
+            FrameGraphUsage::TransferSource);
+        if (screenshotIntent.finalTransition) {
+            throw std::runtime_error("Selected frame graph screenshot intent cannot be final");
+        }
         const DebugLabelScope screenshotLabel{*this, frame.commandBuffer, screenshotPass.name, screenshotPass.debugColor};
-        recordScreenshotCopy(frame.commandBuffer, imageIndex, *screenshotReadback);
+        recordScreenshotCopy(frame.commandBuffer, imageIndex, *screenshotReadback,
+                             imageSyncStateFor(screenshotIntent.access, screenshotIntent.usage));
     }
 
     const FrameGraph::BarrierIntent& finalIntent = graphVariant.graph.finalBarrierIntent(graphVariant.resources.swapchain);

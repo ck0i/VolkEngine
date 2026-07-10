@@ -381,6 +381,34 @@ public:
         }
         return barrierIntents_[intentIndex];
     }
+    [[nodiscard]] const BarrierIntent& barrierIntent(PassHandle pass,
+                                                     ResourceHandle resource,
+                                                     FrameGraphAccess access,
+                                                     FrameGraphUsage usage) const {
+        validatePass(pass);
+        validateResource(resource);
+        if (!compiled_) {
+            throw std::runtime_error("FrameGraph has not been compiled");
+        }
+        const BarrierIntent* result = nullptr;
+        for (const BarrierIntent& intent : barrierIntents_) {
+            if (intent.finalTransition ||
+                intent.pass.index != pass.index ||
+                intent.resource.index != resource.index ||
+                intent.access != access ||
+                intent.usage != usage) {
+                continue;
+            }
+            if (result != nullptr) {
+                throw std::runtime_error("FrameGraph pass/resource/access/usage has multiple barrier intents");
+            }
+            result = &intent;
+        }
+        if (result == nullptr) {
+            throw std::runtime_error("FrameGraph pass/resource/access/usage has no barrier intent");
+        }
+        return *result;
+    }
 
 private:
     void addEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) {
