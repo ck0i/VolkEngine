@@ -110,6 +110,7 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 - `executionOrder() -> const std::vector<PassHandle>&` — compiled stable pass order; empty while invalidated.
 - `lifetime(resource) -> const ResourceLifetime&` — first/last compiled pass and `used`; throws while the graph is invalidated.
 - `barrierPlan() -> const std::vector<BarrierIntent>&` — available after compilation and may be empty; pass-associated intents follow execution order and final transitions follow them. It is cleared when the graph is invalidated.
+- `finalBarrierIntent(resource) -> const BarrierIntent&` — O(1) lookup of the unique final transition; throws if the graph is uncompiled or no final transition exists.
 
 ## Current renderer use
 

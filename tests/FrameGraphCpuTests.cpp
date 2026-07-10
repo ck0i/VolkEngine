@@ -117,12 +117,19 @@ int main() {
         expectEqual("hdr sampled transition follows hdr write", barrierPlan[3].pass.index, tonemapPass.index);
         expectEqual("final present transition is emitted last", barrierPlan.back().finalTransition, true);
         expectEqual("final transition targets swapchain", barrierPlan.back().resource.index, swapchain.index);
+        const FrameGraph::BarrierIntent& finalIntent = graph.finalBarrierIntent(swapchain);
+        expectEqual("final barrier query returns present intent", static_cast<int>(finalIntent.usage), static_cast<int>(FrameGraphUsage::Present));
+        expectEqual("final barrier query identifies final transition", finalIntent.finalTransition, true);
+        expectEqual("final barrier query has no destination pass", finalIntent.pass.valid(), false);
         expectThrowsRuntimeError("invalidated barrier plan unavailable", [&] {
             graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
             (void)graph.barrierPlan();
         });
         graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
         expectEqual("graph mutation invalidates execution plan", graph.compiled(), false);
+        expectThrowsRuntimeError("invalidated final barrier unavailable", [&] {
+            (void)graph.finalBarrierIntent(swapchain);
+        });
         expectThrowsRuntimeError("invalidated lifetime unavailable", [&] {
             (void)graph.lifetime(depth);
         });

@@ -91,6 +91,7 @@ public:
         executionOrder_.clear();
         resourceLifetimes_.clear();
         barrierIntents_.clear();
+        finalBarrierIntentIndices_.clear();
         return handle;
     }
 
@@ -104,6 +105,7 @@ public:
         executionOrder_.clear();
         resourceLifetimes_.clear();
         barrierIntents_.clear();
+        finalBarrierIntentIndices_.clear();
         return handle;
     }
 
@@ -123,6 +125,7 @@ public:
         executionOrder_.clear();
         resourceLifetimes_.clear();
         barrierIntents_.clear();
+        finalBarrierIntentIndices_.clear();
     }
 
     [[nodiscard]] bool hasEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) const {
@@ -158,6 +161,7 @@ public:
         executionOrder_.clear();
         resourceLifetimes_.clear();
         barrierIntents_.clear();
+        finalBarrierIntentIndices_.clear();
         std::vector<std::vector<const Edge*>> edgesByPass(passes_.size());
         std::vector<std::vector<const Edge*>> edgesByResource(resources_.size());
         for (const Edge& edge : edges_) {
@@ -323,6 +327,18 @@ public:
             }
             return passPositions[lhs.pass.index] < passPositions[rhs.pass.index];
         });
+        finalBarrierIntentIndices_.assign(resources_.size(), kInvalidIndex);
+        for (Index intentIndex = 0; intentIndex < static_cast<Index>(barrierIntents_.size()); ++intentIndex) {
+            const BarrierIntent& intent = barrierIntents_[intentIndex];
+            if (!intent.finalTransition) {
+                continue;
+            }
+            Index& cachedIndex = finalBarrierIntentIndices_[intent.resource.index];
+            if (cachedIndex != kInvalidIndex) {
+                throw std::runtime_error("FrameGraph resource has multiple final barrier intents");
+            }
+            cachedIndex = intentIndex;
+        }
         compiled_ = true;
     }
 
@@ -354,6 +370,17 @@ public:
         }
         return barrierIntents_;
     }
+    [[nodiscard]] const BarrierIntent& finalBarrierIntent(ResourceHandle resource) const {
+        validateResource(resource);
+        if (!compiled_) {
+            throw std::runtime_error("FrameGraph has not been compiled");
+        }
+        const Index intentIndex = finalBarrierIntentIndices_[resource.index];
+        if (intentIndex == kInvalidIndex) {
+            throw std::runtime_error("FrameGraph resource has no final barrier intent");
+        }
+        return barrierIntents_[intentIndex];
+    }
 
 private:
     void addEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) {
@@ -372,6 +399,7 @@ private:
         executionOrder_.clear();
         resourceLifetimes_.clear();
         barrierIntents_.clear();
+        finalBarrierIntentIndices_.clear();
     }
 
     void validatePass(PassHandle handle) const {
@@ -392,6 +420,7 @@ private:
     std::vector<PassHandle> executionOrder_;
     std::vector<ResourceLifetime> resourceLifetimes_;
     std::vector<BarrierIntent> barrierIntents_;
+    std::vector<Index> finalBarrierIntentIndices_;
     bool compiled_ = false;
 };
 
