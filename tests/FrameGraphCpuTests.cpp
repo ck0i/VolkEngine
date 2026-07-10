@@ -61,6 +61,26 @@ int main() {
     expectEqual("force-off exposes only depth-off topology", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::ForceOff, false), true);
     expectEqual("auto exposes both depth topologies", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::Auto, true) &&
                                                         ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::Auto, false), true);
+    {
+        FrameGraph graph;
+        const auto image = graph.addResource({"Usage Validation Image", ve::FrameGraphResourceKind::Image, true});
+        const auto pass = graph.addPass({"Usage Validation Pass"});
+        expectNoThrow("sampled image reads are valid", [&] {
+            graph.read(pass, image, FrameGraphUsage::SampledImage);
+        });
+        expectThrowsRuntimeError("sampled image writes are rejected", [&] {
+            graph.write(pass, image, FrameGraphUsage::SampledImage);
+        });
+        expectThrowsRuntimeError("transfer source writes are rejected", [&] {
+            graph.write(pass, image, FrameGraphUsage::TransferSource);
+        });
+        expectThrowsRuntimeError("present writes are rejected", [&] {
+            graph.write(pass, image, FrameGraphUsage::Present);
+        });
+        expectThrowsRuntimeError("invalid frame-graph usage is rejected", [&] {
+            graph.read(pass, image, static_cast<FrameGraphUsage>(0xff));
+        });
+    }
 
     {
         FrameGraph graph;

@@ -414,6 +414,7 @@ private:
     void addEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) {
         validatePass(pass);
         validateResource(resource);
+        validateAccessUsage(access, usage);
         for (const Edge& edge : edges_) {
             if (edge.pass.index == pass.index &&
                 edge.resource.index == resource.index &&
@@ -428,6 +429,42 @@ private:
         resourceLifetimes_.clear();
         barrierIntents_.clear();
         finalBarrierIntentIndices_.clear();
+    }
+
+    static void validateAccessUsage(FrameGraphAccess access, FrameGraphUsage usage) {
+        switch (usage) {
+        case FrameGraphUsage::ColorAttachment:
+        case FrameGraphUsage::DepthAttachment:
+            if (access == FrameGraphAccess::Read || access == FrameGraphAccess::Write) {
+                return;
+            }
+            throw std::runtime_error("FrameGraph attachment usage has an invalid access");
+        case FrameGraphUsage::SampledImage:
+            if (access == FrameGraphAccess::Read) {
+                return;
+            }
+            if (access == FrameGraphAccess::Write) {
+                throw std::runtime_error("FrameGraph sampled-image usage must be read-only");
+            }
+            throw std::runtime_error("FrameGraph sampled-image usage has an invalid access");
+        case FrameGraphUsage::TransferSource:
+            if (access == FrameGraphAccess::Read) {
+                return;
+            }
+            if (access == FrameGraphAccess::Write) {
+                throw std::runtime_error("FrameGraph transfer-source usage must be read-only");
+            }
+            throw std::runtime_error("FrameGraph transfer-source usage has an invalid access");
+        case FrameGraphUsage::Present:
+            if (access == FrameGraphAccess::Read) {
+                return;
+            }
+            if (access == FrameGraphAccess::Write) {
+                throw std::runtime_error("FrameGraph present usage must be read-only");
+            }
+            throw std::runtime_error("FrameGraph present usage has an invalid access");
+        }
+        throw std::runtime_error("Unknown FrameGraph usage");
     }
 
     void validatePass(PassHandle handle) const {
