@@ -116,6 +116,7 @@ SandboxArgs parseArguments(int argc, char** argv) {
         const std::string_view arg{argv[i]};
         if (arg == "--help" || arg == "-h") {
             args.help = true;
+            return args;
         } else if (arg == "--resize-smoke") {
             args.run.resizeSmoke = true;
         } else if (arg == "--acquire-recovery-smoke") {

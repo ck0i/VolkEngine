@@ -178,6 +178,10 @@ add_dependencies(VolkEngineSandbox VolkEngineRuntimeAssets)
 volkengine_target_warnings(VolkEngineSandbox)
 
 enable_testing()
+add_test(NAME SandboxHelp
+    COMMAND VolkEngineSandbox --help --width 0 --unknown)
+set_tests_properties(SandboxHelp PROPERTIES
+    PASS_REGULAR_EXPRESSION "^Usage: VolkEngineSandbox")
 
 add_executable(VolkEngineConfigCpuTest
     tests/ConfigCpuTests.cpp
