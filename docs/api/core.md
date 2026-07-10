@@ -56,8 +56,8 @@ return app.run(ve::RunOptions{.maxFrames = 120});
 Mutable camera used by the window input layer and renderer.
 
 `setAspect(float)` updates the projection aspect ratio. It requires a finite, strictly positive value and throws before changing the previous aspect when given zero, a negative value, NaN, or infinity.
-- `update(forward, right, up, yawDelta, pitchDelta, dt)`: apply movement and rotation deltas.
-- `rotate(yawDegrees, pitchDegrees)`: apply angular deltas directly.
+- `update(forward, right, up, yawDelta, pitchDelta, dt)`: applies movement and rotation deltas; all inputs must be finite and `dt` must be non-negative, otherwise it throws before changing camera state.
+- `rotate(yawDegrees, pitchDegrees)`: applies finite angular deltas and rejects rotations that would make the stored angles non-finite.
 - `viewMatrix()`, `projectionMatrix()`, `viewProjectionMatrix()`: derive matrices on demand.
 - `position()`, `forward()`, `right()`: expose camera vectors.
 

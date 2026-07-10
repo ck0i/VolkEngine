@@ -4,6 +4,10 @@
 #include <iostream>
 #include <string_view>
 
+#include <limits>
+#include <stdexcept>
+
+
 namespace {
 
 int gFailureCount = 0;
@@ -18,6 +22,19 @@ void expectNear(const std::string_view context, const float actual, const float 
 void expectTrue(const std::string_view context, const bool value) {
     if (!value) {
         std::cerr << "[FAILED] " << context << '\n';
+        ++gFailureCount;
+    }
+}
+
+template <typename F>
+void expectThrowsRuntimeError(const std::string_view context, F&& callable) {
+    try {
+        callable();
+        std::cerr << "[FAILED] " << context << ": expected runtime_error\n";
+        ++gFailureCount;
+    } catch (const std::runtime_error&) {
+    } catch (...) {
+        std::cerr << "[FAILED] " << context << ": unexpected exception type\n";
         ++gFailureCount;
     }
 }
@@ -75,6 +92,43 @@ int main() {
         input.mousePitchDegrees = 1000.0f;
         ve::applyCameraInput(camera, input, 0.0f);
         expectTrue("camera pitch remains clamped", camera.forward().y < 1.0f && camera.forward().y > 0.99f);
+    }
+
+    {
+        ve::Camera camera;
+        const ve::Vec3 beforePosition = camera.position();
+        const ve::Vec3 beforeForward = camera.forward();
+        ve::CameraInput invalid{};
+        invalid.mouseYawDegrees = std::numeric_limits<float>::quiet_NaN();
+        expectThrowsRuntimeError("non-finite mouse input is rejected transactionally", [&] {
+            ve::applyCameraInput(camera, invalid, 1.0f);
+        });
+        expectNear("rejected mouse input preserves position", camera.position().x, beforePosition.x);
+        expectNear("rejected mouse input preserves orientation", camera.forward().x, beforeForward.x);
+
+        invalid = {};
+        invalid.mousePitchDegrees = 4.0f;
+        expectThrowsRuntimeError("non-finite delta is rejected transactionally", [&] {
+            ve::applyCameraInput(camera, invalid, std::numeric_limits<float>::quiet_NaN());
+        });
+        expectNear("rejected delta preserves position", camera.position().z, beforePosition.z);
+        expectNear("rejected delta preserves orientation", camera.forward().y, beforeForward.y);
+
+        invalid = {};
+        invalid.forward = std::numeric_limits<float>::infinity();
+        expectThrowsRuntimeError("non-finite movement input is rejected transactionally", [&] {
+            ve::applyCameraInput(camera, invalid, 1.0f);
+        });
+        expectNear("rejected movement preserves position", camera.position().y, beforePosition.y);
+        invalid = {};
+        invalid.mousePitchDegrees = 4.0f;
+        invalid.yaw = std::numeric_limits<float>::max();
+        expectThrowsRuntimeError("camera-step overflow is rejected transactionally", [&] {
+            ve::applyCameraInput(camera, invalid, 1.0f);
+        });
+        expectNear("rejected overflow preserves position", camera.position().x, beforePosition.x);
+        expectNear("rejected overflow preserves orientation", camera.forward().z, beforeForward.z);
+
     }
 
     if (gFailureCount == 0) {

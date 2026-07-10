@@ -29,7 +29,7 @@ ve::Window window{glfwRuntime, config};
 
 `updateCamera(Camera& camera, float dt)` collects current keyboard/mouse state and applies it to the supplied camera.
 
-The reusable `mapCameraInput(...)` helper converts boolean actions into normalized signed axes, while `applyCameraInput(...)` applies those axes and mouse deltas to a camera. This split keeps GLFW polling platform-owned and makes camera input deterministic to test and replay.
+The reusable `mapCameraInput(...)` helper converts boolean actions into normalized signed axes, while `applyCameraInput(...)` applies those axes and mouse deltas to a camera transactionally. Non-finite axes or delta time, negative delta time, and camera-step overflow are rejected before the caller's camera is changed. This split keeps GLFW polling platform-owned and makes camera input deterministic to test and replay.
 
 Current sandbox controls:
 

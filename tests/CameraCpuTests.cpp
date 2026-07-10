@@ -60,6 +60,28 @@ int main() {
     expectThrowsRuntimeError("infinite aspect is rejected", [&] { camera.setAspect(std::numeric_limits<float>::infinity()); });
     expectProjectionEqual("infinite aspect preserves projection", camera.projectionMatrix(), baselineProjection);
 
+    const ve::Mat4 baselineView = camera.viewMatrix();
+    expectThrowsRuntimeError("NaN camera delta is rejected", [&] {
+        camera.update(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, std::numeric_limits<float>::quiet_NaN());
+    });
+    expectProjectionEqual("NaN camera delta preserves view", camera.viewMatrix(), baselineView);
+    expectThrowsRuntimeError("negative camera delta is rejected", [&] {
+        camera.update(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -0.01f);
+    });
+    expectProjectionEqual("negative camera delta preserves view", camera.viewMatrix(), baselineView);
+    expectThrowsRuntimeError("infinite camera movement is rejected", [&] {
+        camera.update(std::numeric_limits<float>::infinity(), 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    });
+    expectProjectionEqual("infinite camera movement preserves view", camera.viewMatrix(), baselineView);
+    expectThrowsRuntimeError("NaN camera rotation is rejected", [&] {
+        camera.rotate(std::numeric_limits<float>::quiet_NaN(), 0.0f);
+    });
+    expectProjectionEqual("NaN camera rotation preserves view", camera.viewMatrix(), baselineView);
+    expectThrowsRuntimeError("infinite camera rotation is rejected", [&] {
+        camera.rotate(std::numeric_limits<float>::infinity(), 0.0f);
+    });
+    expectProjectionEqual("infinite camera rotation preserves view", camera.viewMatrix(), baselineView);
+
     if (gFailureCount == 0) {
         return 0;
     }

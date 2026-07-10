@@ -1,5 +1,9 @@
 #include "platform/Input.hpp"
 
+#include <cmath>
+#include <stdexcept>
+
+
 namespace ve {
 
 CameraInput mapCameraInput(const bool forwardKey,
@@ -22,8 +26,17 @@ CameraInput mapCameraInput(const bool forwardKey,
 }
 
 void applyCameraInput(Camera& camera, const CameraInput& input, const float dt) {
-    camera.rotate(input.mouseYawDegrees, input.mousePitchDegrees);
-    camera.update(input.forward, input.right, input.up, input.yaw, input.pitch, dt);
+    if (!std::isfinite(input.forward) || !std::isfinite(input.right) || !std::isfinite(input.up) ||
+        !std::isfinite(input.yaw) || !std::isfinite(input.pitch) ||
+        !std::isfinite(input.mouseYawDegrees) || !std::isfinite(input.mousePitchDegrees) ||
+        !std::isfinite(dt) || dt < 0.0f) {
+        throw std::runtime_error("Camera input and delta time must be finite; delta time must be non-negative");
+    }
+
+    Camera nextCamera = camera;
+    nextCamera.rotate(input.mouseYawDegrees, input.mousePitchDegrees);
+    nextCamera.update(input.forward, input.right, input.up, input.yaw, input.pitch, dt);
+    camera = nextCamera;
 }
 
 } // namespace ve
