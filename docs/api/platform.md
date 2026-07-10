@@ -1,8 +1,8 @@
 # Platform API
 
-Header: `engine/platform/Window.hpp`.
+Headers: `engine/platform/Window.hpp`, `engine/platform/Input.hpp`.
 
-`Window` is the GLFW-backed platform seam. It owns the `GLFWwindow*`, converts input into camera movement, tracks framebuffer resize state, and creates Vulkan surfaces for the backend.
+`Window` is the GLFW-backed platform seam. It owns the `GLFWwindow*`, collects native input, tracks framebuffer resize state, and creates Vulkan surfaces for the backend. The GLFW-free `CameraInput` mapper is the deterministic engine-side input policy.
 
 ## Construction and lifetime
 
@@ -24,7 +24,9 @@ ve::Window window{config};
 
 ## Input and camera
 
-`updateCamera(Camera& camera, float dt)` applies current keyboard/mouse state to the supplied camera.
+`updateCamera(Camera& camera, float dt)` collects current keyboard/mouse state and applies it to the supplied camera.
+
+The reusable `mapCameraInput(...)` helper converts boolean actions into normalized signed axes, while `applyCameraInput(...)` applies those axes and mouse deltas to a camera. This split keeps GLFW polling platform-owned and makes camera input deterministic to test and replay.
 
 Current sandbox controls:
 
