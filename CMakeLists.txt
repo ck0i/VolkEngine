@@ -303,3 +303,12 @@ target_include_directories(VolkEngineTimeCpuTest
 volkengine_target_warnings(VolkEngineTimeCpuTest)
 add_test(NAME TimeCpu
     COMMAND VolkEngineTimeCpuTest)
+
+add_executable(VolkEngineWorldCpuTest
+    tests/WorldCpuTests.cpp)
+target_include_directories(VolkEngineWorldCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineWorldCpuTest)
+add_test(NAME WorldCpu
+    COMMAND VolkEngineWorldCpuTest)

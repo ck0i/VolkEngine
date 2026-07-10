@@ -76,6 +76,15 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 
 `clampDeltaSeconds(deltaSeconds, maximumSeconds)` is a pure simulation helper. It clamps negative, non-finite, or hitch-sized deltas to a non-negative maximum without changing the raw wall-clock timing reported by `Clock`; telemetry and renderer frame metrics retain the original delta. `advanceSimulationSeconds(currentSeconds, deltaSeconds, maximumDeltaSeconds)` accumulates this bounded delta for gameplay and scene simulation timelines.
 
+## `World`
+
+`World` is the runtime's generational entity/component registry. `createEntity()` returns an opaque `{index, generation}` handle; destroying an entity invalidates that handle before its slot can be recycled. Component pools use sparse lookup plus dense storage for constant-time access and cache-friendly iteration. Removing a component uses swap-and-pop, so component references may be invalidated by structural changes; entity handles remain stable for the entity lifetime. Moving a `World` preserves live entity handles.
+
+- `emplace<T>(entity, args...)` constructs one component of type `T`; duplicate insertion throws.
+- `tryGet<T>(entity)`, `contains<T>(entity)`, `remove<T>(entity)`, and `componentCount<T>()` provide component access.
+- `each<T>(function)` iterates the dense component pool as `(Entity, T&)`.
+- `clear()` destroys all entities and component storage.
+
 ## File IO helpers
 
 - `readBinaryFile(path) -> std::vector<std::byte>`
