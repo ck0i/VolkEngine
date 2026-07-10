@@ -834,6 +834,7 @@ private:
     bool timestampsEnabled_ = false;
     std::uint32_t timestampValidBits_ = 0;
     std::array<std::filesystem::file_time_type, 5> shaderWriteTimes_{};
+    double shaderHotReloadRetryDelaySeconds_ = 0.5;
     double shaderHotReloadLastCheckSeconds_ = 0.0;
     RenderStats stats_{};
     RenderDeviceInfo deviceInfo_{};

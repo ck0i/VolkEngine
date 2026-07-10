@@ -6,6 +6,8 @@
 
 namespace ve {
 namespace {
+constexpr double kShaderHotReloadInitialRetryDelaySeconds = 0.5;
+constexpr double kShaderHotReloadMaxRetryDelaySeconds = 4.0;
 
 [[nodiscard]] std::vector<std::uint32_t> readSpirvWords(const std::filesystem::path& path) {
     constexpr std::uint32_t kSpirvMagic = 0x07230203U;
@@ -453,7 +455,7 @@ bool VulkanRenderer::Impl::shaderFilesChanged() const {
 }
 
 void VulkanRenderer::Impl::pollShaderHotReload(const double elapsedSeconds) {
-    if (!config_.shaderHotReload || elapsedSeconds - shaderHotReloadLastCheckSeconds_ < 0.5) {
+    if (!config_.shaderHotReload || elapsedSeconds - shaderHotReloadLastCheckSeconds_ < shaderHotReloadRetryDelaySeconds_) {
         return;
     }
     shaderHotReloadLastCheckSeconds_ = elapsedSeconds;
@@ -466,8 +468,10 @@ void VulkanRenderer::Impl::pollShaderHotReload(const double elapsedSeconds) {
     try {
         nextPipelines = buildPipelineSet();
     } catch (const std::exception& e) {
-        logger()->warn("Shader hot reload failed; keeping existing pipelines: {}", e.what());
-        refreshShaderWriteTimes();
+        shaderHotReloadRetryDelaySeconds_ =
+            std::min(shaderHotReloadRetryDelaySeconds_ * 2.0, kShaderHotReloadMaxRetryDelaySeconds);
+        logger()->warn("Shader hot reload failed; keeping existing pipelines and retrying in {:.1f}s: {}",
+                       shaderHotReloadRetryDelaySeconds_, e.what());
         return;
     }
 
@@ -491,6 +495,7 @@ void VulkanRenderer::Impl::pollShaderHotReload(const double elapsedSeconds) {
         throw;
     }
     installPipelineSet(nextPipelines);
+    shaderHotReloadRetryDelaySeconds_ = kShaderHotReloadInitialRetryDelaySeconds;
     refreshShaderWriteTimes();
     logger()->info("Reloaded graphics pipelines from updated shader bytecode; retiring previous set after tracked frame fences signal");
 }

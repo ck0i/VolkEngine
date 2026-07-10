@@ -51,6 +51,7 @@ The depth prepass uses `scene_depth.vert`, which keeps the same model/view-proje
 2. Swap the replacement set into use only after every pipeline/layout succeeds.
 3. Retire the previous set after frame fences that could reference it signal.
 4. Keep current pipelines live on rebuild failure.
+5. Leave failed shader timestamps unacknowledged so a corrected file is retried; retries back off from 0.5 to 4 seconds to avoid rebuilding continuously while an editor writes an invalid intermediate file.
 
 ## Pipeline cache
 
