@@ -41,6 +41,7 @@ struct EngineConfig {
     std::filesystem::path groundAlbedoTexture = "textures/ground_albedo.png";
     std::filesystem::path groundNormalTexture = "textures/ground_normal.png";
     std::filesystem::path groundOrmTexture = "textures/ground_orm.png";
+    std::filesystem::path importedModelPath = "models/imported_showcase.obj";
     std::filesystem::path cacheDirectory = executableDirectory() / "cache";
 };
 

@@ -176,7 +176,15 @@ void VulkanRenderer::Impl::createMeshes() {
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(16, 32);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(8, 16);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = createPlaneMesh(12.0f, 12.0f);
-        meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)] = loadObjMesh(config_.assetDirectory / "models" / "imported_showcase.obj");
+        const std::filesystem::path importedModelPath = resolveAssetPath(config_.assetDirectory, config_.importedModelPath);
+        if (importedModelPath.empty()) {
+            throw std::runtime_error("Imported model path is empty");
+        }
+        std::error_code modelFileError;
+        if (!std::filesystem::is_regular_file(importedModelPath, modelFileError)) {
+            throw std::runtime_error("Imported model path is not a regular file: " + importedModelPath.string());
+        }
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)] = loadObjMesh(importedModelPath);
         for (std::size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex) {
             sceneMeshBounds_[meshIndex] = meshes[meshIndex].bounds;
         }

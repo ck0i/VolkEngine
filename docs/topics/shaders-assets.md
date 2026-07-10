@@ -80,9 +80,10 @@ Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNor
 - uses separate descriptor samplers for color/scalar maps and normal maps: albedo/ORM can enable device anisotropy and use generated material mip ranges, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.
 
 Current geometry path (`VulkanRenderer.Meshes.cpp`):
-
 - creates procedural cube/sphere/plane meshes in memory.
-- loads `assets/models/imported_showcase.obj` through `loadObjMesh()`.
+
+- resolves `EngineConfig::importedModelPath` relative to `EngineConfig::assetDirectory` (absolute overrides are accepted).
+- validates the resolved model path is a regular file before mesh allocation, then loads it through `loadObjMesh()`.
 - supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, generated normals when faces omit normals, and generated-normal fallback when explicit OBJ normals are degenerate.
 - computes `MeshData::bounds` from vertex positions and computes `Vertex::tangent` as `vec4(xyz, handedness)` for normal-map TBN shading; missing/degenerate UVs get deterministic fallback tangents.
 - packs per-instance normal matrices as three `vec4` columns so shaders transform normals with inverse-transpose data while tangents still use the model linear transform and `tangent.w * sign(det(model3x3))`.
