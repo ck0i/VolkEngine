@@ -383,6 +383,15 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         throw std::runtime_error("Selected frame graph HDR sample intent cannot be final");
     }
     const ImageSyncState hdrSampleState = imageSyncStateFor(hdrSampleIntent.access, hdrSampleIntent.usage);
+    const FrameGraph::BarrierIntent& hdrWriteIntent = graphVariant.graph.barrierIntent(
+        graphVariant.passes.hdrScene,
+        graphVariant.resources.hdr,
+        FrameGraphAccess::Write,
+        FrameGraphUsage::ColorAttachment);
+    if (hdrWriteIntent.finalTransition) {
+        throw std::runtime_error("Selected frame graph HDR write intent cannot be final");
+    }
+    const ImageSyncState hdrWriteState = imageSyncStateFor(hdrWriteIntent.access, hdrWriteIntent.usage);
     const VkDescriptorSet sceneSet = sceneDescriptorSets_[frameIndex_];
     const VkDeviceSize offset = 0;
     if (sceneDrawCalls > 0U) {
@@ -440,7 +449,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     {
         const DebugLabelScope hdrLabel{*this, frame.commandBuffer, hdrPass.name, hdrPass.debugColor};
         transitionImageTracked(frame.commandBuffer, hdr_.image, hdr_.syncState,
-                               imageSyncStateFor(FrameGraphAccess::Write, FrameGraphUsage::ColorAttachment),
+                               hdrWriteState,
                                VK_IMAGE_ASPECT_COLOR_BIT);
 
         VkRenderingAttachmentInfo colorAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
