@@ -64,6 +64,12 @@ public:
         FrameGraphUsage usage = FrameGraphUsage::SampledImage;
     };
 
+    struct ResourceLifetime {
+        PassHandle firstPass{};
+        PassHandle lastPass{};
+        bool used = false;
+    };
+
     [[nodiscard]] ResourceHandle addResource(ResourceDesc desc) {
         if (resources_.size() >= static_cast<std::size_t>(kInvalidIndex)) {
             throw std::runtime_error("FrameGraph resource id range exhausted");
@@ -72,6 +78,7 @@ public:
         resources_.push_back(desc);
         compiled_ = false;
         executionOrder_.clear();
+        resourceLifetimes_.clear();
         return handle;
     }
 
@@ -83,6 +90,7 @@ public:
         passes_.push_back(desc);
         compiled_ = false;
         executionOrder_.clear();
+        resourceLifetimes_.clear();
         return handle;
     }
 
@@ -100,6 +108,7 @@ public:
         resources_[static_cast<std::size_t>(resource.index)].finalUsage = usage;
         compiled_ = false;
         executionOrder_.clear();
+        resourceLifetimes_.clear();
     }
 
     [[nodiscard]] bool hasEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) const {
@@ -131,6 +140,9 @@ public:
     }
 
     void compile() {
+        compiled_ = false;
+        executionOrder_.clear();
+        resourceLifetimes_.clear();
         std::vector<std::uint8_t> hasWriter(resources_.size(), 0);
         std::vector<std::uint8_t> passHasAccess(passes_.size(), 0);
 
@@ -219,6 +231,33 @@ public:
             executionOrder_.clear();
             throw std::runtime_error("FrameGraph contains a cyclic pass dependency");
         }
+
+        std::vector<Index> passPositions(passCount, kInvalidIndex);
+        for (Index position = 0; position < static_cast<Index>(executionOrder_.size()); ++position) {
+            passPositions[executionOrder_[position].index] = position;
+        }
+        std::vector<Index> firstUses(resources_.size(), kInvalidIndex);
+        std::vector<Index> lastUses(resources_.size(), kInvalidIndex);
+        for (const Edge& edge : edges_) {
+            const std::size_t resourceIndex = static_cast<std::size_t>(edge.resource.index);
+            const Index position = passPositions[edge.pass.index];
+            if (firstUses[resourceIndex] == kInvalidIndex || position < firstUses[resourceIndex]) {
+                firstUses[resourceIndex] = position;
+            }
+            if (lastUses[resourceIndex] == kInvalidIndex || position > lastUses[resourceIndex]) {
+                lastUses[resourceIndex] = position;
+            }
+        }
+        resourceLifetimes_.assign(resources_.size(), ResourceLifetime{});
+        for (std::size_t resourceIndex = 0; resourceIndex < resources_.size(); ++resourceIndex) {
+            if (firstUses[resourceIndex] == kInvalidIndex) {
+                continue;
+            }
+            resourceLifetimes_[resourceIndex] = ResourceLifetime{
+                executionOrder_[firstUses[resourceIndex]],
+                executionOrder_[lastUses[resourceIndex]],
+                true};
+        }
         compiled_ = true;
     }
 
@@ -237,6 +276,13 @@ public:
     [[nodiscard]] std::size_t edgeCount() const { return edges_.size(); }
     [[nodiscard]] bool compiled() const { return compiled_; }
     [[nodiscard]] const std::vector<PassHandle>& executionOrder() const { return executionOrder_; }
+    [[nodiscard]] const ResourceLifetime& lifetime(ResourceHandle resource) const {
+        validateResource(resource);
+        if (!compiled_) {
+            throw std::runtime_error("FrameGraph has not been compiled");
+        }
+        return resourceLifetimes_[static_cast<std::size_t>(resource.index)];
+    }
 
 private:
     void addEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) {
@@ -253,6 +299,7 @@ private:
         edges_.push_back(Edge{pass, resource, access, usage});
         compiled_ = false;
         executionOrder_.clear();
+        resourceLifetimes_.clear();
     }
 
     void validatePass(PassHandle handle) const {
@@ -271,6 +318,7 @@ private:
     std::vector<PassDesc> passes_;
     std::vector<Edge> edges_;
     std::vector<PassHandle> executionOrder_;
+    std::vector<ResourceLifetime> resourceLifetimes_;
     bool compiled_ = false;
 };
 

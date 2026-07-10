@@ -90,9 +90,8 @@ Adding the same `(pass, resource, access, usage)` edge twice throws immediately.
 
 - every pass has at least one resource edge.
 - non-imported resources are written before any pass reads them.
-
-
 Compilation also derives RAW, WAR, and WAW hazard dependencies and exposes a stable topological pass order. The declaration index breaks ties, so independent passes remain deterministic.
+For each resource with at least one edge, compilation also records the first and last pass in that execution order. These intervals are the input for future transient allocation and aliasing; the graph still does not own Vulkan memory.
 It intentionally does not reject all multi-pass writes or resource reuse; future render-graph work needs those patterns.
 
 ## Querying
@@ -107,6 +106,7 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 - `edgeCount()`
 - `compiled()`
 - `executionOrder() -> const std::vector<PassHandle>&` — compiled stable pass order; empty while invalidated.
+- `lifetime(resource) -> const ResourceLifetime&` — first/last compiled pass and `used`; throws while the graph is invalidated.
 
 ## Current renderer use
 

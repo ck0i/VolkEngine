@@ -89,8 +89,21 @@ int main() {
         expectEqual("execution plan orders hdr after depth", graph.executionOrder()[1].index, hdrPass.index);
         expectEqual("execution plan orders tonemap after hdr", graph.executionOrder()[2].index, tonemapPass.index);
         expectEqual("execution plan ends with screenshot readback", graph.executionOrder()[3].index, screenshotPass.index);
+        const FrameGraph::ResourceLifetime depthLifetime = graph.lifetime(depth);
+        expectEqual("depth lifetime starts at prepass", depthLifetime.firstPass.index, depthPass.index);
+        expectEqual("depth lifetime ends at hdr pass", depthLifetime.lastPass.index, hdrPass.index);
+        expectEqual("depth lifetime is marked used", depthLifetime.used, true);
+        const FrameGraph::ResourceLifetime hdrLifetime = graph.lifetime(hdr);
+        expectEqual("hdr lifetime starts at hdr pass", hdrLifetime.firstPass.index, hdrPass.index);
+        expectEqual("hdr lifetime ends at tonemap", hdrLifetime.lastPass.index, tonemapPass.index);
+        const FrameGraph::ResourceLifetime swapchainLifetime = graph.lifetime(swapchain);
+        expectEqual("swapchain lifetime starts at tonemap", swapchainLifetime.firstPass.index, tonemapPass.index);
+        expectEqual("swapchain lifetime ends at screenshot", swapchainLifetime.lastPass.index, screenshotPass.index);
         graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
         expectEqual("graph mutation invalidates execution plan", graph.compiled(), false);
+        expectThrowsRuntimeError("invalidated lifetime unavailable", [&] {
+            (void)graph.lifetime(depth);
+        });
         expectEqual("invalidated execution plan is empty", graph.executionOrder().empty(), true);
     }
 
