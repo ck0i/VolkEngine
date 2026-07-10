@@ -37,6 +37,14 @@ struct Health {
     int value = 100;
 };
 
+struct LvaluePositionVisitor {
+    int* sum = nullptr;
+
+    void operator()(const ve::World::Entity, const Position& position) & {
+        *sum += position.value;
+    }
+};
+
 } // namespace
 
 int main() {
@@ -56,6 +64,14 @@ int main() {
     int positionSum = 0;
     world.each<Position>([&](const ve::World::Entity, const Position& position) { positionSum += position.value; });
     expectTrue("dense component iteration visits every component", positionSum == 30);
+
+    const ve::World& readOnlyWorld = world;
+    int readOnlyPositionSum = 0;
+    readOnlyWorld.each<Position>([&](const ve::World::Entity, const Position& position) { readOnlyPositionSum += position.value; });
+    expectTrue("const world iteration exposes dense component data", readOnlyPositionSum == 30);
+    int lvalueVisitorSum = 0;
+    readOnlyWorld.each<Position>(LvaluePositionVisitor{&lvalueVisitorSum});
+    expectTrue("const iteration supports lvalue-qualified visitors", lvalueVisitorSum == 30);
 
     expectTrue("component removal succeeds", world.remove<Health>(first));
     expectTrue("component removal clears lookup", !world.contains<Health>(first) && world.componentCount<Health>() == 0U);

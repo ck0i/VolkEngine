@@ -157,6 +157,14 @@ public:
         }
     }
 
+    template <typename T, typename Function>
+    void each(Function&& function) const {
+        const ComponentPool<T>* pool = findPool<T>();
+        if (pool != nullptr) {
+            pool->each(std::forward<Function>(function));
+        }
+    }
+
 private:
     static constexpr Index kInvalidDenseIndex = kInvalidIndex;
 
@@ -227,7 +235,14 @@ private:
         template <typename Function>
         void each(Function&& function) {
             for (Index denseIndex = 0; denseIndex < static_cast<Index>(components_.size()); ++denseIndex) {
-                std::forward<Function>(function)(entities_[denseIndex], components_[denseIndex]);
+                function(entities_[denseIndex], components_[denseIndex]);
+            }
+        }
+
+        template <typename Function>
+        void each(Function&& function) const {
+            for (Index denseIndex = 0; denseIndex < static_cast<Index>(components_.size()); ++denseIndex) {
+                function(entities_[denseIndex], components_[denseIndex]);
             }
         }
 

@@ -82,7 +82,7 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 
 - `emplace<T>(entity, args...)` constructs one component of type `T`; duplicate insertion throws.
 - `tryGet<T>(entity)`, `contains<T>(entity)`, `remove<T>(entity)`, and `componentCount<T>()` provide component access.
-- `each<T>(function)` iterates the dense component pool as `(Entity, T&)`.
+- `each<T>(function)` iterates the dense component pool as `(Entity, T&)`; the `const World` overload supplies `(Entity, const T&)` without permitting mutation.
 - `clear()` destroys all entities and component storage.
 
 ## File IO helpers
