@@ -201,6 +201,30 @@ int main() {
 
     {
         ve::InputTracker tracker;
+        tracker.scrollEvent(1.0, 2.0);
+        tracker.scrollEvent(-0.25, 3.0);
+        const ve::InputState scrolled = tracker.consume();
+        expectTrue("scroll offsets accumulate between snapshots",
+                   scrolled.scrollDeltaX == 0.75 && scrolled.scrollDeltaY == 5.0);
+
+        const ve::InputState consumed = tracker.consume();
+        expectTrue("scroll offsets are consumed once",
+                   consumed.scrollDeltaX == 0.0 && consumed.scrollDeltaY == 0.0);
+
+        tracker.scrollEvent(std::numeric_limits<double>::infinity(), 1.0);
+        const ve::InputState ignored = tracker.consume();
+        expectTrue("non-finite scroll offsets are ignored",
+                   ignored.scrollDeltaX == 0.0 && ignored.scrollDeltaY == 0.0);
+
+        tracker.scrollEvent(std::numeric_limits<double>::max(), 0.0);
+        tracker.scrollEvent(std::numeric_limits<double>::max(), 0.0);
+        const ve::InputState overflow = tracker.consume();
+        expectTrue("scroll accumulation overflow resets motion",
+                   overflow.scrollDeltaX == 0.0 && overflow.scrollDeltaY == 0.0);
+    }
+
+    {
+        ve::InputTracker tracker;
         tracker.keyEvent(ve::InputKey::Space, true);
         tracker.keyEvent(ve::InputKey::Space, false);
         const ve::InputState tapped = tracker.consume();
@@ -216,6 +240,7 @@ int main() {
         tracker.beginCapture();
         tracker.cursorPosition(4.0, 8.0);
         tracker.cursorPosition(9.0, 12.0);
+        tracker.scrollEvent(1.0, -2.0);
         tracker.focusLost();
 
         const ve::InputState unfocused = tracker.consume();
@@ -226,6 +251,8 @@ int main() {
         expectTrue("focus loss releases cursor capture", !unfocused.cursorCaptured);
         expectTrue("focus loss discards cursor motion",
                    unfocused.cursorDeltaX == 0.0 && unfocused.cursorDeltaY == 0.0);
+        expectTrue("focus loss discards scroll motion",
+                   unfocused.scrollDeltaX == 0.0 && unfocused.scrollDeltaY == 0.0);
     }
 
     {

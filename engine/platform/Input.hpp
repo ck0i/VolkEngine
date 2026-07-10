@@ -61,6 +61,8 @@ public:
     double cursorY = 0.0;
     double cursorDeltaX = 0.0;
     double cursorDeltaY = 0.0;
+    double scrollDeltaX = 0.0;
+    double scrollDeltaY = 0.0;
     bool cursorCaptured = false;
 
 private:
@@ -91,6 +93,7 @@ public:
     void keyEvent(InputKey key, bool down) noexcept;
     void mouseButtonEvent(InputMouseButton button, bool down) noexcept;
     void cursorPosition(double x, double y) noexcept;
+    void scrollEvent(double xOffset, double yOffset) noexcept;
     void beginCapture() noexcept;
     void endCapture() noexcept;
     void focusLost() noexcept;
@@ -108,6 +111,8 @@ private:
     double cursorY_ = 0.0;
     double cursorDeltaX_ = 0.0;
     double cursorDeltaY_ = 0.0;
+    double scrollDeltaX_ = 0.0;
+    double scrollDeltaY_ = 0.0;
     bool hasCursorPosition_ = false;
     bool cursorCaptured_ = false;
 };

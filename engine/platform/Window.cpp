@@ -137,6 +137,7 @@ Window::Window(GlfwRuntime&, const EngineConfig& config) {
     glfwSetKeyCallback(window_, keyCallback);
     glfwSetMouseButtonCallback(window_, mouseButtonCallback);
     glfwSetCursorPosCallback(window_, cursorPositionCallback);
+    glfwSetScrollCallback(window_, scrollCallback);
     glfwSetWindowFocusCallback(window_, focusCallback);
     logger()->info("Created window {}x{}", config.initialWidth, config.initialHeight);
 }
@@ -255,6 +256,13 @@ void Window::cursorPositionCallback(GLFWwindow* window, const double x, const do
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
     if (self) {
         self->inputTracker_.cursorPosition(x, y);
+    }
+}
+
+void Window::scrollCallback(GLFWwindow* window, const double xOffset, const double yOffset) {
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (self) {
+        self->inputTracker_.scrollEvent(xOffset, yOffset);
     }
 }
 

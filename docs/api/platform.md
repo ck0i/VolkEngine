@@ -27,9 +27,9 @@ ve::Window window{glfwRuntime, config};
 
 ## Input and camera
 
-GLFW callbacks update `InputTracker` as events arrive, preserving presses and releases that both occur between frames. `pollInput()` consumes one `InputState` value snapshot: held state persists, while pressed/released transitions and accumulated cursor deltas clear after consumption. The snapshot safely exposes supported keyboard and mouse-button state, cursor position/delta, and capture status without GLFW types.
+GLFW callbacks update `InputTracker` as events arrive, preserving presses and releases that both occur between frames. `pollInput()` consumes one `InputState` value snapshot: held state persists, while pressed/released transitions plus accumulated cursor and two-axis scroll deltas clear after consumption. The snapshot safely exposes supported keyboard and mouse-button state, cursor position/delta, scroll motion, and capture status without GLFW types. Non-finite events are ignored, and finite accumulation overflow resets the affected motion instead of poisoning a frame.
 
-`updateCamera(Camera& camera, const InputState& input, float dt)` applies the same snapshot that gameplay may receive through `Application::runWithInput(...)`. The compatibility overload `updateCamera(Camera& camera, float dt)` consumes the current tracker snapshot itself. `mapCameraInput(...)` converts actions into normalized signed axes, while `applyCameraInput(...)` applies axes and mouse deltas transactionally. Non-finite axes or delta time, negative delta time, and camera-step overflow are rejected before the caller's camera changes. Focus loss releases held inputs, clears cursor deltas, and exits captured/raw mouse mode.
+`updateCamera(Camera& camera, const InputState& input, float dt)` applies the same snapshot that gameplay may receive through `Application::runWithInput(...)`. The compatibility overload `updateCamera(Camera& camera, float dt)` consumes the current tracker snapshot itself. `mapCameraInput(...)` converts actions into normalized signed axes, while `applyCameraInput(...)` applies axes and mouse deltas transactionally. Non-finite axes or delta time, negative delta time, and camera-step overflow are rejected before the caller's camera changes. Focus loss releases held inputs, clears cursor and scroll deltas, and exits captured/raw mouse mode.
 
 Current sandbox controls:
 

@@ -62,6 +62,21 @@ void InputTracker::cursorPosition(const double x, const double y) noexcept {
     hasCursorPosition_ = true;
 }
 
+void InputTracker::scrollEvent(const double xOffset, const double yOffset) noexcept {
+    if (!std::isfinite(xOffset) || !std::isfinite(yOffset)) {
+        return;
+    }
+    const double accumulatedX = scrollDeltaX_ + xOffset;
+    const double accumulatedY = scrollDeltaY_ + yOffset;
+    if (std::isfinite(accumulatedX) && std::isfinite(accumulatedY)) {
+        scrollDeltaX_ = accumulatedX;
+        scrollDeltaY_ = accumulatedY;
+    } else {
+        scrollDeltaX_ = 0.0;
+        scrollDeltaY_ = 0.0;
+    }
+}
+
 void InputTracker::beginCapture() noexcept {
     cursorCaptured_ = true;
     cursorDeltaX_ = 0.0;
@@ -85,6 +100,8 @@ void InputTracker::focusLost() noexcept {
     heldMouseButtons_ = 0U;
     cursorDeltaX_ = 0.0;
     cursorDeltaY_ = 0.0;
+    scrollDeltaX_ = 0.0;
+    scrollDeltaY_ = 0.0;
     hasCursorPosition_ = false;
     cursorCaptured_ = false;
 }
@@ -101,6 +118,8 @@ InputState InputTracker::consume() noexcept {
     state.cursorY = cursorY_;
     state.cursorDeltaX = cursorDeltaX_;
     state.cursorDeltaY = cursorDeltaY_;
+    state.scrollDeltaX = scrollDeltaX_;
+    state.scrollDeltaY = scrollDeltaY_;
     state.cursorCaptured = cursorCaptured_;
 
     pressedKeys_ = 0U;
@@ -109,6 +128,8 @@ InputState InputTracker::consume() noexcept {
     releasedMouseButtons_ = 0U;
     cursorDeltaX_ = 0.0;
     cursorDeltaY_ = 0.0;
+    scrollDeltaX_ = 0.0;
+    scrollDeltaY_ = 0.0;
     return state;
 }
 
