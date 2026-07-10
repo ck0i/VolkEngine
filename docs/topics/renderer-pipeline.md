@@ -85,7 +85,7 @@ Swapchain images are preferred as UNORM because `tonemap.frag` normally applies 
 - `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds; command recording expands each visible item into GPU instance data with model and CPU-precomputed normal-matrix columns.
 - Scene descriptors bind per-frame uniforms, one fixed combined-sampler material texture array (`albedo`, `normal`, `ORM`), and per-frame instance data.
 - Visibility planning extracts frustum planes from the camera view-projection matrix, culls bounding spheres, applies optional material-grid acceleration, and counts visible mesh work.
-- Command recording materializes visible instances into per-mesh CPU scratch while emitting compact `{depth,index}` sort keys for opaque early-Z locality, writes the final contiguous instance ranges sequentially into the mapped per-frame storage buffer, and binds shared scene vertex/index/descriptor state once before scene passes.
+- Command recording assigns each mesh a contiguous mapped instance range. Depth-prepass frames write visible instances directly into those ranges because both scene passes share the same stable order; single-pass opaque frames instead emit compact `{depth,index}` keys, sort front-to-back for early-Z locality, and scatter the ordered instances sequentially into their mapped ranges.
 - If `multiDrawIndirect`, `drawIndirectFirstInstance`, and `maxDrawIndirectCount` allow it, one `vkCmdDrawIndexedIndirect` submits all visible mesh batches per pass.
 - Otherwise the renderer records direct `vkCmdDrawIndexed` per visible mesh batch.
 

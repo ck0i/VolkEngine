@@ -76,6 +76,17 @@ enum class FrameSubmissionProgress : std::uint8_t {
     const FrameSubmissionProgress progress) noexcept {
     return progress == FrameSubmissionProgress::ImageAcquired;
 }
+
+enum class InstanceMaterializationPolicy : std::uint8_t {
+    DirectMapped,
+    FrontToBackSort,
+};
+
+[[nodiscard]] inline constexpr InstanceMaterializationPolicy instanceMaterializationPolicy(
+    const bool useDepthPrepass) noexcept {
+    return useDepthPrepass ? InstanceMaterializationPolicy::DirectMapped
+                           : InstanceMaterializationPolicy::FrontToBackSort;
+}
 struct TonemapPushConstants {
     float exposure = 1.0f;
     std::uint32_t applySrgbOetf = 1U;

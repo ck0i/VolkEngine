@@ -99,6 +99,14 @@ int main() {
                !ve::vulkan_renderer_detail::frameFailureRequiresAcquireRecovery(
                    FrameSubmissionProgress::CommandsSubmitted));
 
+    using ve::vulkan_renderer_detail::InstanceMaterializationPolicy;
+    expectTrue("depth prepass materializes instances directly into mapped storage",
+               ve::vulkan_renderer_detail::instanceMaterializationPolicy(true) ==
+                   InstanceMaterializationPolicy::DirectMapped);
+    expectTrue("single-pass opaque rendering retains front-to-back instance sorting",
+               ve::vulkan_renderer_detail::instanceMaterializationPolicy(false) ==
+                   InstanceMaterializationPolicy::FrontToBackSort);
+
     const VkSemaphore firstUploadSemaphore = fakeHandle<VkSemaphore>(1);
     const VkSemaphore secondUploadSemaphore = fakeHandle<VkSemaphore>(2);
     std::vector<TestPendingUpload> pendingUploads{{firstUploadSemaphore}, {VK_NULL_HANDLE}, {secondUploadSemaphore}};

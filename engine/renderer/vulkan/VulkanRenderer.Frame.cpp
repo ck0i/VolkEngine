@@ -293,13 +293,18 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     if (visibleInstanceCount > frame.instanceCapacity) {
         throw std::runtime_error("Scene visibility plan exceeds frame instance capacity");
     }
-    for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
-        std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
-        instances.clear();
-        instances.reserve(visibility.meshInstanceCounts[meshIndex]);
-        std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
-        sortKeys.clear();
-        sortKeys.reserve(visibility.meshInstanceCounts[meshIndex]);
+    const InstanceMaterializationPolicy materializationPolicy = instanceMaterializationPolicy(useDepthPrepass);
+    const bool directMappedMaterialization = materializationPolicy == InstanceMaterializationPolicy::DirectMapped;
+    std::array<std::uint32_t, kSceneMeshBatchOrder.size()> materializedInstanceCounts{};
+    if (!directMappedMaterialization) {
+        for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
+            std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
+            instances.clear();
+            instances.reserve(visibility.meshInstanceCounts[meshIndex]);
+            std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
+            sortKeys.clear();
+            sortKeys.reserve(visibility.meshInstanceCounts[meshIndex]);
+        }
     }
 
     const auto makeInstanceData = [](const SceneRenderItem& item) {
@@ -317,9 +322,16 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         return dot(position - visibility.cameraPosition, visibility.cameraForward);
     };
     const auto writeInstanceData = [&](const std::size_t meshIndex, const InstanceData& data) {
+        const std::uint32_t outputIndex = materializedInstanceCounts[meshIndex]++;
+        if (outputIndex >= visibility.meshInstanceCounts[meshIndex]) {
+            throw std::runtime_error("Scene instance materialization exceeded visibility count");
+        }
+        if (directMappedMaterialization) {
+            instanceData[meshFirstInstances[meshIndex] + outputIndex] = data;
+            return;
+        }
         std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
-        std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
-        sortKeys.push_back(InstanceSortKey{instanceDepth(data), static_cast<std::uint32_t>(instances.size())});
+        instanceSortKeyScratch_[meshIndex].push_back(InstanceSortKey{instanceDepth(data), outputIndex});
         instances.push_back(data);
     };
     const auto writeCachedGridInstances = [&](const std::size_t meshIndex) {
@@ -367,13 +379,19 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         gridVisibilityCache_.valid = true;
     }
     for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
-        std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
-        if (instances.size() != visibility.meshInstanceCounts[meshIndex] ||
-            instanceSortKeyScratch_[meshIndex].size() != visibility.meshInstanceCounts[meshIndex]) {
+        if (materializedInstanceCounts[meshIndex] != visibility.meshInstanceCounts[meshIndex]) {
             throw std::runtime_error("Scene instance materialization did not match visibility counts");
         }
+        if (directMappedMaterialization) {
+            continue;
+        }
+        std::vector<InstanceData>& instances = instanceSortScratch_[meshIndex];
         std::vector<InstanceSortKey>& sortKeys = instanceSortKeyScratch_[meshIndex];
-        if (!useDepthPrepass && sortKeys.size() > 1U) {
+        if (instances.size() != visibility.meshInstanceCounts[meshIndex] ||
+            sortKeys.size() != visibility.meshInstanceCounts[meshIndex]) {
+            throw std::runtime_error("Scene instance sort scratch did not match visibility counts");
+        }
+        if (sortKeys.size() > 1U) {
             std::sort(sortKeys.begin(), sortKeys.end(), [](const InstanceSortKey& lhs, const InstanceSortKey& rhs) {
                 return lhs.depth < rhs.depth;
             });
