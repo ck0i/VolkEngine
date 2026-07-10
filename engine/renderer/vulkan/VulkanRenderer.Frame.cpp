@@ -404,8 +404,16 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     if (useDepthPrepass) {
         {
             const DebugLabelScope depthLabel{*this, frame.commandBuffer, depthPass->name, depthPass->debugColor};
+            const FrameGraph::BarrierIntent& depthWriteIntent = graphVariant.graph.barrierIntent(
+                graphVariant.passes.depthPrepass,
+                graphVariant.resources.depth,
+                FrameGraphAccess::Write,
+                FrameGraphUsage::DepthAttachment);
+            if (depthWriteIntent.finalTransition) {
+                throw std::runtime_error("Selected frame graph depth-write intent cannot be final");
+            }
             transitionImageTracked(frame.commandBuffer, depth_.image, depth_.syncState,
-                                   imageSyncStateFor(FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment),
+                                   imageSyncStateFor(depthWriteIntent.access, depthWriteIntent.usage),
                                    VK_IMAGE_ASPECT_DEPTH_BIT);
             VkRenderingAttachmentInfo depthPrepassAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
             depthPrepassAttachment.imageView = depth_.view;

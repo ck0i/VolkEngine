@@ -112,6 +112,11 @@ int main() {
         expectEqual("barrier plan contains first-use and changed-state intents", barrierPlan.size(), static_cast<std::size_t>(7));
         expectEqual("first barrier intent is depth prepass write", barrierPlan[0].pass.index, depthPass.index);
         expectEqual("first barrier intent targets depth", barrierPlan[0].resource.index, depth.index);
+        const FrameGraph::BarrierIntent& depthWriteIntent = graph.barrierIntent(
+            depthPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment);
+        expectEqual("depth write intent targets prepass", depthWriteIntent.pass.index, depthPass.index);
+        expectEqual("depth first-use write has no graph predecessor", depthWriteIntent.hasPrevious, false);
+        expectEqual("depth write intent is not final", depthWriteIntent.finalTransition, false);
         expectEqual("depth read transition follows depth write", barrierPlan[1].pass.index, hdrPass.index);
         expectEqual("depth read transition records previous write", barrierPlan[1].hasPrevious, true);
         const FrameGraph::BarrierIntent& depthReadIntent = graph.barrierIntent(
