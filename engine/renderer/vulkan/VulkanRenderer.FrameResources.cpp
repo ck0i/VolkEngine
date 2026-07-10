@@ -215,52 +215,80 @@ void VulkanRenderer::Impl::createTimestampQueries() {
 }
 
 void VulkanRenderer::Impl::createFrameGraph() {
-    frameGraph_ = {};
+    const auto makeVariant = [&](const bool depthPrepass, const bool screenshot) {
+        FrameGraphVariant variant{};
+        FrameGraph& graph = variant.graph;
+        const FrameGraph::ResourceHandle depth = graph.addResource({"Depth Image", FrameGraphResourceKind::Image, false});
+        const FrameGraph::ResourceHandle hdr = graph.addResource({"HDR Color Image", FrameGraphResourceKind::Image, false});
+        const FrameGraph::ResourceHandle swapchain = graph.addResource({"Swapchain Image", FrameGraphResourceKind::Image, true});
 
-    const FrameGraph::ResourceHandle depth = frameGraph_.addResource({"Depth Image", FrameGraphResourceKind::Image, false});
-    const FrameGraph::ResourceHandle hdr = frameGraph_.addResource({"HDR Color Image", FrameGraphResourceKind::Image, false});
-    const FrameGraph::ResourceHandle swapchain = frameGraph_.addResource({"Swapchain Image", FrameGraphResourceKind::Image, true});
+        FrameGraph::PassHandle depthPass{};
+        if (depthPrepass) {
+            depthPass = graph.addPass({"Depth Prepass", {0.16f, 0.42f, 0.18f, 1.0f}});
+            graph.write(depthPass, depth, FrameGraphUsage::DepthAttachment);
+        }
 
-    const bool graphIncludesDepthPrepass = depthPrepassGraphIncludesPrepass(config_.depthPrepassMode);
-    const bool graphAllowsDepthPrepassOff = config_.depthPrepassMode != DepthPrepassMode::ForceOn;
-    FrameGraph::PassHandle depthPass{};
-    if (graphIncludesDepthPrepass) {
-        depthPass = frameGraph_.addPass({"Depth Prepass", {0.16f, 0.42f, 0.18f, 1.0f}});
-        frameGraph_.write(depthPass, depth, FrameGraphUsage::DepthAttachment);
+        const FrameGraph::PassHandle hdrPass = graph.addPass({"HDR Scene Pass", {0.18f, 0.32f, 0.95f, 1.0f}});
+        if (depthPrepass) {
+            graph.read(hdrPass, depth, FrameGraphUsage::DepthAttachment);
+        } else {
+            graph.write(hdrPass, depth, FrameGraphUsage::DepthAttachment);
+        }
+        graph.write(hdrPass, hdr, FrameGraphUsage::ColorAttachment);
+
+        const FrameGraph::PassHandle tonemapPass = graph.addPass({
+            config_.debugOverlay ? "Tonemap + ImGui Pass" : "Tonemap Pass",
+            {0.95f, 0.58f, 0.16f, 1.0f}});
+        graph.read(tonemapPass, hdr, FrameGraphUsage::SampledImage);
+        graph.write(tonemapPass, swapchain, FrameGraphUsage::ColorAttachment);
+
+        FrameGraph::PassHandle screenshotPass{};
+        if (screenshot) {
+            screenshotPass = graph.addPass({"Screenshot Readback", {0.36f, 0.74f, 0.95f, 1.0f}});
+            graph.read(screenshotPass, swapchain, FrameGraphUsage::TransferSource);
+        }
+        graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
+        graph.compile();
+
+        const bool depthEdgesMatch = depthPrepass
+            ? graph.hasEdge(depthPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment)
+                  && graph.hasEdge(hdrPass, depth, FrameGraphAccess::Read, FrameGraphUsage::DepthAttachment)
+            : graph.hasEdge(hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment);
+        if (!depthEdgesMatch) {
+            throw std::runtime_error("FrameGraph depth variant edges are invalid");
+        }
+        if (screenshot && !graph.hasEdge(screenshotPass, swapchain, FrameGraphAccess::Read, FrameGraphUsage::TransferSource)) {
+            throw std::runtime_error("FrameGraph screenshot variant edge is missing");
+        }
+
+        variant.resources = {depth, hdr, swapchain};
+        variant.passes = {depthPass, hdrPass, tonemapPass, screenshotPass};
+        return variant;
+    };
+
+    const bool depthPrepassAvailable = FrameGraphVariantPolicy::depthVariantAvailable(config_.depthPrepassMode, true);
+    const bool depthPrepassOffAvailable = FrameGraphVariantPolicy::depthVariantAvailable(config_.depthPrepassMode, false);
+    for (FrameGraphVariant& variant : frameGraphVariants_) {
+        variant = {};
+    }
+    const auto cacheVariant = [&](const bool depthPrepass, const bool screenshot) {
+        const std::size_t index = FrameGraphVariantPolicy::index(depthPrepass, screenshot);
+        frameGraphVariants_[index] = makeVariant(depthPrepass, screenshot);
+    };
+    if (depthPrepassAvailable) {
+        cacheVariant(true, false);
+        cacheVariant(true, true);
+    }
+    if (depthPrepassOffAvailable) {
+        cacheVariant(false, false);
+        cacheVariant(false, true);
     }
 
-    const FrameGraph::PassHandle hdrPass = frameGraph_.addPass({"HDR Scene Pass", {0.18f, 0.32f, 0.95f, 1.0f}});
-    if (graphIncludesDepthPrepass) {
-        frameGraph_.read(hdrPass, depth, FrameGraphUsage::DepthAttachment);
-    }
-    if (graphAllowsDepthPrepassOff) {
-        frameGraph_.write(hdrPass, depth, FrameGraphUsage::DepthAttachment);
-    }
-    frameGraph_.write(hdrPass, hdr, FrameGraphUsage::ColorAttachment);
-
-    const FrameGraph::PassHandle tonemapPass = frameGraph_.addPass({config_.debugOverlay ? "Tonemap + ImGui Pass" : "Tonemap Pass", {0.95f, 0.58f, 0.16f, 1.0f}});
-    frameGraph_.read(tonemapPass, hdr, FrameGraphUsage::SampledImage);
-    frameGraph_.write(tonemapPass, swapchain, FrameGraphUsage::ColorAttachment);
-    const FrameGraph::PassHandle screenshotPass = frameGraph_.addPass({"Screenshot Readback", {0.36f, 0.74f, 0.95f, 1.0f}});
-    frameGraph_.read(screenshotPass, swapchain, FrameGraphUsage::TransferSource);
-    frameGraph_.setFinalUsage(swapchain, FrameGraphUsage::Present);
-
-    frameGraph_.compile();
-    const bool depthEdgesMatch = graphIncludesDepthPrepass
-        ? frameGraph_.hasEdge(depthPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment)
-              && frameGraph_.hasEdge(hdrPass, depth, FrameGraphAccess::Read, FrameGraphUsage::DepthAttachment)
-              && (!graphAllowsDepthPrepassOff || frameGraph_.hasEdge(hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment))
-        : frameGraph_.hasEdge(hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment);
-    if (!depthEdgesMatch) {
-        throw std::runtime_error("FrameGraph depth edges do not match configured prepass mode");
-    }
-    if (!frameGraph_.hasEdge(screenshotPass, swapchain, FrameGraphAccess::Read, FrameGraphUsage::TransferSource)) {
-        throw std::runtime_error("FrameGraph screenshot readback edge is missing");
-    }
-    frameGraphResources_ = {depth, hdr, swapchain};
-    frameGraphPasses_ = {depthPass, hdrPass, tonemapPass, screenshotPass};
-    logger()->info("Compiled frame graph (depth prepass {}): {} passes, {} resources, {} edges",
-                   depthPrepassModeName(config_.depthPrepassMode), frameGraph_.passCount(), frameGraph_.resourceCount(), frameGraph_.edgeCount());
+    const std::size_t baseVariantIndex = (depthPrepassAvailable ? 1U : 0U) | 2U;
+    logger()->info("Compiled frame graph variants (depth prepass {}): {} cached topologies, {} resources",
+                   depthPrepassModeName(config_.depthPrepassMode),
+                   (depthPrepassAvailable ? 2U : 0U) + (depthPrepassOffAvailable ? 2U : 0U),
+                   frameGraphVariants_[baseVariantIndex].graph.resourceCount());
 }
 
 void VulkanRenderer::Impl::updateUniforms(FrameResources& frame, const Camera& camera, const Mat4& viewProjection, const double elapsedSeconds) {

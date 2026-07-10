@@ -1,4 +1,5 @@
 #include "renderer/FrameGraph.hpp"
+#include "renderer/FrameGraphTopology.hpp"
 
 #include <cstddef>
 #include <exception>
@@ -52,6 +53,14 @@ int main() {
     using ve::FrameGraph;
     using ve::FrameGraphAccess;
     using ve::FrameGraphUsage;
+    expectEqual("variant index depth-on no screenshot", ve::FrameGraphVariantPolicy::index(true, false), static_cast<std::size_t>(1));
+    expectEqual("variant index depth-off screenshot", ve::FrameGraphVariantPolicy::index(false, true), static_cast<std::size_t>(2));
+    expectEqual("force-on exposes only depth-on topology", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::ForceOn, true), true);
+    expectEqual("force-on rejects depth-off topology", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::ForceOn, false), false);
+    expectEqual("force-off rejects depth-on topology", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::ForceOff, true), false);
+    expectEqual("force-off exposes only depth-off topology", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::ForceOff, false), true);
+    expectEqual("auto exposes both depth topologies", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::Auto, true) &&
+                                                        ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::Auto, false), true);
 
     {
         FrameGraph graph;

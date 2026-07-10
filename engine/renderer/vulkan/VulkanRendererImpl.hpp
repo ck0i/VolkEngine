@@ -3,6 +3,7 @@
 #include "renderer/vulkan/VulkanRenderer.hpp"
 #include "renderer/Geometry.hpp"
 #include "renderer/FrameGraph.hpp"
+#include "renderer/FrameGraphTopology.hpp"
 #include "renderer/GpuResourceRegistry.hpp"
 #include "renderer/SceneRenderer.hpp"
 #include "core/FileSystem.hpp"
@@ -212,9 +213,6 @@ inline FrustumSphereClassification classifySphereAgainstFrustum(const Frustum& f
     return fullyInside ? FrustumSphereClassification::Inside : FrustumSphereClassification::Intersects;
 }
 
-inline bool depthPrepassGraphIncludesPrepass(const DepthPrepassMode mode) {
-    return mode != DepthPrepassMode::ForceOff;
-}
 
 
 inline const char* capabilityName(const bool available) noexcept {
@@ -551,6 +549,11 @@ private:
         FrameGraph::PassHandle tonemap;
         FrameGraph::PassHandle screenshotReadback;
     };
+    struct FrameGraphVariant {
+        FrameGraph graph;
+        FrameGraphResources resources;
+        FrameGraphPasses passes;
+    };
     struct alignas(16) SceneUniforms {
         Mat4 viewProjection;
         Vec4 cameraPositionTime;
@@ -644,7 +647,7 @@ private:
     void recreateSwapchain();
     [[nodiscard]] SceneVisibilityPlan planSceneVisibility(const Camera& camera, const Mat4& projection, const Mat4& viewProjection, const SceneRenderList& renderItems);
     [[nodiscard]] bool resolveDepthPrepassForFrame(const SceneVisibilityPlan& visibility);
-    void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback);
+    void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback, const FrameGraphVariant& graphVariant);
     void restoreFrameFenceAfterSubmitFailure(FrameResources& frame, std::size_t frameIndex, VkResult submitResult);
     [[nodiscard]] VkDeviceSize checkedSceneInstanceBufferSize(std::size_t capacity) const;
     void createFrameInstanceDataBuffer(FrameResources& frame, std::size_t frameIndex, std::size_t capacity);
@@ -815,9 +818,7 @@ private:
     double shaderHotReloadLastCheckSeconds_ = 0.0;
     RenderStats stats_{};
     RenderDeviceInfo deviceInfo_{};
-    FrameGraph frameGraph_{};
-    FrameGraphResources frameGraphResources_{};
-    FrameGraphPasses frameGraphPasses_{};
+    std::array<FrameGraphVariant, 4> frameGraphVariants_{};
     GpuResourceRegistry resourceRegistry_{};
     DemoSceneRenderer sceneRenderer_{};
     struct VisibleSceneWork {

@@ -76,7 +76,13 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const double elapsedSecond
     bool frameCommandsSubmitted = false;
     try {
         const bool useDepthPrepass = resolveDepthPrepassForFrame(visibility);
-        recordCommandBuffer(frame, imageIndex, renderItems, visibility, useDepthPrepass, screenshotThisFrame ? &screenshotReadback_ : nullptr);
+        const std::size_t graphVariantIndex = FrameGraphVariantPolicy::index(useDepthPrepass, screenshotThisFrame);
+        const FrameGraphVariant& graphVariant = frameGraphVariants_[graphVariantIndex];
+        if (!graphVariant.graph.compiled()) {
+            throw std::runtime_error("Requested frame graph topology variant is unavailable");
+        }
+        recordCommandBuffer(frame, imageIndex, renderItems, visibility, useDepthPrepass,
+                            screenshotThisFrame ? &screenshotReadback_ : nullptr, graphVariant);
         cpuRecordEnd = std::chrono::steady_clock::now();
 
         collectPendingUploadWaitSemaphores(pendingUploadWaitSemaphores_);
@@ -187,7 +193,7 @@ bool VulkanRenderer::Impl::resolveDepthPrepassForFrame(const SceneVisibilityPlan
     return false;
 }
 
-void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, const bool useDepthPrepass, const Buffer* screenshotReadback) {
+void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, const bool useDepthPrepass, const Buffer* screenshotReadback, const FrameGraphVariant& graphVariant) {
     static_assert(kSceneMeshBatchOrder.size() == kSceneMeshBatchCount);
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -362,13 +368,12 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
                              batch.mesh->firstIndex, batch.mesh->vertexOffset, batch.firstInstance);
         }
     };
-    if (useDepthPrepass && !depthPrepassGraphIncludesPrepass(config_.depthPrepassMode)) {
+    if (useDepthPrepass && !FrameGraphVariantPolicy::depthVariantAvailable(config_.depthPrepassMode, true)) {
         throw std::runtime_error("Depth prepass selected without a compiled frame-graph pass");
     }
-    const FrameGraph::PassDesc* depthPass = useDepthPrepass ? &frameGraph_.pass(frameGraphPasses_.depthPrepass) : nullptr;
-    const FrameGraph::PassDesc& hdrPass = frameGraph_.pass(frameGraphPasses_.hdrScene);
-    const FrameGraph::PassDesc& tonemapPass = frameGraph_.pass(frameGraphPasses_.tonemap);
-    const FrameGraph::PassDesc& screenshotPass = frameGraph_.pass(frameGraphPasses_.screenshotReadback);
+    const FrameGraph::PassDesc* depthPass = useDepthPrepass ? &graphVariant.graph.pass(graphVariant.passes.depthPrepass) : nullptr;
+    const FrameGraph::PassDesc& hdrPass = graphVariant.graph.pass(graphVariant.passes.hdrScene);
+    const FrameGraph::PassDesc& tonemapPass = graphVariant.graph.pass(graphVariant.passes.tonemap);
     const VkDescriptorSet sceneSet = sceneDescriptorSets_[frameIndex_];
     const VkDeviceSize offset = 0;
     if (sceneDrawCalls > 0U) {
@@ -486,12 +491,13 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     }
 
     if (screenshotReadback != nullptr) {
+        const FrameGraph::PassDesc& screenshotPass = graphVariant.graph.pass(graphVariant.passes.screenshotReadback);
         const DebugLabelScope screenshotLabel{*this, frame.commandBuffer, screenshotPass.name, screenshotPass.debugColor};
         recordScreenshotCopy(frame.commandBuffer, imageIndex, *screenshotReadback);
     }
 
     transitionImageTracked(frame.commandBuffer, swapchainImages_[imageIndex], swapchainStates_[imageIndex],
-                           finalImageSyncStateFor(frameGraph_.finalUsage(frameGraphResources_.swapchain)),
+                           finalImageSyncStateFor(graphVariant.graph.finalUsage(graphVariant.resources.swapchain)),
                            VK_IMAGE_ASPECT_COLOR_BIT);
 
     if (timestampsEnabled_) {

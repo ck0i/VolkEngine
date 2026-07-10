@@ -112,10 +112,10 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 
 ## Current renderer use
 
-The Vulkan backend builds one static graph at startup:
+The Vulkan backend caches separate graph topologies at startup:
 
-- auto/default path: a superset graph containing the depth prepass plus HDR scene depth read/write edges; command recording chooses the runtime path.
-- forced-off path: HDR scene, tonemap/final, screenshot-readback metadata.
-- forced-on path: depth prepass, HDR scene, tonemap/final, screenshot-readback metadata.
+- depth-prepass-on versus depth-prepass-off are constructed separately, so the no-prepass variant omits the HDR depth-read edge instead of filtering only the prepass node.
+- screenshot-enabled versus screenshot-disabled are independent variant bits.
+- `Auto` caches four combinations; `ForceOn` and `ForceOff` cache only the valid depth combinations.
 
-The `Screenshot Readback` pass/edge is always present so graph validation can prove the final swapchain image has a transfer-source path. The runtime image copy, fence wait, and PPM write are still conditional on `VulkanRenderer::requestScreenshot(path)`. Vulkan image barriers and transitions remain renderer responsibilities.
+Each frame selects the matching cached topology using the resolved depth-prepass state and whether a screenshot readback is active. Vulkan barriers and command recording remain explicit backend responsibilities; the selected graph supplies the matching pass descriptors and final-usage metadata.
