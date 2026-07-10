@@ -144,6 +144,7 @@ int main() {
         expectEqual("final transition targets swapchain", barrierPlan.back().resource.index, swapchain.index);
         const FrameGraph::BarrierIntent& finalIntent = graph.finalBarrierIntent(swapchain);
         expectEqual("final barrier query returns present intent", static_cast<int>(finalIntent.usage), static_cast<int>(FrameGraphUsage::Present));
+        expectEqual("final present intent is read-only", static_cast<int>(finalIntent.access), static_cast<int>(FrameGraphAccess::Read));
         expectEqual("final barrier query identifies final transition", finalIntent.finalTransition, true);
         expectEqual("final barrier query has no destination pass", finalIntent.pass.valid(), false);
         const FrameGraph::BarrierIntent& screenshotIntent = graph.barrierIntent(

@@ -35,6 +35,9 @@ VulkanRenderer::Impl::ImageSyncState VulkanRenderer::Impl::imageSyncStateFor(con
             VK_ACCESS_2_TRANSFER_READ_BIT,
         };
     case FrameGraphUsage::Present:
+        if (access != FrameGraphAccess::Read) {
+            throw std::runtime_error("Present frame-graph usage must be read-only");
+        }
         return finalImageSyncStateFor(usage);
     }
     throw std::runtime_error("Unknown frame-graph image usage");

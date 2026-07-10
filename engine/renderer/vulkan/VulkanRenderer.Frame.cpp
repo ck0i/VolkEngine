@@ -557,11 +557,12 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     }
 
     const FrameGraph::BarrierIntent& finalIntent = graphVariant.graph.finalBarrierIntent(graphVariant.resources.swapchain);
-    if (!finalIntent.finalTransition || finalIntent.usage != FrameGraphUsage::Present) {
+    if (!finalIntent.finalTransition || finalIntent.access != FrameGraphAccess::Read ||
+        finalIntent.usage != FrameGraphUsage::Present) {
         throw std::runtime_error("Selected frame graph has an invalid swapchain final barrier intent");
     }
     transitionImageTracked(frame.commandBuffer, swapchainImages_[imageIndex], swapchainStates_[imageIndex],
-                           finalImageSyncStateFor(finalIntent.usage),
+                           imageSyncStateFor(finalIntent.access, finalIntent.usage),
                            VK_IMAGE_ASPECT_COLOR_BIT);
 
     if (timestampsEnabled_) {
