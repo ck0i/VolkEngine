@@ -46,7 +46,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
             logger()->warn("Screenshot requested but swapchain format {} is not BGRA8/RGBA8 UNORM", static_cast<int>(swapchainFormat_));
         } else {
             const VkDeviceSize screenshotBytes = static_cast<VkDeviceSize>(swapchainExtent_.width) * static_cast<VkDeviceSize>(swapchainExtent_.height) * 4U;
-            if (screenshotReadback_.buffer != VK_NULL_HANDLE && screenshotReadback_.size != screenshotBytes) {
+            if (screenshotReadback_.buffer != VK_NULL_HANDLE && screenshotReadback_.size < screenshotBytes) {
                 destroyBuffer(screenshotReadback_);
             }
             if (screenshotReadback_.buffer == VK_NULL_HANDLE) {
@@ -146,14 +146,8 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
     }
     if (screenshotThisFrame) {
         checkVk(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences screenshot capture");
-        try {
-            writeScreenshotPpm(screenshotReadback_, screenshotExtent, screenshotFormat, screenshotPath);
-            logger()->info("Saved screenshot {}", screenshotPath.string());
-            destroyBuffer(screenshotReadback_);
-        } catch (...) {
-            destroyBuffer(screenshotReadback_);
-            throw;
-        }
+        writeScreenshotPpm(screenshotReadback_, screenshotExtent, screenshotFormat, screenshotPath);
+        logger()->info("Saved screenshot {}", screenshotPath.string());
     }
     if (present == VK_ERROR_OUT_OF_DATE_KHR || present == VK_SUBOPTIMAL_KHR || window_.consumeFramebufferResized()) {
         recreateSwapchain();
