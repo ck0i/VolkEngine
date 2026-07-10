@@ -58,7 +58,8 @@ constexpr float kTriangleDegenerateSinEpsilon = 0.000001f;
 constexpr float kTriangleDegenerateSinEpsilonSquared = kTriangleDegenerateSinEpsilon * kTriangleDegenerateSinEpsilon;
 
 [[nodiscard]] bool isNearlyZero(const Vec3 vector) noexcept {
-    return dot(vector, vector) <= kVectorEpsilonSquared;
+    const float lengthSquared = dot(vector, vector);
+    return !std::isfinite(lengthSquared) || lengthSquared <= kVectorEpsilonSquared;
 }
 
 [[nodiscard]] bool isDegenerateTriangle(const Vec3 edge0, const Vec3 edge1, const Vec3 faceNormal) noexcept {
@@ -68,7 +69,7 @@ constexpr float kTriangleDegenerateSinEpsilonSquared = kTriangleDegenerateSinEps
 
 [[nodiscard]] Vec3 normalizeOr(const Vec3 vector, const Vec3 fallback) noexcept {
     const float lengthSquared = dot(vector, vector);
-    if (lengthSquared <= kVectorEpsilonSquared) {
+    if (!std::isfinite(lengthSquared) || lengthSquared <= kVectorEpsilonSquared) {
         return fallback;
     }
     return vector * (1.0f / std::sqrt(lengthSquared));

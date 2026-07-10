@@ -683,6 +683,17 @@ int main() {
             (void)ve::loadObjMesh(nonFiniteNormalFixture);
         });
 
+        const auto overflowingNormalFixture = addFixture(
+            "geometry_cpu_overflowing_normal",
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 3.4028235e38 3.4028235e38 3.4028235e38\nf 1//1 2//1 3//1\n");
+        ve::MeshData overflowingNormalMesh;
+        expectNoThrow("loadObjMesh falls back from finite but unnormalizable normal", [&] {
+            overflowingNormalMesh = ve::loadObjMesh(overflowingNormalFixture);
+        });
+        for (const ve::Vertex& vertex : overflowingNormalMesh.vertices) {
+            expectTangentBasisContract("finite normal fallback keeps tangent basis finite", vertex.tangent, vertex.normal);
+        }
+
         const auto emptyFixture = addFixture("geometry_cpu_empty", "# no geometry here\n# only comments\n");
         expectThrowsRuntimeError("loadObjMesh rejects OBJ without faces", [&] {
             (void)ve::loadObjMesh(emptyFixture);
