@@ -59,8 +59,8 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 
 1. `Clock::tick()` returns elapsed and delta time.
 2. `Window::updateCamera()` applies keyboard/mouse input to `Camera`.
-3. `Application` updates its demo producer and builds a reusable `SceneRenderList`; world-backed producers can use `WorldSceneExtractor` to create the same renderer-facing snapshot.
-4. `Application::run()` calls `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)`; the renderer borrows the list only for that call, while an extractor-owned list remains valid until its next build.
+3. `Application::run(options)` updates the demo producer; the world overload accepts a caller-prepared `World`, or invokes its same-thread update callback after clamped simulation timing and camera input.
+4. Both run paths extract/build a `SceneRenderList` and call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows it synchronously, and the world extractor overwrites its snapshot on the next build.
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
 6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.
 7. `RenderStats` and `RenderDeviceInfo` expose what path was used and how the last submitted frame behaved.

@@ -18,6 +18,7 @@ constexpr std::size_t kMaxSandboxSceneItems = 4'194'304;
 struct SandboxArgs {
     ve::EngineConfig config{};
     ve::RunOptions run{};
+    bool worldScene = false;
     bool help = false;
 };
 
@@ -77,6 +78,28 @@ void validateConfig(const ve::EngineConfig& config) {
     }
 }
 
+void populateWorldScene(ve::World& world) {
+    const ve::World::Entity cube = world.createEntity();
+    auto& transform = world.emplace<ve::WorldSceneTransform>(cube);
+    transform.model = ve::translate({0.0f, 0.6f, -2.2f}) * ve::scale({0.75f, 0.75f, 0.75f});
+
+    auto& renderable = world.emplace<ve::WorldSceneRenderable>(cube);
+    renderable.mesh = ve::SceneMeshId::Cube;
+    renderable.material.albedoRoughness = {0.75f, 0.18f, 0.08f, 0.55f};
+    renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
+}
+
+void updateWorldScene(ve::World& world, const double elapsedSeconds, const double) {
+    world.each<ve::WorldSceneTransform, ve::WorldSceneRenderable>(
+        [elapsedSeconds](const ve::World::Entity, ve::WorldSceneTransform& transform, const ve::WorldSceneRenderable& renderable) {
+            if (renderable.mesh == ve::SceneMeshId::Cube) {
+                transform.model = ve::translate({0.0f, 0.6f, -2.2f}) *
+                                  ve::rotateY(static_cast<float>(elapsedSeconds * 0.55)) *
+                                  ve::scale({0.75f, 0.75f, 0.75f});
+            }
+        });
+}
+
 SandboxArgs parseArguments(int argc, char** argv) {
     SandboxArgs args{};
     for (int i = 1; i < argc; ++i) {
@@ -85,6 +108,8 @@ SandboxArgs parseArguments(int argc, char** argv) {
             args.help = true;
         } else if (arg == "--resize-smoke") {
             args.run.resizeSmoke = true;
+        } else if (arg == "--world-scene") {
+            args.worldScene = true;
         } else if (arg == "--frames") {
             args.run.maxFrames = parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--width") {
@@ -139,7 +164,7 @@ SandboxArgs parseArguments(int argc, char** argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--resize-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps|--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
+    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--resize-smoke] [--screenshot FILE.ppm] [--hot-reload-shaders] [--grid-rows N] [--grid-columns N] [--grid-tile-rows N] [--grid-tile-columns N] [--auto-depth-prepass|--depth-prepass|--no-depth-prepass] [--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] [--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] [--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
 }
 
 } // namespace
@@ -154,7 +179,12 @@ int main(int argc, char** argv) {
         }
         validateConfig(args.config);
         ve::Application app{args.config};
-        return app.run(args.run);
+        if (!args.worldScene) {
+            return app.run(args.run);
+        }
+        ve::World world;
+        populateWorldScene(world);
+        return app.run(world, &updateWorldScene, args.run);
     } catch (const std::exception& e) {
         ve::logger()->critical("Fatal error: {}", e.what());
         std::cerr << "Fatal error: " << e.what() << '\n';

@@ -25,7 +25,8 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
 
 
 Application::Application(EngineConfig config)
-    : config_(std::move(config)), glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{}, renderer_(window_, config_), sceneRenderer_{}, clock_{} {
+    : config_(std::move(config)), glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{}, renderer_(window_, config_),
+      sceneRenderer_{}, worldSceneExtractor_{}, clock_{} {
     const VkExtent2D extent = window_.framebufferExtent();
     if (extent.width > 0U && extent.height > 0U) {
         camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
@@ -33,6 +34,18 @@ Application::Application(EngineConfig config)
     sceneRenderer_.setImportedModelBounds(renderer_.meshBounds(SceneMeshId::ImportedModel));
 }
 int Application::run(const RunOptions& options) {
+    return runInternal(nullptr, nullptr, options);
+}
+
+int Application::run(World& world, const RunOptions& options) {
+    return runInternal(&world, nullptr, options);
+}
+
+int Application::run(World& world, const WorldUpdateCallback update, const RunOptions& options) {
+    return runInternal(&world, update, options);
+}
+
+int Application::runInternal(World* world, const WorldUpdateCallback update, const RunOptions& options) {
     logger()->info("Entering main loop");
     double titleUpdateSeconds = 0.0;
     std::uint64_t titleUpdateFrames = 0;
@@ -50,11 +63,15 @@ int Application::run(const RunOptions& options) {
 
         const double previousSimulationElapsedSeconds = simulationElapsedSeconds_;
         simulationElapsedSeconds_ = advanceSimulationSeconds(simulationElapsedSeconds_, timing.deltaSeconds, 0.05);
-        const float simulationDelta = static_cast<float>(simulationElapsedSeconds_ - previousSimulationElapsedSeconds);
-        window_.updateCamera(camera_, simulationDelta);
+        const double simulationDelta = simulationElapsedSeconds_ - previousSimulationElapsedSeconds;
+        window_.updateCamera(camera_, static_cast<float>(simulationDelta));
         const VkExtent2D extent = window_.framebufferExtent();
         if (extent.width > 0U && extent.height > 0U) {
             camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
+        }
+
+        if (world != nullptr && update != nullptr) {
+            update(*world, simulationElapsedSeconds_, simulationDelta);
         }
 
         if (!screenshotRequested && !options.screenshotPath.empty()) {
@@ -63,12 +80,13 @@ int Application::run(const RunOptions& options) {
         }
 
         const auto sceneBuildStart = std::chrono::steady_clock::now();
-        const SceneRenderList& renderItems = sceneRenderer_.build(
-            simulationElapsedSeconds_,
-            config_.materialGridRows,
-            config_.materialGridColumns,
-            config_.materialGridTileRows,
-            config_.materialGridTileColumns);
+        const SceneRenderList& renderItems = world != nullptr
+            ? worldSceneExtractor_.build(*world)
+            : sceneRenderer_.build(simulationElapsedSeconds_,
+                                   config_.materialGridRows,
+                                   config_.materialGridColumns,
+                                   config_.materialGridTileRows,
+                                   config_.materialGridTileColumns);
         const double sceneBuildMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - sceneBuildStart).count();
         renderer_.draw(camera_, renderItems, sceneBuildMs, timing.elapsedSeconds, timing.deltaSeconds * 1000.0);
