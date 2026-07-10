@@ -84,6 +84,14 @@ int main() {
         expectEqual("mode-like DAG with prepass screenshot read is not sampled image", graph.hasEdge(screenshotPass, swapchain, FrameGraphAccess::Read, FrameGraphUsage::SampledImage), false);
         expectEqual("mode-like DAG with prepass final usage is marked", graph.hasFinalUsage(swapchain), true);
         expectEqual("mode-like DAG with prepass has final usage", static_cast<int>(graph.finalUsage(swapchain)), static_cast<int>(FrameGraphUsage::Present));
+        expectEqual("compiled execution plan has every pass", graph.executionOrder().size(), static_cast<std::size_t>(4));
+        expectEqual("execution plan starts with depth dependency", graph.executionOrder()[0].index, depthPass.index);
+        expectEqual("execution plan orders hdr after depth", graph.executionOrder()[1].index, hdrPass.index);
+        expectEqual("execution plan orders tonemap after hdr", graph.executionOrder()[2].index, tonemapPass.index);
+        expectEqual("execution plan ends with screenshot readback", graph.executionOrder()[3].index, screenshotPass.index);
+        graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
+        expectEqual("graph mutation invalidates execution plan", graph.compiled(), false);
+        expectEqual("invalidated execution plan is empty", graph.executionOrder().empty(), true);
     }
 
     {
@@ -108,6 +116,7 @@ int main() {
         });
         expectEqual("mode-like DAG without prepass compiles", graph.compiled(), true);
         expectEqual("mode-like DAG without prepass edge count", graph.edgeCount(), static_cast<std::size_t>(5));
+
         expectEqual("mode-like DAG without prepass pass count", graph.passCount(), static_cast<std::size_t>(3));
         expectEqual("mode-like DAG without prepass hdr writes depth", graph.hasEdge(hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment), true);
         expectEqual("mode-like DAG without prepass hdr does not read depth", graph.hasEdge(hdrPass, depth, FrameGraphAccess::Read, FrameGraphUsage::DepthAttachment), false);
@@ -115,6 +124,20 @@ int main() {
         expectEqual("mode-like DAG without prepass screenshot read is not sampled image", graph.hasEdge(screenshotPass, swapchain, FrameGraphAccess::Read, FrameGraphUsage::SampledImage), false);
         expectEqual("mode-like DAG without prepass final usage is marked", graph.hasFinalUsage(swapchain), true);
         expectEqual("mode-like DAG without prepass has final usage", static_cast<int>(graph.finalUsage(swapchain)), static_cast<int>(FrameGraphUsage::Present));
+    }
+    {
+        FrameGraph graph;
+        const auto image = graph.addResource({"Imported Image", ve::FrameGraphResourceKind::Image, true});
+        const auto readPass = graph.addPass({"Read"});
+        const auto firstWrite = graph.addPass({"First Write"});
+        const auto secondWrite = graph.addPass({"Second Write"});
+        graph.read(readPass, image, FrameGraphUsage::SampledImage);
+        graph.write(firstWrite, image, FrameGraphUsage::ColorAttachment);
+        graph.write(secondWrite, image, FrameGraphUsage::ColorAttachment);
+        graph.compile();
+        expectEqual("hazard plan retains read-before-write WAR order", graph.executionOrder()[0].index, readPass.index);
+        expectEqual("hazard plan retains first WAW writer", graph.executionOrder()[1].index, firstWrite.index);
+        expectEqual("hazard plan retains second WAW writer", graph.executionOrder()[2].index, secondWrite.index);
     }
 
     {

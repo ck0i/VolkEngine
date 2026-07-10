@@ -1,9 +1,12 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <functional>
+#include <queue>
 #include <stdexcept>
 #include <vector>
 
@@ -68,6 +71,7 @@ public:
         const ResourceHandle handle{static_cast<Index>(resources_.size())};
         resources_.push_back(desc);
         compiled_ = false;
+        executionOrder_.clear();
         return handle;
     }
 
@@ -78,6 +82,7 @@ public:
         const PassHandle handle{static_cast<Index>(passes_.size())};
         passes_.push_back(desc);
         compiled_ = false;
+        executionOrder_.clear();
         return handle;
     }
 
@@ -94,6 +99,7 @@ public:
         resources_[static_cast<std::size_t>(resource.index)].hasFinalUsage = true;
         resources_[static_cast<std::size_t>(resource.index)].finalUsage = usage;
         compiled_ = false;
+        executionOrder_.clear();
     }
 
     [[nodiscard]] bool hasEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) const {
@@ -148,6 +154,71 @@ public:
             }
         }
 
+        const std::size_t passCount = passes_.size();
+        std::vector<std::vector<Index>> dependencies(passCount);
+        std::vector<Index> lastWriters(resources_.size(), kInvalidIndex);
+        auto addDependency = [&](const Index from, const Index to) {
+            if (from == kInvalidIndex || from == to) {
+                return;
+            }
+            std::vector<Index>& outgoing = dependencies[from];
+            if (std::find(outgoing.begin(), outgoing.end(), to) == outgoing.end()) {
+                outgoing.push_back(to);
+            }
+        };
+
+        for (std::size_t resourceIndex = 0; resourceIndex < resources_.size(); ++resourceIndex) {
+            std::vector<Index> readers;
+            for (std::size_t passIndex = 0; passIndex < passCount; ++passIndex) {
+                const Index pass = static_cast<Index>(passIndex);
+                for (const Edge& edge : edges_) {
+                    if (edge.resource.index != static_cast<Index>(resourceIndex) || edge.pass.index != pass) {
+                        continue;
+                    }
+                    if (edge.access == FrameGraphAccess::Read) {
+                        addDependency(lastWriters[resourceIndex], pass);
+                        readers.push_back(pass);
+                    } else {
+                        addDependency(lastWriters[resourceIndex], pass);
+                        for (const Index reader : readers) {
+                            addDependency(reader, pass);
+                        }
+                        readers.clear();
+                        lastWriters[resourceIndex] = pass;
+                    }
+                }
+            }
+        }
+
+        std::vector<Index> indegree(passCount, 0);
+        for (const std::vector<Index>& outgoing : dependencies) {
+            for (const Index target : outgoing) {
+                ++indegree[target];
+            }
+        }
+        std::priority_queue<Index, std::vector<Index>, std::greater<Index>> ready;
+        for (Index pass = 0; pass < static_cast<Index>(passCount); ++pass) {
+            if (indegree[pass] == 0U) {
+                ready.push(pass);
+            }
+        }
+
+        executionOrder_.clear();
+        executionOrder_.reserve(passCount);
+        while (!ready.empty()) {
+            const Index pass = ready.top();
+            ready.pop();
+            executionOrder_.push_back(PassHandle{pass});
+            for (const Index target : dependencies[pass]) {
+                if (--indegree[target] == 0U) {
+                    ready.push(target);
+                }
+            }
+        }
+        if (executionOrder_.size() != passCount) {
+            executionOrder_.clear();
+            throw std::runtime_error("FrameGraph contains a cyclic pass dependency");
+        }
         compiled_ = true;
     }
 
@@ -165,6 +236,7 @@ public:
     [[nodiscard]] std::size_t resourceCount() const { return resources_.size(); }
     [[nodiscard]] std::size_t edgeCount() const { return edges_.size(); }
     [[nodiscard]] bool compiled() const { return compiled_; }
+    [[nodiscard]] const std::vector<PassHandle>& executionOrder() const { return executionOrder_; }
 
 private:
     void addEdge(PassHandle pass, ResourceHandle resource, FrameGraphAccess access, FrameGraphUsage usage) {
@@ -180,6 +252,7 @@ private:
         }
         edges_.push_back(Edge{pass, resource, access, usage});
         compiled_ = false;
+        executionOrder_.clear();
     }
 
     void validatePass(PassHandle handle) const {
@@ -197,6 +270,7 @@ private:
     std::vector<ResourceDesc> resources_;
     std::vector<PassDesc> passes_;
     std::vector<Edge> edges_;
+    std::vector<PassHandle> executionOrder_;
     bool compiled_ = false;
 };
 

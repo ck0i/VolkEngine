@@ -2,7 +2,7 @@
 
 Header: `engine/renderer/FrameGraph.hpp`.
 
-`FrameGraph` is a backend-agnostic metadata and validation layer. It describes pass/resource intent and catches simple ordering mistakes; it does not allocate transient resources or emit Vulkan barriers.
+`FrameGraph` is a backend-agnostic metadata, hazard-validation, and scheduling layer. It describes pass/resource intent, catches ordering mistakes, and compiles a stable execution plan; it does not allocate transient resources or emit Vulkan barriers.
 
 Backend integration points:
 
@@ -91,6 +91,8 @@ Adding the same `(pass, resource, access, usage)` edge twice throws immediately.
 - every pass has at least one resource edge.
 - non-imported resources are written before any pass reads them.
 
+
+Compilation also derives RAW, WAR, and WAW hazard dependencies and exposes a stable topological pass order. The declaration index breaks ties, so independent passes remain deterministic.
 It intentionally does not reject all multi-pass writes or resource reuse; future render-graph work needs those patterns.
 
 ## Querying
@@ -104,6 +106,7 @@ It intentionally does not reject all multi-pass writes or resource reuse; future
 - `resourceCount()`
 - `edgeCount()`
 - `compiled()`
+- `executionOrder() -> const std::vector<PassHandle>&` — compiled stable pass order; empty while invalidated.
 
 ## Current renderer use
 
