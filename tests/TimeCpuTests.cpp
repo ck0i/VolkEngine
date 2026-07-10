@@ -18,6 +18,13 @@ void expectNear(const std::string_view context, const double actual, const doubl
     }
 }
 
+void expectTrue(const std::string_view context, const bool value) {
+    if (!value) {
+        std::cerr << "[FAILED] " << context << '\n';
+        ++gFailureCount;
+    }
+}
+
 template <typename F>
 void expectThrowsRuntimeError(const std::string_view context, F&& callable) {
     try {
@@ -76,6 +83,12 @@ int main() {
     expectNear("hitch delta is capped", ve::clampDeltaSeconds(0.5, 0.05), 0.05);
     expectNear("negative delta is rejected", ve::clampDeltaSeconds(-0.25, 0.05), 0.0);
     expectNear("non-positive maximum disables simulation", ve::clampDeltaSeconds(0.05, 0.0), 0.0);
+    expectNear("infinite delta is rejected",
+               ve::clampDeltaSeconds(std::numeric_limits<double>::infinity(), 0.05),
+               0.0);
+    expectNear("infinite maximum disables simulation",
+               ve::clampDeltaSeconds(0.05, std::numeric_limits<double>::infinity()),
+               0.0);
     const double simulationAfterNormal = ve::advanceSimulationSeconds(0.0, 0.016, 0.05);
     expectNear("simulation time advances by normal delta", simulationAfterNormal, 0.016);
     expectNear("simulation hitch is capped", ve::advanceSimulationSeconds(simulationAfterNormal, 0.5, 0.05), 0.066);
@@ -83,6 +96,21 @@ int main() {
     expectNear("simulation NaN delta does not advance",
                ve::advanceSimulationSeconds(simulationAfterNormal, std::numeric_limits<double>::quiet_NaN(), 0.05),
                simulationAfterNormal);
+    const double saturatedSimulation = ve::advanceSimulationSeconds(
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::max());
+    expectTrue("finite simulation overflow saturates",
+               std::isfinite(saturatedSimulation) &&
+               saturatedSimulation == std::numeric_limits<double>::max());
+    expectNear("infinite simulation step does not advance",
+               ve::advanceSimulationSeconds(10.0,
+                                            std::numeric_limits<double>::infinity(),
+                                            std::numeric_limits<double>::infinity()),
+               10.0);
+    expectNear("non-finite simulation state resets safely",
+               ve::advanceSimulationSeconds(std::numeric_limits<double>::quiet_NaN(), 0.016, 0.05),
+               0.0);
 
     if (gFailureCount == 0) {
         return 0;

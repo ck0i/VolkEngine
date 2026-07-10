@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 
 namespace ve {
 
@@ -12,7 +13,9 @@ struct FrameTiming {
 };
 
 [[nodiscard]] constexpr double clampDeltaSeconds(const double deltaSeconds, const double maximumSeconds) noexcept {
-    if (!(maximumSeconds > 0.0) || !(deltaSeconds > 0.0)) {
+    constexpr double kMaximumFiniteSeconds = std::numeric_limits<double>::max();
+    if (!(maximumSeconds > 0.0) || maximumSeconds > kMaximumFiniteSeconds ||
+        !(deltaSeconds > 0.0) || deltaSeconds > kMaximumFiniteSeconds) {
         return 0.0;
     }
     return deltaSeconds < maximumSeconds ? deltaSeconds : maximumSeconds;
@@ -20,7 +23,18 @@ struct FrameTiming {
 [[nodiscard]] constexpr double advanceSimulationSeconds(const double currentSeconds,
                                                          const double deltaSeconds,
                                                          const double maximumDeltaSeconds) noexcept {
-    return currentSeconds + clampDeltaSeconds(deltaSeconds, maximumDeltaSeconds);
+    constexpr double kMaximumFiniteSeconds = std::numeric_limits<double>::max();
+    if (currentSeconds != currentSeconds ||
+        currentSeconds < -kMaximumFiniteSeconds ||
+        currentSeconds > kMaximumFiniteSeconds) {
+        return 0.0;
+    }
+
+    const double stepSeconds = clampDeltaSeconds(deltaSeconds, maximumDeltaSeconds);
+    if (currentSeconds > kMaximumFiniteSeconds - stepSeconds) {
+        return kMaximumFiniteSeconds;
+    }
+    return currentSeconds + stepSeconds;
 }
 
 class Clock {
