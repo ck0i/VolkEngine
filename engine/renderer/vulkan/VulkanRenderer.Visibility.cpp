@@ -90,7 +90,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
     const auto cullItem = [&](const std::size_t itemIndex) {
         const SceneRenderItem& item = renderItems[itemIndex];
         if (classifySphereAgainstFrustum(frustum, item.boundsCenter, item.boundsRadius) == FrustumSphereClassification::Outside) {
-            ++plan.culledDrawCalls;
+            ++plan.culledItemCount;
             return;
         }
         acceptVisibleItem(itemIndex, item);
@@ -113,7 +113,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
             plan.gridWorkEnd = plan.gridWorkBegin;
             plan.visibleItemCount += gridVisibilityCache_.visibleItemCount;
             plan.sceneTriangleCount += gridVisibilityCache_.sceneTriangleCount;
-            plan.culledDrawCalls += gridVisibilityCache_.culledDrawCalls;
+            plan.culledItemCount += gridVisibilityCache_.culledItemCount;
             plan.gridTileCount += gridVisibilityCache_.gridTileCount;
             plan.gridTilesAccepted += gridVisibilityCache_.gridTilesAccepted;
             plan.gridTilesCulled += gridVisibilityCache_.gridTilesCulled;
@@ -127,7 +127,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
             plan.gridWorkBegin = visibleSceneWork.size();
             const std::uint32_t gridVisibleBegin = plan.visibleItemCount;
             const std::uint64_t gridTriangleBegin = plan.sceneTriangleCount;
-            const std::uint32_t gridCulledBegin = plan.culledDrawCalls;
+            const std::uint32_t gridCulledBegin = plan.culledItemCount;
             const std::uint32_t gridTileBegin = plan.gridTileCount;
             const std::uint32_t gridAcceptedBegin = plan.gridTilesAccepted;
             const std::uint32_t gridCulledTileBegin = plan.gridTilesCulled;
@@ -146,7 +146,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
                 ++plan.gridTileCount;
                 const FrustumSphereClassification tileVisibility = classifySphereAgainstFrustum(frustum, tile.boundsCenter, tile.boundsRadius);
                 if (tileVisibility == FrustumSphereClassification::Outside) {
-                    plan.culledDrawCalls += static_cast<std::uint32_t>(tile.itemCount);
+                    plan.culledItemCount += static_cast<std::uint32_t>(tile.itemCount);
                     ++plan.gridTilesCulled;
                     continue;
                 }
@@ -177,7 +177,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
             }
             gridVisibilityCache_.visibleItemCount = plan.visibleItemCount - gridVisibleBegin;
             gridVisibilityCache_.sceneTriangleCount = plan.sceneTriangleCount - gridTriangleBegin;
-            gridVisibilityCache_.culledDrawCalls = plan.culledDrawCalls - gridCulledBegin;
+            gridVisibilityCache_.culledItemCount = plan.culledItemCount - gridCulledBegin;
             gridVisibilityCache_.gridTileCount = plan.gridTileCount - gridTileBegin;
             gridVisibilityCache_.gridTilesAccepted = plan.gridTilesAccepted - gridAcceptedBegin;
             gridVisibilityCache_.gridTilesCulled = plan.gridTilesCulled - gridCulledTileBegin;

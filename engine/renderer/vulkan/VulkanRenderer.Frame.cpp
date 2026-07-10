@@ -587,7 +587,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     stats_.meshBatchCount = sceneDrawCalls;
     const std::uint32_t sceneDrawCommandCount = (indirectSceneDrawsEnabled_ && sceneDrawCalls > 0U) ? 1U : sceneDrawCalls;
     stats_.drawCalls = (sceneDrawCommandCount * scenePassCount) + 1U;
-    stats_.culledDrawCalls = visibility.culledDrawCalls;
+    stats_.culledItemCount = visibility.culledItemCount;
     stats_.gridTileCount = visibility.gridTileCount;
     stats_.gridTilesCulled = visibility.gridTilesCulled;
     stats_.gridTilesAccepted = visibility.gridTilesAccepted;

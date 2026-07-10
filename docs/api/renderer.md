@@ -85,7 +85,7 @@ Submission/scene fields:
   - This reflects the current private instance-record layout; it includes model, normal-matrix, and material data.
 - `meshBatchCount`
 - `drawCalls`
-- `culledDrawCalls`
+- `culledItemCount`: rejected scene items/instances; this is distinct from `drawCalls`, which counts submitted mesh commands.
 - `indirectSceneDraws`
 - `sceneTriangleCount`: visible scene geometry before multiplying by depth/HDR scene passes.
 - `triangleCount`: submitted triangle work, preserving scene-pass multiplication and the fullscreen tonemap triangle.

@@ -156,8 +156,8 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
         } else {
             ImGui::TextUnformatted("GPU frame: pending/unavailable");
         }
-        ImGui::Text("Draws: %u  Culled: %u  Grid tiles: %u/%u accepted, %u culled, %u intersected",
-                    stats_.drawCalls, stats_.culledDrawCalls, stats_.gridTilesAccepted, stats_.gridTileCount,
+        ImGui::Text("Draws: %u  Culled items: %u  Grid tiles: %u/%u accepted, %u culled, %u intersected",
+                    stats_.drawCalls, stats_.culledItemCount, stats_.gridTilesAccepted, stats_.gridTileCount,
                     stats_.gridTilesCulled, stats_.gridTilesIntersected);
         ImGui::Text("Grid visibility cache: %s  Work records: %u",
                     stats_.gridVisibilityCacheHit ? "hit" : "miss", stats_.gridVisibilityWorkItems);

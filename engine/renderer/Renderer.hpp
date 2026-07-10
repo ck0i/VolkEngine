@@ -62,7 +62,7 @@ struct RenderStats {
     double sceneInstanceBufferMiB = 0.0;
     unsigned meshBatchCount = 0;
     unsigned drawCalls = 0;
-    unsigned culledDrawCalls = 0;
+    unsigned culledItemCount = 0;
     unsigned gridTileCount = 0;
     unsigned gridTilesCulled = 0;
     unsigned gridTilesAccepted = 0;

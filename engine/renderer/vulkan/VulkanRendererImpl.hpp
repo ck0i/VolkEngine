@@ -841,7 +841,7 @@ private:
         std::uint64_t sceneTriangleCount = 0;
         Vec3 cameraPosition{};
         Vec3 cameraForward{1.0f, 0.0f, 0.0f};
-        std::uint32_t culledDrawCalls = 0;
+        std::uint32_t culledItemCount = 0;
         std::uint32_t gridTileCount = 0;
         std::uint32_t gridTilesCulled = 0;
         std::uint32_t gridTilesAccepted = 0;
@@ -866,7 +866,7 @@ private:
         std::array<std::uint32_t, kSceneMeshBatchCount> meshInstanceCounts{};
         std::uint32_t visibleItemCount = 0;
         std::uint64_t sceneTriangleCount = 0;
-        std::uint32_t culledDrawCalls = 0;
+        std::uint32_t culledItemCount = 0;
         std::uint32_t gridTileCount = 0;
         std::uint32_t gridTilesAccepted = 0;
         std::uint32_t gridTilesCulled = 0;
