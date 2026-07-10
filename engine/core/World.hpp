@@ -74,11 +74,19 @@ public:
         return true;
     }
 
-    void clear() noexcept {
+    void clear() {
+        freeIndices_.reserve(slots_.size());
         pools_.clear();
-        slots_.clear();
-        freeIndices_.clear();
         aliveCount_ = 0;
+        freeIndices_.clear();
+        for (Index index = 0; index < static_cast<Index>(slots_.size()); ++index) {
+            Slot& slot = slots_[index];
+            slot.alive = false;
+            if (slot.generation != std::numeric_limits<std::uint32_t>::max()) {
+                ++slot.generation;
+                freeIndices_.push_back(index);
+            }
+        }
     }
 
     [[nodiscard]] bool alive(const Entity entity) const noexcept {

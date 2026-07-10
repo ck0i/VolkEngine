@@ -73,6 +73,14 @@ int main() {
     world.emplace<Position>(recycled, 30);
     expectTrue("recycled entity has independent component storage", world.tryGet<Position>(recycled) != nullptr && world.tryGet<Position>(recycled)->value == 30);
 
+    {
+        ve::World clearWorld;
+        const ve::World::Entity preClear = clearWorld.createEntity();
+        clearWorld.clear();
+        expectTrue("clear immediately invalidates the old handle", !clearWorld.alive(preClear));
+        const ve::World::Entity postClear = clearWorld.createEntity();
+        expectTrue("clear prevents handle resurrection after slot reuse", !clearWorld.alive(preClear) && postClear.generation != preClear.generation);
+    }
     ve::World movedWorld = std::move(world);
     expectTrue("moving a world preserves entity handles", movedWorld.alive(recycled) && movedWorld.tryGet<Position>(recycled)->value == 30);
     movedWorld.clear();

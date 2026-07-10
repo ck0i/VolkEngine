@@ -78,7 +78,7 @@ Samples must be nondecreasing. A timestamp earlier than the previous sample thro
 
 ## `World`
 
-`World` is the runtime's generational entity/component registry. `createEntity()` returns an opaque `{index, generation}` handle; destroying an entity invalidates that handle before its slot can be recycled. Component pools use sparse lookup plus dense storage for constant-time access and cache-friendly iteration. Removing a component uses swap-and-pop, so component references may be invalidated by structural changes; entity handles remain stable for the entity lifetime. Moving a `World` preserves live entity handles.
+`World` is the runtime's generational entity/component registry. `createEntity()` returns an opaque `{index, generation}` handle; destroying an entity invalidates that handle before its slot can be recycled, and `clear()` invalidates every handle issued before the clear. Component pools use sparse lookup plus dense storage for constant-time access and cache-friendly iteration. Removing a component uses swap-and-pop, so component references may be invalidated by structural changes; entity handles remain stable for the entity lifetime. Moving a `World` preserves live entity handles.
 
 - `emplace<T>(entity, args...)` constructs one component of type `T`; duplicate insertion throws.
 - `tryGet<T>(entity)`, `contains<T>(entity)`, `remove<T>(entity)`, and `componentCount<T>()` provide component access.
