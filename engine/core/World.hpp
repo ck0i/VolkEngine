@@ -125,6 +125,31 @@ public:
         return aliveCount_;
     }
 
+    void reserveEntities(const std::size_t capacity) {
+        if (capacity > static_cast<std::size_t>(kInvalidIndex)) {
+            throw std::invalid_argument("World entity capacity exceeds index range");
+        }
+        slots_.reserve(capacity);
+        freeIndices_.reserve(capacity);
+    }
+
+    [[nodiscard]] std::size_t entityCapacity() const noexcept {
+        return slots_.capacity();
+    }
+
+    template <typename T>
+    void reserveComponents(const std::size_t capacity) {
+        static_assert(detail::validWorldComponentType<T>, "World components must be object types");
+        getOrCreatePool<T>().reserve(capacity);
+    }
+
+    template <typename T>
+    [[nodiscard]] std::size_t componentCapacity() const noexcept {
+        static_assert(detail::validWorldComponentType<T>, "World components must be object types");
+        const ComponentPool<T>* pool = findPool<T>();
+        return pool == nullptr ? 0U : pool->capacity();
+    }
+
     template <typename T, typename... Args>
     T& emplace(const Entity entity, Args&&... args) {
         static_assert(!std::is_const_v<T> && !std::is_reference_v<T>, "World components must be object types");
@@ -293,6 +318,15 @@ private:
 
         [[nodiscard]] std::size_t size() const noexcept {
             return components_.size();
+        }
+
+        void reserve(const std::size_t capacity) {
+            components_.reserve(capacity);
+            entities_.reserve(capacity);
+        }
+
+        [[nodiscard]] std::size_t capacity() const noexcept {
+            return components_.capacity();
         }
 
         template <typename Function>

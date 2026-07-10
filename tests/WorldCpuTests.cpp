@@ -58,6 +58,26 @@ int main() {
     expectTrue("new entities are alive", world.alive(first) && world.alive(second));
     expectTrue("entity count tracks creation", world.entityCount() == 2U);
 
+    {
+        ve::World reservedWorld;
+        reservedWorld.reserveEntities(32U);
+        reservedWorld.reserveComponents<Position>(16U);
+        expectTrue("entity reservation grows slot capacity", reservedWorld.entityCapacity() >= 32U);
+        expectTrue("component reservation grows dense capacity", reservedWorld.componentCapacity<Position>() >= 16U);
+        const ve::World::Entity reservedEntity = reservedWorld.createEntity();
+        reservedWorld.emplace<Position>(reservedEntity, 42);
+        expectTrue("reserved component storage remains usable", reservedWorld.tryGet<Position>(reservedEntity)->value == 42);
+        reservedWorld.reserveEntities(1U);
+        reservedWorld.reserveComponents<Position>(1U);
+        expectTrue("smaller reservations never shrink capacity", reservedWorld.entityCapacity() >= 32U &&
+                                                                    reservedWorld.componentCapacity<Position>() >= 16U);
+        if constexpr (sizeof(std::size_t) > sizeof(ve::World::Index)) {
+            expectThrows("entity reservation rejects index overflow", [&] {
+                reservedWorld.reserveEntities(static_cast<std::size_t>(ve::World::kInvalidIndex) + 1U);
+            });
+        }
+    }
+
     world.emplace<Position>(first, 10);
     world.emplace<Health>(first, 80);
     world.emplace<Armor>(first, 7);
