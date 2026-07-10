@@ -1,6 +1,7 @@
 #include "core/Config.hpp"
 
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <string_view>
@@ -32,6 +33,17 @@ int main() {
     expectFalse("negative exposure is invalid", ve::isValidExposure(-1.0f));
     expectFalse("infinite exposure is invalid", ve::isValidExposure(std::numeric_limits<float>::infinity()));
     expectFalse("NaN exposure is invalid", ve::isValidExposure(std::nanf("")));
+    const ve::EngineConfig defaults{};
+    expectTrue("default albedo texture is asset-relative", defaults.groundAlbedoTexture == "textures/ground_albedo.png");
+    expectTrue("default normal texture is asset-relative", defaults.groundNormalTexture == "textures/ground_normal.png");
+    expectTrue("default ORM texture is asset-relative", defaults.groundOrmTexture == "textures/ground_orm.png");
+    const std::filesystem::path assetRoot = "/tmp/volkengine-assets";
+    expectTrue("relative asset paths resolve under asset directory",
+               ve::resolveAssetPath(assetRoot, defaults.groundAlbedoTexture) == assetRoot / "textures/ground_albedo.png");
+    const std::filesystem::path absoluteOverride = "/opt/materials/albedo.png";
+    expectTrue("absolute asset paths bypass asset directory",
+               ve::resolveAssetPath(assetRoot, absoluteOverride) == absoluteOverride);
+    expectTrue("empty asset path remains empty", ve::resolveAssetPath(assetRoot, {}).empty());
 
     if (gFailureCount == 0) {
         return 0;

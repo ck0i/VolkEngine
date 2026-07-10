@@ -21,6 +21,7 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `materialGridTileRows`, `materialGridTileColumns` | `16`, `16` | Demo grid tile dimensions for culling acceleration. |
 | `depthPrepassMode` | `DepthPrepassMode::Auto` | Adaptive prepass selection by visible scene complexity; `ForceOn` and `ForceOff` are deterministic overrides. |
 | `shaderDirectory`, `assetDirectory`, `cacheDirectory` | CMake-defined build paths | Runtime shader, asset, and pipeline-cache locations. |
+| `groundAlbedoTexture`, `groundNormalTexture`, `groundOrmTexture` | `textures/ground_{albedo,normal,orm}.png` relative to `assetDirectory` | Role-specific ground material inputs. Relative paths resolve under `assetDirectory`; absolute paths bypass it. Empty or non-regular files are rejected before texture upload. |
 
 `isValidExposure(float)` is the shared helper for sandbox CLI parsing and programmatic config checks.
 

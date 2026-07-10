@@ -86,10 +86,21 @@ void VulkanRenderer::Impl::createTextureResources() {
     };
 
     std::array<TextureUpload, 3> uploads{{
-        {.path = config_.assetDirectory / "textures" / "ground_albedo.png", .format = VK_FORMAT_R8G8B8A8_SRGB, .debugName = "Ground Albedo", .mipPolicy = TextureMipPolicy::Albedo},
-        {.path = config_.assetDirectory / "textures" / "ground_normal.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground Normal", .mipPolicy = TextureMipPolicy::Normal},
-        {.path = config_.assetDirectory / "textures" / "ground_orm.png", .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground ORM", .mipPolicy = TextureMipPolicy::Linear},
+        {.path = resolveAssetPath(config_.assetDirectory, config_.groundAlbedoTexture), .format = VK_FORMAT_R8G8B8A8_SRGB, .debugName = "Ground Albedo", .mipPolicy = TextureMipPolicy::Albedo},
+        {.path = resolveAssetPath(config_.assetDirectory, config_.groundNormalTexture), .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground Normal", .mipPolicy = TextureMipPolicy::Normal},
+        {.path = resolveAssetPath(config_.assetDirectory, config_.groundOrmTexture), .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Ground ORM", .mipPolicy = TextureMipPolicy::Linear},
     }};
+    constexpr std::array<const char*, 3> textureRoles{"Ground Albedo", "Ground Normal", "Ground ORM"};
+    for (std::size_t index = 0; index < uploads.size(); ++index) {
+        const TextureUpload& upload = uploads[index];
+        if (upload.path.empty()) {
+            throw std::runtime_error(std::string(textureRoles[index]) + " texture path is empty");
+        }
+        std::error_code fileError;
+        if (!std::filesystem::is_regular_file(upload.path, fileError)) {
+            throw std::runtime_error(std::string(textureRoles[index]) + " texture path is not a regular file: " + upload.path.string());
+        }
+    }
     VkCommandBuffer uploadCommands = VK_NULL_HANDLE;
     VkDeviceSize totalStagingSize = 0;
     Buffer textureStaging;

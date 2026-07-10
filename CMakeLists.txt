@@ -173,7 +173,8 @@ volkengine_target_warnings(VolkEngineSandbox)
 enable_testing()
 
 add_executable(VolkEngineConfigCpuTest
-    tests/ConfigCpuTests.cpp)
+    tests/ConfigCpuTests.cpp
+    engine/core/FileSystem.cpp)
 target_include_directories(VolkEngineConfigCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")

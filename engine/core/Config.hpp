@@ -38,11 +38,22 @@ struct EngineConfig {
     DepthPrepassMode depthPrepassMode = DepthPrepassMode::Auto;
     std::filesystem::path shaderDirectory = executableDirectory() / "shaders";
     std::filesystem::path assetDirectory = executableDirectory() / "assets";
+    std::filesystem::path groundAlbedoTexture = "textures/ground_albedo.png";
+    std::filesystem::path groundNormalTexture = "textures/ground_normal.png";
+    std::filesystem::path groundOrmTexture = "textures/ground_orm.png";
     std::filesystem::path cacheDirectory = executableDirectory() / "cache";
 };
 
 [[nodiscard]] inline bool isValidExposure(const float exposure) noexcept {
     return std::isfinite(exposure) && exposure > 0.0f;
+}
+
+[[nodiscard]] inline std::filesystem::path resolveAssetPath(const std::filesystem::path& assetDirectory,
+                                                             const std::filesystem::path& configuredPath) {
+    if (configuredPath.empty() || configuredPath.is_absolute()) {
+        return configuredPath;
+    }
+    return assetDirectory / configuredPath;
 }
 
 struct RunOptions {

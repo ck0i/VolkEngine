@@ -65,9 +65,10 @@ The depth prepass uses `scene_depth.vert`, which keeps the same model/view-proje
 
 Runtime assets are copied from `assets/` to `EngineConfig::assetDirectory`.
 
-Current texture path (`VulkanRenderer.Resources.cpp`):
+Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNormalTexture`, and `groundOrmTexture`) resolve relative to `EngineConfig::assetDirectory`; absolute paths are accepted as direct overrides:
 
-- loads `assets/textures/ground_albedo.png`, `assets/textures/ground_normal.png`, and `assets/textures/ground_orm.png` through `loadImageRgba8()`.
+- defaults load `textures/ground_albedo.png`, `textures/ground_normal.png`, and `textures/ground_orm.png` through `loadImageRgba8()`.
+- startup validates that each configured role path is non-empty and names a regular file before allocating upload resources.
 - uses stb_image for non-PPM image formats and keeps `loadPpmRgba8()` for PPM fixtures/compatibility.
 - decodes source images to RGBA8 CPU pixels while preserving source alpha.
 - uploads albedo as `VK_FORMAT_R8G8B8A8_SRGB`.
