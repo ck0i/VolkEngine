@@ -1,4 +1,5 @@
 #include "platform/Window.hpp"
+#include "platform/Input.hpp"
 
 #include "core/Log.hpp"
 
@@ -77,22 +78,17 @@ void Window::updateCamera(Camera& camera, const float dt) {
         glfwSetWindowShouldClose(window_, GLFW_TRUE);
     }
 
-    float forward = 0.0f;
-    float right = 0.0f;
-    float up = 0.0f;
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-
-    if (glfwGetKey(window_, GLFW_KEY_W) == GLFW_PRESS) { forward += 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS) { forward -= 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS) { right += 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS) { right -= 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_E) == GLFW_PRESS) { up += 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_Q) == GLFW_PRESS) { up -= 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_RIGHT) == GLFW_PRESS) { yaw += 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_PRESS) { yaw -= 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_UP) == GLFW_PRESS) { pitch += 1.0f; }
-    if (glfwGetKey(window_, GLFW_KEY_DOWN) == GLFW_PRESS) { pitch -= 1.0f; }
+    CameraInput input = mapCameraInput(
+        glfwGetKey(window_, GLFW_KEY_W) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_E) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_Q) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_RIGHT) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_UP) == GLFW_PRESS,
+        glfwGetKey(window_, GLFW_KEY_DOWN) == GLFW_PRESS);
 
     if (glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
         double cursorX = 0.0;
@@ -105,8 +101,8 @@ void Window::updateCamera(Camera& camera, const float dt) {
             glfwSetInputMode(window_, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         } else {
             constexpr float mouseSensitivity = 0.12f;
-            camera.rotate(static_cast<float>(cursorX - lastCursorX_) * mouseSensitivity,
-                          static_cast<float>(lastCursorY_ - cursorY) * mouseSensitivity);
+            input.mouseYawDegrees = static_cast<float>(cursorX - lastCursorX_) * mouseSensitivity;
+            input.mousePitchDegrees = static_cast<float>(lastCursorY_ - cursorY) * mouseSensitivity;
             lastCursorX_ = cursorX;
             lastCursorY_ = cursorY;
         }
@@ -115,7 +111,7 @@ void Window::updateCamera(Camera& camera, const float dt) {
         glfwSetInputMode(window_, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
 
-    camera.update(forward, right, up, yaw, pitch, dt);
+    applyCameraInput(camera, input, dt);
 }
 
 void Window::setSize(const std::uint32_t width, const std::uint32_t height) {

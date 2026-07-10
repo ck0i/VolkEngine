@@ -96,6 +96,7 @@ add_library(VolkEngine STATIC
     engine/core/FileSystem.cpp
     engine/core/Log.cpp
     engine/core/Time.cpp
+    engine/platform/Input.cpp
     engine/platform/Window.cpp
     engine/renderer/Geometry.cpp
     engine/renderer/GreedyMesher.cpp
@@ -253,3 +254,14 @@ target_link_libraries(VolkEngineVulkanFrustumCpuTest
 volkengine_target_warnings(VolkEngineVulkanFrustumCpuTest)
 add_test(NAME VulkanFrustumCpu
     COMMAND VolkEngineVulkanFrustumCpuTest)
+
+add_executable(VolkEngineInputCpuTest
+    tests/InputCpuTests.cpp
+    engine/core/Camera.cpp
+    engine/platform/Input.cpp)
+target_include_directories(VolkEngineInputCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineInputCpuTest)
+add_test(NAME InputCpu
+    COMMAND VolkEngineInputCpuTest)
