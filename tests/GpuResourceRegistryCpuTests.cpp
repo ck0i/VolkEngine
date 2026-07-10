@@ -50,6 +50,37 @@ int main() {
 
     {
         ve::GpuResourceRegistry registry;
+        const std::uint32_t maxBuffer = registry.registerResource(
+            ve::GpuResourceKind::Buffer, "Max Buffer", std::numeric_limits<std::uint64_t>::max());
+        const std::uint32_t oneByteBuffer = registry.registerResource(ve::GpuResourceKind::Buffer, "One Byte Buffer", 1);
+
+        ve::GpuResourceRegistry::Stats stats = registry.stats();
+        expectEqual("buffer byte accounting saturates total", stats.bytes, std::numeric_limits<std::uint64_t>::max());
+        expectEqual("buffer byte accounting saturates category", stats.bufferBytes, std::numeric_limits<std::uint64_t>::max());
+        expectEqual("saturated buffer accounting retains both resources", stats.liveResources, 2U);
+        registry.unregisterResource(maxBuffer);
+        stats = registry.stats();
+        expectEqual("unregister recomputes saturated bytes", stats.bytes, 1ULL);
+        expectEqual("unregister recomputes saturated buffer bytes", stats.bufferBytes, 1ULL);
+        expectEqual("unregister preserves one-byte resource", stats.liveResources, 1U);
+        (void)oneByteBuffer;
+    }
+
+    {
+        ve::GpuResourceRegistry registry;
+        (void)registry.registerResource(ve::GpuResourceKind::Image, "Max Owned Image",
+                                         std::numeric_limits<std::uint64_t>::max());
+        (void)registry.registerResource(ve::GpuResourceKind::Image, "Imported Image", 1, true);
+
+        const ve::GpuResourceRegistry::Stats stats = registry.stats();
+        expectEqual("image byte accounting saturates total", stats.bytes, std::numeric_limits<std::uint64_t>::max());
+        expectEqual("image byte accounting saturates image category", stats.imageBytes, std::numeric_limits<std::uint64_t>::max());
+        expectEqual("owned image bytes remain saturated", stats.ownedImageBytes, std::numeric_limits<std::uint64_t>::max());
+        expectEqual("imported image bytes retain exact small value", stats.importedImageBytes, 1ULL);
+    }
+
+    {
+        ve::GpuResourceRegistry registry;
         const std::uint32_t buffer = registry.registerResource(ve::GpuResourceKind::Buffer, "Scene Instances", 64);
         const std::uint32_t ownedImage = registry.registerResource(ve::GpuResourceKind::Image, "HDR", 256);
         const std::uint32_t importedImage = registry.registerResource(ve::GpuResourceKind::Image, "Swapchain", 512, true);

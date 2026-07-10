@@ -76,4 +76,4 @@ Returns aggregate live-resource accounting:
 - `importedImageBytes`
 - `ownedImageBytes`
 
-These are renderer estimates for objects the registry knows about. They intentionally exclude Dear ImGui backend internals, VMA allocator internals, transient staging resources, and total process/GPU residency.
+These are renderer estimates for objects the registry knows about. Byte aggregates saturate at `std::uint64_t::max()` instead of wrapping when estimates exceed representable range; because `stats()` recomputes from live records, unregistering a resource restores the exact remaining aggregate. They intentionally exclude Dear ImGui backend internals, VMA allocator internals, transient staging resources, and total process/GPU residency.

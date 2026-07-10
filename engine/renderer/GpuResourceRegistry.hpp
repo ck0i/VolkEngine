@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -68,18 +69,18 @@ public:
         Stats result{};
         for (const Record& record : records_) {
             ++result.liveResources;
-            result.bytes += record.bytes;
+            result.bytes = saturatingAdd(result.bytes, record.bytes);
             if (record.kind == GpuResourceKind::Buffer) {
                 ++result.buffers;
-                result.bufferBytes += record.bytes;
+                result.bufferBytes = saturatingAdd(result.bufferBytes, record.bytes);
             } else {
                 ++result.images;
-                result.imageBytes += record.bytes;
+                result.imageBytes = saturatingAdd(result.imageBytes, record.bytes);
                 if (record.imported) {
                     ++result.importedImages;
-                    result.importedImageBytes += record.bytes;
+                    result.importedImageBytes = saturatingAdd(result.importedImageBytes, record.bytes);
                 } else {
-                    result.ownedImageBytes += record.bytes;
+                    result.ownedImageBytes = saturatingAdd(result.ownedImageBytes, record.bytes);
                 }
             }
         }
@@ -87,6 +88,10 @@ public:
     }
 
 private:
+    [[nodiscard]] static constexpr std::uint64_t saturatingAdd(const std::uint64_t lhs, const std::uint64_t rhs) noexcept {
+        constexpr std::uint64_t maxValue = std::numeric_limits<std::uint64_t>::max();
+        return lhs > maxValue - rhs ? maxValue : lhs + rhs;
+    }
     [[nodiscard]] std::uint32_t allocateId() {
         if (nextId_ == kInvalidId) {
             throw std::runtime_error("GPU resource registry id range exhausted");
