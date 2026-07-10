@@ -256,9 +256,19 @@ add_test(NAME MathCpu
     COMMAND VolkEngineMathCpuTest)
 add_executable(VolkEngineVulkanFrustumCpuTest
     tests/VulkanFrustumCpuTests.cpp)
+target_include_directories(VolkEngineVulkanFrustumCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_compile_definitions(VolkEngineVulkanFrustumCpuTest
+    PRIVATE
+        GLFW_INCLUDE_NONE
+        VOLKENGINE_ENABLE_IMGUI=0)
 target_link_libraries(VolkEngineVulkanFrustumCpuTest
     PRIVATE
-        VolkEngine)
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+        ${VOLKENGINE_GLFW_TARGET}
+        ${VOLKENGINE_SPDLOG_TARGET})
 volkengine_target_warnings(VolkEngineVulkanFrustumCpuTest)
 add_test(NAME VulkanFrustumCpu
     COMMAND VolkEngineVulkanFrustumCpuTest)
