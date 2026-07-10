@@ -130,6 +130,9 @@ std::size_t DemoSceneRenderer::requiredItemCount(const std::uint32_t materialGri
 }
 
 void DemoSceneRenderer::validateMaterialGridDimensions(const std::uint32_t materialGridRows, const std::uint32_t materialGridColumns) {
+    if (materialGridRows == 0U || materialGridColumns == 0U) {
+        throw std::runtime_error("Material grid dimensions must be positive");
+    }
     (void)requiredItemCount(materialGridRows, materialGridColumns);
 }
 
@@ -146,6 +149,7 @@ const SceneRenderList& DemoSceneRenderer::build(const double elapsedSeconds,
                                                 const std::uint32_t materialGridColumns,
                                                 const std::uint32_t materialGridTileRows,
                                                 const std::uint32_t materialGridTileColumns) {
+    validateMaterialGridDimensions(materialGridRows, materialGridColumns);
     const std::size_t requiredItems = requiredItemCount(materialGridRows, materialGridColumns);
     ensureStaticSceneLayout(materialGridRows, materialGridColumns, materialGridTileRows, materialGridTileColumns, requiredItems);
     writeAnimatedItems(elapsedSeconds);

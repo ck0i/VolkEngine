@@ -180,6 +180,25 @@ int main() {
     expectThrowsRuntimeError("validateMaterialGridDimensions overflow", [] {
         DemoSceneRenderer::validateMaterialGridDimensions(65535U, 65537U);
     });
+    expectThrowsRuntimeError("validateMaterialGridDimensions zero rows", [] {
+        DemoSceneRenderer::validateMaterialGridDimensions(0U, 1U);
+    });
+    expectThrowsRuntimeError("validateMaterialGridDimensions zero columns", [] {
+        DemoSceneRenderer::validateMaterialGridDimensions(1U, 0U);
+    });
+    expectThrowsRuntimeError("validateMaterialGridDimensions zero rows and columns", [] {
+        DemoSceneRenderer::validateMaterialGridDimensions(0U, 0U);
+    });
+    DemoSceneRenderer invalidDimensionRenderer;
+    expectThrowsRuntimeError("build rejects zero material-grid rows", [&] {
+        (void)invalidDimensionRenderer.build(0.0, 0U, 1U);
+    });
+    expectThrowsRuntimeError("build rejects zero material-grid columns", [&] {
+        (void)invalidDimensionRenderer.build(0.0, 1U, 0U);
+    });
+    const auto& singleCellBuild = invalidDimensionRenderer.build(0.0, 1U, 1U);
+    expectEqual("build(1, 1) remains valid after rejected dimensions", singleCellBuild.materialGridRange().valid, true);
+    expectEqual("build(1, 1) rebuilds tile coverage", singleCellBuild.materialGridTilesCoverRange(), true);
 
     const auto firstGridRange = first.materialGridRange();
     expectEqual("build(4, 5) material grid valid", firstGridRange.valid, true);
