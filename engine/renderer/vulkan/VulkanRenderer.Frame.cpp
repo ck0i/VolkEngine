@@ -454,8 +454,16 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
                                imageSyncStateFor(depthReadIntent.access, depthReadIntent.usage),
                                VK_IMAGE_ASPECT_DEPTH_BIT);
     } else {
+        const FrameGraph::BarrierIntent& depthWriteIntent = graphVariant.graph.barrierIntent(
+            graphVariant.passes.hdrScene,
+            graphVariant.resources.depth,
+            FrameGraphAccess::Write,
+            FrameGraphUsage::DepthAttachment);
+        if (depthWriteIntent.finalTransition) {
+            throw std::runtime_error("Selected frame graph HDR depth-write intent cannot be final");
+        }
         transitionImageTracked(frame.commandBuffer, depth_.image, depth_.syncState,
-                               imageSyncStateFor(FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment),
+                               imageSyncStateFor(depthWriteIntent.access, depthWriteIntent.usage),
                                VK_IMAGE_ASPECT_DEPTH_BIT);
     }
     if (timestampsEnabled_) {

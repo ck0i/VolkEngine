@@ -196,6 +196,11 @@ int main() {
         expectEqual("mode-like DAG without prepass screenshot read is not sampled image", graph.hasEdge(screenshotPass, swapchain, FrameGraphAccess::Read, FrameGraphUsage::SampledImage), false);
         expectEqual("mode-like DAG without prepass final usage is marked", graph.hasFinalUsage(swapchain), true);
         expectEqual("mode-like DAG without prepass has final usage", static_cast<int>(graph.finalUsage(swapchain)), static_cast<int>(FrameGraphUsage::Present));
+        const FrameGraph::BarrierIntent& depthWriteIntent = graph.barrierIntent(
+            hdrPass, depth, FrameGraphAccess::Write, FrameGraphUsage::DepthAttachment);
+        expectEqual("depth-off write intent targets HDR pass", depthWriteIntent.pass.index, hdrPass.index);
+        expectEqual("depth-off first-use write has no graph predecessor", depthWriteIntent.hasPrevious, false);
+        expectEqual("depth-off write intent is not final", depthWriteIntent.finalTransition, false);
     }
     {
         FrameGraph graph;
