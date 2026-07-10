@@ -135,6 +135,11 @@ int main() {
         expectEqual("HDR sample intent targets tonemap", hdrSampleIntent.pass.index, tonemapPass.index);
         expectEqual("HDR sample intent records color-write predecessor", static_cast<int>(hdrSampleIntent.previousUsage), static_cast<int>(FrameGraphUsage::ColorAttachment));
         expectEqual("HDR sample intent is not final", hdrSampleIntent.finalTransition, false);
+        const FrameGraph::BarrierIntent& swapchainWriteIntent = graph.barrierIntent(
+            tonemapPass, swapchain, FrameGraphAccess::Write, FrameGraphUsage::ColorAttachment);
+        expectEqual("swapchain write intent targets tonemap", swapchainWriteIntent.pass.index, tonemapPass.index);
+        expectEqual("swapchain first-use write has no graph predecessor", swapchainWriteIntent.hasPrevious, false);
+        expectEqual("swapchain write intent is not final", swapchainWriteIntent.finalTransition, false);
         expectEqual("final present transition is emitted last", barrierPlan.back().finalTransition, true);
         expectEqual("final transition targets swapchain", barrierPlan.back().resource.index, swapchain.index);
         const FrameGraph::BarrierIntent& finalIntent = graph.finalBarrierIntent(swapchain);
