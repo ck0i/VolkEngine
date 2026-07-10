@@ -36,6 +36,9 @@ std::string readTokenSkippingComments(std::ifstream& file) {
 
     while (file.get(ch)) {
         if (std::isspace(static_cast<unsigned char>(ch)) != 0) {
+            if (ch == '\r' && file.peek() == '\n') {
+                file.get();
+            }
             break;
         }
         if (ch == '#') {

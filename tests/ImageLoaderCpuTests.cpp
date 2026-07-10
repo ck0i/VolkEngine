@@ -198,6 +198,18 @@ int main() {
                              255U, 0U, 0U, 255U,
                              0U, 128U, 255U, 255U});
     });
+    const auto crlfPath = addFixture("image_loader_crlf.ppm",
+                                     "P6\r\n"
+                                     "1 1\r\n"
+                                     "255\r\n",
+                                     std::vector<std::uint8_t>{0x0AU, 0xBBU, 0xCCU});
+    expectNoThrow("loadPpmRgba8 preserves the first pixel after a CRLF header", [&] {
+        const auto image = ve::loadPpmRgba8(crlfPath);
+        expectEqual("CRLF PPM width", image.width, 1U);
+        expectEqual("CRLF PPM height", image.height, 1U);
+        expectEqualBytes("CRLF PPM exact RGBA output", image.pixels,
+                         std::vector<std::uint8_t>{0x0AU, 0xBBU, 0xCCU, 0xFFU});
+    });
 
     const auto valid16BitPath = addFixture("image_loader_valid_16bit.ppm",
                                           "P6\n"
