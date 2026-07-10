@@ -149,11 +149,17 @@ GreedyMeshResult generateGreedyMesh(const GreedyMeshingVolume& volume) {
         return neighbor[boundaryIndex] == 0U;
     };
 
-    std::array<std::vector<std::uint32_t>, 6> visited;
+    const std::size_t visitedWordCount = cellCount / 64U + (cellCount % 64U != 0U ? 1U : 0U);
+    std::array<std::vector<std::uint64_t>, kFaces.size()> visited;
     for (auto& faceVisited : visited) {
-        faceVisited.assign(cellCount, 0U);
+        faceVisited.assign(visitedWordCount, 0U);
     }
-    constexpr std::uint32_t comparison = 1U;
+    const auto isVisited = [&](const std::size_t faceIndex, const std::size_t cellIndex) {
+        return (visited[faceIndex][cellIndex / 64U] & (std::uint64_t{1} << (cellIndex % 64U))) != 0U;
+    };
+    const auto setVisited = [&](const std::size_t faceIndex, const std::size_t cellIndex) {
+        visited[faceIndex][cellIndex / 64U] |= std::uint64_t{1} << (cellIndex % 64U);
+    };
 
     const auto appendMaterialRange = [&](const std::uint32_t material, const std::size_t firstIndex) {
         const auto first = static_cast<std::uint32_t>(firstIndex);
@@ -270,7 +276,7 @@ GreedyMeshResult generateGreedyMesh(const GreedyMeshingVolume& volume) {
                     }
                     ++result.visibleFaceCount;
                     const std::size_t start = linearIndex(volume.dimensions, coordinate);
-                    if (visited[faceIndex][start] == comparison) {
+                    if (isVisited(faceIndex, start)) {
                         continue;
                     }
                     const std::uint8_t primaryAxis = spec.primaryAxis;
@@ -280,7 +286,7 @@ GreedyMeshResult generateGreedyMesh(const GreedyMeshingVolume& volume) {
                         auto candidate = coordinate;
                         candidate[primaryAxis] += lengthA;
                         const std::size_t candidateIndex = linearIndex(volume.dimensions, candidate);
-                        if (cellAt(candidate) != material || visited[faceIndex][candidateIndex] == comparison ||
+                        if (cellAt(candidate) != material || isVisited(faceIndex, candidateIndex) ||
                             !faceVisible(candidate, spec.face)) {
                             break;
                         }
@@ -289,7 +295,7 @@ GreedyMeshResult generateGreedyMesh(const GreedyMeshingVolume& volume) {
                     for (std::uint32_t offset = 0; offset < lengthA; ++offset) {
                         auto marked = coordinate;
                         marked[primaryAxis] += offset;
-                        visited[faceIndex][linearIndex(volume.dimensions, marked)] = comparison;
+                        setVisited(faceIndex, linearIndex(volume.dimensions, marked));
                     }
 
                     std::uint32_t lengthB = 1U;
@@ -300,7 +306,7 @@ GreedyMeshResult generateGreedyMesh(const GreedyMeshingVolume& volume) {
                             candidate[secondaryAxis] += lengthB;
                             candidate[primaryAxis] += offset;
                             const std::size_t candidateIndex = linearIndex(volume.dimensions, candidate);
-                            if (cellAt(candidate) != material || visited[faceIndex][candidateIndex] == comparison ||
+                            if (cellAt(candidate) != material || isVisited(faceIndex, candidateIndex) ||
                                 !faceVisible(candidate, spec.face)) {
                                 identicalRow = false;
                                 break;
@@ -313,7 +319,7 @@ GreedyMeshResult generateGreedyMesh(const GreedyMeshingVolume& volume) {
                             auto marked = coordinate;
                             marked[secondaryAxis] += lengthB;
                             marked[primaryAxis] += offset;
-                            visited[faceIndex][linearIndex(volume.dimensions, marked)] = comparison;
+                            setVisited(faceIndex, linearIndex(volume.dimensions, marked));
                         }
                         ++lengthB;
                     }

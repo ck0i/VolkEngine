@@ -341,5 +341,23 @@ int main() {
         });
     }
 
+    {
+        constexpr std::array<std::uint32_t, 3> dimensions{128U, 128U, 128U};
+        constexpr std::size_t cellCount = static_cast<std::size_t>(dimensions[0]) *
+                                          static_cast<std::size_t>(dimensions[1]) *
+                                          static_cast<std::size_t>(dimensions[2]);
+        std::vector<std::uint32_t> cells(cellCount, 0U);
+        const std::size_t interiorCell = 64U + 64U * dimensions[1] +
+                                         64U * static_cast<std::size_t>(dimensions[0]) * dimensions[1];
+        cells[interiorCell] = 9U;
+        const ve::GreedyMeshResult result = mesh(dimensions, cells);
+        expectEqual("sparse volume visible faces", result.visibleFaceCount, 6U);
+        expectEqual("sparse volume merged quads", result.mergedQuadCount, 6U);
+        expectEqual("sparse volume vertices", result.mesh.vertices.size(), 24U);
+        expectEqual("sparse volume indices", result.mesh.indices.size(), 36U);
+        expectTrue("sparse volume bounds remain valid", result.mesh.bounds.valid);
+        expectVec3Nearly("sparse volume bounds center", result.mesh.bounds.center, {64.5f, 64.5f, 64.5f});
+    }
+
     return gFailureCount == 0 ? 0 : 1;
 }
