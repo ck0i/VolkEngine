@@ -152,6 +152,8 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << summary.config.gpuVisibilityValidation
            << ",\"hiz_occlusion\":"
            << summary.config.depthPyramidOcclusion
+           << ",\"cluster_indirect_commands\":"
+           << summary.config.gpuClusterCommands
            << ",\"resize_smoke\":" << summary.options.resizeSmoke
            << ",\"acquire_recovery_smoke\":" << summary.options.acquireRecoverySmoke
            << ",\"screenshot\":" << !summary.options.screenshotPath.empty()
@@ -162,16 +164,19 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << ",\"instances\":" << summary.stats.sceneItemCount
            << ",\"visible_instances\":" << summary.stats.visibleItemCount
            << ",\"clusters\":" << summary.stats.sceneClusterCount
-           << ",\"visible_cluster_instances\":"
-           << summary.stats.visibleClusterInstanceCount
-           << ",\"tested_cluster_instances\":"
-           << summary.stats.testedClusterInstanceCount
-           << ",\"occluded_cluster_instances\":"
-           << summary.stats.occludedClusterInstanceCount
            << ",\"host_device_memory\":{\"available\":false,\"reason\":\"allocator budget is not exposed by the public renderer contract\"}},\n"
            << "  \"gpu_visibility\":{\"enabled\":"
            << summary.stats.gpuDrivenVisibility
            << ",\"validated\":" << summary.stats.gpuVisibilityValidated
+           << ",\"culling_unit\":\""
+           << (!summary.stats.gpuDrivenVisibility
+                   ? "none"
+                   : (summary.stats.cullingUnitsAreClusters
+                          ? "cluster_instance"
+                          : "instance"))
+           << "\",\"visible_units\":" << summary.stats.visibleCullingUnitCount
+           << ",\"tested_units\":" << summary.stats.testedCullingUnitCount
+           << ",\"occluded_units\":" << summary.stats.occludedCullingUnitCount
            << ",\"material_descriptors\":"
            << summary.stats.materialDescriptorCount
            << ",\"material_descriptor_capacity\":"
@@ -207,7 +212,7 @@ std::string serializeRunSummary(const RunSummary& summary) {
     appendMetric(output, "gpu_frame", summary.stats.gpuFrameMs, "ms", summary.stats.gpuTimestampsValid,
                  "GPU timestamp result unavailable");
     output << ',';
-    appendMetric(output, "gpu_cluster_cull", summary.stats.gpuCullMs, "ms",
+    appendMetric(output, "gpu_visibility_cull", summary.stats.gpuCullMs, "ms",
                  summary.stats.gpuTimestampsValid &&
                      summary.stats.gpuDrivenVisibility,
                  summary.stats.gpuDrivenVisibility

@@ -41,6 +41,8 @@ int main() {
     expectTrue("default cache directory is configured", !defaults.cacheDirectory.empty());
     expectTrue("depth-pyramid occlusion defaults on",
                defaults.depthPyramidOcclusion);
+    expectFalse("classic indirect submission defaults to mesh commands",
+                defaults.gpuClusterCommands);
 
     if (gFailureCount == 0) {
         return 0;

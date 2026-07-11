@@ -7,8 +7,10 @@
 
 namespace ve {
 
-inline constexpr std::uint32_t kMaximumClusterVertices = 64U;
-inline constexpr std::uint32_t kMaximumClusterTriangles = 126U;
+// Classic indexed-indirect clusters amortize command and atomic cost; future
+// mesh-shader meshlets may use a separate tighter 64/126 encoding.
+inline constexpr std::uint32_t kMaximumClusterVertices = 256U;
+inline constexpr std::uint32_t kMaximumClusterTriangles = 512U;
 inline constexpr std::uint32_t kInvalidClusterNode = 0xffffffffU;
 
 struct MeshCluster {

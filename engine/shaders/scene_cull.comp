@@ -1,4 +1,9 @@
 #version 450
+#ifdef VE_SUBGROUP_RESERVATION
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#endif
+
 
 layout(local_size_x = 64) in;
 
@@ -56,9 +61,9 @@ layout(std140, set = 0, binding = 5) uniform CullData {
 } cull;
 layout(std430, set = 0, binding = 6) buffer CullCounterData {
     uint visibleItemCount;
-    uint visibleClusterInstanceCount;
-    uint testedClusterInstanceCount;
-    uint occludedClusterInstanceCount;
+    uint visibleCullingUnitCount;
+    uint testedCullingUnitCount;
+    uint occludedCullingUnitCount;
     uvec4 sphereLodCounts;
 } counters;
 layout(set = 0, binding = 7) uniform sampler2D depthPyramidTexture;
@@ -149,6 +154,7 @@ uint selectedMesh(const CullCandidate candidate) {
     return cull.sphereLodMeshes.z;
 }
 
+
 void main() {
     const uint candidateIndex = gl_GlobalInvocationID.x;
     if (candidateIndex >= cull.counts.x) {
@@ -172,6 +178,47 @@ void main() {
             atomicAdd(counters.sphereLodCounts.z, 1);
         }
     }
+    if (cull.counts.w == 0) {
+        atomicAdd(counters.testedCullingUnitCount, 1);
+        if (sphereOccluded(candidate.bounds.xyz, candidate.bounds.w)) {
+            atomicAdd(counters.occludedCullingUnitCount, 1);
+            return;
+        }
+        atomicAdd(counters.visibleCullingUnitCount, 1);
+#ifdef VE_SUBGROUP_RESERVATION
+        uvec4 remaining = subgroupBallot(true);
+        while (subgroupBallotBitCount(remaining) != 0) {
+            const uint leader = subgroupBallotFindLSB(remaining);
+            const uint commandIndex =
+                subgroupBroadcast(meshIndex, leader);
+            const uvec4 matching =
+                subgroupBallot(meshIndex == commandIndex) & remaining;
+            uint first = 0;
+            if (gl_SubgroupInvocationID == leader) {
+                first = atomicAdd(
+                    commands[commandIndex].instanceCount,
+                    subgroupBallotBitCount(matching));
+            }
+            first = subgroupBroadcast(first, leader);
+            if (subgroupBallotBitExtract(
+                    matching, gl_SubgroupInvocationID)) {
+                const uint localIndex =
+                    subgroupBallotExclusiveBitCount(matching);
+                visibleInstanceIndices[
+                    commands[commandIndex].firstInstance +
+                    first + localIndex] = candidateIndex;
+            }
+            remaining &= ~matching;
+        }
+#else
+        const uint firstInstance = commands[meshIndex].firstInstance;
+        const uint instanceIndex =
+            atomicAdd(commands[meshIndex].instanceCount, 1);
+        visibleInstanceIndices[firstInstance + instanceIndex] =
+            candidateIndex;
+#endif
+        return;
+    }
     const mat4 model = candidate.model;
     const float radiusScale = max(length(model[0].xyz),
                                   max(length(model[1].xyz), length(model[2].xyz)));
@@ -183,25 +230,19 @@ void main() {
         if (!sphereVisible(center, radius)) {
             continue;
         }
-        atomicAdd(counters.testedClusterInstanceCount, 1);
+        atomicAdd(counters.testedCullingUnitCount, 1);
         if (sphereOccluded(center, radius)) {
-            atomicAdd(counters.occludedClusterInstanceCount, 1);
+            atomicAdd(counters.occludedCullingUnitCount, 1);
             continue;
         }
-        atomicAdd(counters.visibleClusterInstanceCount, 1);
+        atomicAdd(counters.visibleCullingUnitCount, 1);
 
         const uint firstInstance = commands[clusterIndex].firstInstance;
-        const uint instanceLimit =
-            clusterIndex + 1 < cull.counts.y
-                ? commands[clusterIndex + 1].firstInstance
-                : cull.counts.z;
-        const uint capacity = instanceLimit - firstInstance;
+        // CPU setup reserves one slot for every candidate that can select this
+        // cluster's mesh. A candidate selects one mesh and visits each cluster
+        // in that mesh once, so the atomic result is inside the partition.
         const uint instanceIndex =
             atomicAdd(commands[clusterIndex].instanceCount, 1);
-        if (instanceIndex >= capacity) {
-            atomicMin(commands[clusterIndex].instanceCount, capacity);
-            continue;
-        }
         visibleInstanceIndices[firstInstance + instanceIndex] = candidateIndex;
     }
 }

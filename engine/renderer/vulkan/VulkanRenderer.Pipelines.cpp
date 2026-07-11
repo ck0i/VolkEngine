@@ -198,6 +198,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     VkShaderModule tonemapFrag = VK_NULL_HANDLE;
     VkShaderModule depthPrepassVert = VK_NULL_HANDLE;
     VkShaderModule cullCompute = VK_NULL_HANDLE;
+    VkShaderModule cullSubgroupCompute = VK_NULL_HANDLE;
     VkShaderModule depthPyramidCompute = VK_NULL_HANDLE;
 
     try {
@@ -211,6 +212,9 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             shaderPaths[indirectSceneDrawsEnabled_ ? 8U : 4U]);
         cullCompute = createShaderModule(shaderPaths[6]);
         depthPyramidCompute = createShaderModule(shaderPaths[9]);
+        if (deviceOwner_.info.computeSubgroupBallot) {
+            cullSubgroupCompute = createShaderModule(shaderPaths[10]);
+        }
         VkPipelineLayoutCreateInfo cullLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         cullLayoutInfo.setLayoutCount = 1;
@@ -230,6 +234,19 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
                       "Scene Cull Pipeline Layout");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.cull),
                       "Scene Cull Pipeline");
+        if (cullSubgroupCompute != VK_NULL_HANDLE) {
+            cullInfo.stage =
+                shaderStage(VK_SHADER_STAGE_COMPUTE_BIT,
+                            cullSubgroupCompute);
+            checkVk(vkCreateComputePipelines(
+                        deviceOwner_.device, pipelineOwner_.cache, 1,
+                        &cullInfo, nullptr, &pipelines.cullSubgroup),
+                    "vkCreateComputePipelines subgroup scene cull");
+            setObjectName(
+                VK_OBJECT_TYPE_PIPELINE,
+                handleToUint64(pipelines.cullSubgroup),
+                "Subgroup Scene Cull Pipeline");
+        }
         VkPushConstantRange depthPyramidPushRange{};
         depthPyramidPushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         depthPyramidPushRange.size = sizeof(DepthPyramidPushConstants);
@@ -406,6 +423,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             vkDestroyShaderModule(deviceOwner_.device, depthPyramidCompute,
                                   nullptr);
         }
+        if (cullSubgroupCompute != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(deviceOwner_.device,
+                                  cullSubgroupCompute, nullptr);
+        }
         if (cullCompute != VK_NULL_HANDLE) {
             vkDestroyShaderModule(deviceOwner_.device, cullCompute, nullptr);
         }
@@ -419,6 +440,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     }
 
     vkDestroyShaderModule(deviceOwner_.device, depthPyramidCompute, nullptr);
+    if (cullSubgroupCompute != VK_NULL_HANDLE) {
+        vkDestroyShaderModule(deviceOwner_.device, cullSubgroupCompute,
+                              nullptr);
+    }
     vkDestroyShaderModule(deviceOwner_.device, cullCompute, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, tonemapFrag, nullptr);
@@ -437,6 +462,7 @@ void VulkanRenderer::Impl::createPipelines() {
 void VulkanRenderer::Impl::destroyPipelineSet(PipelineSet& pipelines) const {
     if (pipelines.depthPyramid != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.depthPyramid, nullptr); pipelines.depthPyramid = VK_NULL_HANDLE; }
     if (pipelines.depthPyramidLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.depthPyramidLayout, nullptr); pipelines.depthPyramidLayout = VK_NULL_HANDLE; }
+    if (pipelines.cullSubgroup != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.cullSubgroup, nullptr); pipelines.cullSubgroup = VK_NULL_HANDLE; }
     if (pipelines.cull != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.cull, nullptr); pipelines.cull = VK_NULL_HANDLE; }
     if (pipelines.cullLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.cullLayout, nullptr); pipelines.cullLayout = VK_NULL_HANDLE; }
     if (pipelines.tonemap != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.tonemap, nullptr); pipelines.tonemap = VK_NULL_HANDLE; }
@@ -457,6 +483,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelines.tonemap = pipelineOwner_.tonemap;
     pipelines.cullLayout = pipelineOwner_.cullLayout;
     pipelines.cull = pipelineOwner_.cull;
+    pipelines.cullSubgroup = pipelineOwner_.cullSubgroup;
     pipelines.depthPyramidLayout = pipelineOwner_.depthPyramidLayout;
     pipelines.depthPyramid = pipelineOwner_.depthPyramid;
 
@@ -468,6 +495,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelineOwner_.tonemap = VK_NULL_HANDLE;
     pipelineOwner_.cullLayout = VK_NULL_HANDLE;
     pipelineOwner_.cull = VK_NULL_HANDLE;
+    pipelineOwner_.cullSubgroup = VK_NULL_HANDLE;
     pipelineOwner_.depthPyramidLayout = VK_NULL_HANDLE;
     pipelineOwner_.depthPyramid = VK_NULL_HANDLE;
     return pipelines;
@@ -505,6 +533,7 @@ void VulkanRenderer::Impl::installPipelineSet(const PipelineSet& pipelines) {
     pipelineOwner_.tonemap = pipelines.tonemap;
     pipelineOwner_.cullLayout = pipelines.cullLayout;
     pipelineOwner_.cull = pipelines.cull;
+    pipelineOwner_.cullSubgroup = pipelines.cullSubgroup;
     pipelineOwner_.depthPyramidLayout = pipelines.depthPyramidLayout;
     pipelineOwner_.depthPyramid = pipelines.depthPyramid;
 }

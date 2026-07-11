@@ -39,8 +39,12 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
         throw std::runtime_error("GPU cluster count exceeds uint32 range");
     }
+    const bool clusterSubmission = config_.gpuClusterCommands;
+    const std::size_t commandCount =
+        clusterSubmission ? resourceOwner_.sceneClusters.size()
+                          : resourceOwner_.sceneMeshes.size();
     auto& clusterCapacities = gpuClusterCapacityScratch_;
-    clusterCapacities.resize(resourceOwner_.sceneClusters.size());
+    clusterCapacities.resize(commandCount);
     auto& meshPotentialCounts = gpuMeshPotentialCountScratch_;
     meshPotentialCounts.resize(resourceOwner_.sceneMeshes.size());
     std::ranges::fill(meshPotentialCounts, 0U);
@@ -58,12 +62,14 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         }
     }
     std::uint64_t clusterInstanceCapacity64 = 0;
-    for (std::size_t clusterIndex = 0;
-         clusterIndex < resourceOwner_.sceneClusters.size(); ++clusterIndex) {
-        const std::uint32_t capacity =
-            meshPotentialCounts[
-                resourceOwner_.sceneClusters[clusterIndex].meshIndex];
-        clusterCapacities[clusterIndex] = capacity;
+    for (std::size_t commandIndex = 0; commandIndex < commandCount;
+         ++commandIndex) {
+        const std::size_t meshIndex =
+            clusterSubmission
+                ? resourceOwner_.sceneClusters[commandIndex].meshIndex
+                : commandIndex;
+        const std::uint32_t capacity = meshPotentialCounts[meshIndex];
+        clusterCapacities[commandIndex] = capacity;
         clusterInstanceCapacity64 += capacity;
     }
     if (clusterInstanceCapacity64 >
@@ -119,17 +125,28 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
         frame.indirectCommands.mapped);
     std::uint32_t firstInstance = 0;
-    for (std::size_t clusterIndex = 0;
-         clusterIndex < resourceOwner_.sceneClusters.size(); ++clusterIndex) {
-        const GpuCluster& cluster = resourceOwner_.sceneClusters[clusterIndex];
-        commands[clusterIndex] = {
-            cluster.indexCount, 0U, cluster.firstIndex, cluster.vertexOffset,
-            firstInstance};
-        firstInstance += clusterCapacities[clusterIndex];
+    for (std::size_t commandIndex = 0; commandIndex < commandCount;
+         ++commandIndex) {
+        if (clusterSubmission) {
+            const GpuCluster& cluster =
+                resourceOwner_.sceneClusters[commandIndex];
+            commands[commandIndex] = {
+                cluster.indexCount, 0U, cluster.firstIndex,
+                cluster.vertexOffset, firstInstance};
+        } else {
+            const GpuMesh& mesh = resourceOwner_.sceneMeshes[commandIndex];
+            commands[commandIndex] = {
+                mesh.indexCount, 0U, mesh.firstIndex, mesh.vertexOffset,
+                firstInstance};
+        }
+        firstInstance += clusterCapacities[commandIndex];
     }
     if (firstInstance != clusterInstanceCapacity64) {
         throw std::logic_error("GPU cluster capacity prefix sum is inconsistent");
     }
+    frame.submittedGpuCommandCount =
+        static_cast<std::uint32_t>(commandCount);
+    frame.submittedClusterCommands = clusterSubmission;
 
     const Frustum frustum = extractFrustumPlanes(viewProjection);
     GpuCullUniforms uniforms{};
@@ -145,8 +162,8 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                               plan.cameraForward.z, 0.0f};
     uniforms.counts = {
         static_cast<std::uint32_t>(renderItems.size()),
-        static_cast<std::uint32_t>(resourceOwner_.sceneClusters.size()),
-        firstInstance, 0U};
+        static_cast<std::uint32_t>(commandCount),
+        firstInstance, clusterSubmission ? 1U : 0U};
     uniforms.sphereLodMeshes = {
         static_cast<std::uint32_t>(sphereMeshes[0]),
         static_cast<std::uint32_t>(sphereMeshes[1]),
@@ -162,8 +179,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
             ? 1.0f
             : 0.0f};
     if (config_.gpuVisibilityValidation) {
-        frame.expectedClusterInstanceCounts.assign(
-            resourceOwner_.sceneClusters.size(), 0U);
+        frame.expectedCullingUnitCounts.assign(commandCount, 0U);
         frame.expectedVisibleItemCount = 0U;
         frame.expectedSphereLodCounts.fill(0U);
         for (const SceneRenderItem& item : renderItems) {
@@ -190,6 +206,10 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                 ++frame.expectedSphereLodCounts[lod];
             } else {
                 meshIndex = meshBatchIndex(item.mesh);
+            }
+            if (!clusterSubmission) {
+                ++frame.expectedCullingUnitCounts[meshIndex];
+                continue;
             }
             const GpuMeshClusterRange range =
                 resourceOwner_.sceneMeshClusterRanges[meshIndex];
@@ -223,7 +243,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                         frustum, worldCenter,
                         cluster.bounds.w * radiusScale) !=
                     FrustumSphereClassification::Outside) {
-                    ++frame.expectedClusterInstanceCounts[clusterIndex];
+                    ++frame.expectedCullingUnitCounts[clusterIndex];
                 }
             }
         }
@@ -249,8 +269,13 @@ void VulkanRenderer::Impl::recordGpuCull(
     if (candidateCount == 0U) {
         return;
     }
+    const VkPipeline cullPipeline =
+        !config_.gpuClusterCommands &&
+                pipelineOwner_.cullSubgroup != VK_NULL_HANDLE
+            ? pipelineOwner_.cullSubgroup
+            : pipelineOwner_.cull;
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      pipelineOwner_.cull);
+                      cullPipeline);
     const VkDescriptorSet descriptorSet =
         resourceOwner_.cullDescriptorSets[frameOwner_.currentFrame];
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -267,60 +292,63 @@ void VulkanRenderer::Impl::validateGpuVisibility(
         const auto* counters =
             static_cast<const GpuCullCounters*>(frame.cullCounters.mapped);
         frame.completedVisibleItemCount = counters->visibleItemCount;
-        frame.completedVisibleClusterInstanceCount =
-            counters->visibleClusterInstanceCount;
-        frame.completedTestedClusterInstanceCount =
-            counters->testedClusterInstanceCount;
-        frame.completedOccludedClusterInstanceCount =
-            counters->occludedClusterInstanceCount;
+        frame.completedVisibleCullingUnitCount =
+            counters->visibleCullingUnitCount;
+        frame.completedTestedCullingUnitCount =
+            counters->testedCullingUnitCount;
+        frame.completedOccludedCullingUnitCount =
+            counters->occludedCullingUnitCount;
         frame.completedSphereLodCounts = counters->sphereLodCounts;
         frame.completedSceneTriangleCount = 0U;
-        for (std::size_t clusterIndex = 0;
-             clusterIndex < resourceOwner_.sceneClusters.size();
-             ++clusterIndex) {
+        for (std::size_t commandIndex = 0;
+             commandIndex < frame.submittedGpuCommandCount;
+             ++commandIndex) {
+            const std::uint32_t indexCount =
+                frame.submittedClusterCommands
+                    ? resourceOwner_.sceneClusters[commandIndex].indexCount
+                    : resourceOwner_.sceneMeshes[commandIndex].indexCount;
             frame.completedSceneTriangleCount +=
-                static_cast<std::uint64_t>(
-                    resourceOwner_.sceneClusters[clusterIndex].indexCount / 3U) *
-                commands[clusterIndex].instanceCount;
+                static_cast<std::uint64_t>(indexCount / 3U) *
+                commands[commandIndex].instanceCount;
         }
         frame.completedGpuCullCountersValid = true;
     }
     if (!frame.gpuVisibilityValidationPending) {
         return;
     }
-    if (frame.expectedClusterInstanceCounts.size() !=
-        resourceOwner_.sceneClusters.size()) {
+    if (frame.expectedCullingUnitCounts.size() !=
+        frame.submittedGpuCommandCount) {
         throw std::logic_error(
-            "GPU visibility reference cluster count is inconsistent");
+            "GPU visibility reference command count is inconsistent");
     }
-    std::uint32_t expectedVisibleClusters = 0U;
-    for (std::size_t clusterIndex = 0;
-         clusterIndex < frame.expectedClusterInstanceCounts.size();
-         ++clusterIndex) {
-        const std::uint32_t actual = commands[clusterIndex].instanceCount;
+    std::uint32_t expectedVisibleCullingUnits = 0U;
+    for (std::size_t commandIndex = 0;
+         commandIndex < frame.expectedCullingUnitCounts.size();
+         ++commandIndex) {
+        const std::uint32_t actual = commands[commandIndex].instanceCount;
         const std::uint32_t expected =
-            frame.expectedClusterInstanceCounts[clusterIndex];
+            frame.expectedCullingUnitCounts[commandIndex];
         const std::uint32_t limit =
-            clusterIndex + 1U < frame.expectedClusterInstanceCounts.size()
-                ? commands[clusterIndex + 1U].firstInstance
+            commandIndex + 1U < frame.expectedCullingUnitCounts.size()
+                ? commands[commandIndex + 1U].firstInstance
                 : static_cast<std::uint32_t>(
                       frame.clusterInstanceCapacity);
-        expectedVisibleClusters += expected;
-        if (commands[clusterIndex].firstInstance > limit ||
-            actual > limit - commands[clusterIndex].firstInstance) {
+        expectedVisibleCullingUnits += expected;
+        if (commands[commandIndex].firstInstance > limit ||
+            actual > limit - commands[commandIndex].firstInstance) {
             throw std::runtime_error(
                 "GPU visibility command exceeded its output partition");
         }
         if (actual != expected) {
             throw std::runtime_error(
-                "GPU visibility disagrees with CPU reference at cluster " +
-                std::to_string(clusterIndex) + ": expected " +
+                "GPU visibility disagrees with CPU reference at command " +
+                std::to_string(commandIndex) + ": expected " +
                 std::to_string(expected) + ", observed " +
                 std::to_string(actual));
         }
     }
-    if (frame.completedVisibleClusterInstanceCount !=
-            expectedVisibleClusters ||
+    if (frame.completedVisibleCullingUnitCount !=
+            expectedVisibleCullingUnits ||
         frame.completedVisibleItemCount != frame.expectedVisibleItemCount ||
         frame.completedSphereLodCounts[0] !=
             frame.expectedSphereLodCounts[0] ||

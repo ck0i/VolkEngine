@@ -6,6 +6,7 @@ layout(r32f, set = 0, binding = 1) uniform writeonly image2D destinationDepth;
 
 layout(push_constant) uniform BuildData {
     uvec2 sourceExtent;
+    uint useReductionSampler;
 } build;
 
 void main() {
@@ -21,12 +22,21 @@ void main() {
         ((destination + uvec2(1)) * build.sourceExtent +
          destinationExtent - uvec2(1)) /
         destinationExtent;
+    const uvec2 sourceSpan = sourceEnd - sourceBegin;
     float farthestDepth = 1.0;
-    for (uint y = sourceBegin.y; y < sourceEnd.y; ++y) {
-        for (uint x = sourceBegin.x; x < sourceEnd.x; ++x) {
-            farthestDepth = min(
-                farthestDepth,
-                texelFetch(sourceDepth, ivec2(x, y), 0).r);
+    if (build.useReductionSampler != 0 &&
+        all(equal(sourceSpan, uvec2(2)))) {
+        const vec2 sampleUv =
+            (vec2(sourceBegin) + vec2(1.0)) /
+            vec2(build.sourceExtent);
+        farthestDepth = textureLod(sourceDepth, sampleUv, 0.0).r;
+    } else {
+        for (uint y = sourceBegin.y; y < sourceEnd.y; ++y) {
+            for (uint x = sourceBegin.x; x < sourceEnd.x; ++x) {
+                farthestDepth = min(
+                    farthestDepth,
+                    texelFetch(sourceDepth, ivec2(x, y), 0).r);
+            }
         }
     }
     imageStore(destinationDepth, ivec2(destination), vec4(farthestDepth));

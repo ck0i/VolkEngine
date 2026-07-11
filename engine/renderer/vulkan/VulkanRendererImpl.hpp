@@ -463,7 +463,7 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
     }
 }
 
-inline std::array<std::filesystem::path, 10> shaderSpirvPaths(
+inline std::array<std::filesystem::path, 11> shaderSpirvPaths(
     const std::filesystem::path& shaderDirectory) {
     return {
         shaderDirectory / "scene.vert.spv",
@@ -476,6 +476,7 @@ inline std::array<std::filesystem::path, 10> shaderSpirvPaths(
         shaderDirectory / "scene_gpu.vert.spv",
         shaderDirectory / "scene_depth_gpu.vert.spv",
         shaderDirectory / "depth_pyramid.comp.spv",
+        shaderDirectory / "scene_cull_subgroup.comp.spv",
     };
 }
 } // namespace vulkan_renderer_detail
@@ -637,17 +638,19 @@ private:
         bool submittedDepthPrepass = false;
         std::uint32_t submittedScenePassCount = 0;
         bool depthPyramidBuildRecorded = false;
-        std::vector<std::uint32_t> expectedClusterInstanceCounts;
+        std::vector<std::uint32_t> expectedCullingUnitCounts;
         bool gpuVisibilityValidationPending = false;
         std::uint32_t expectedVisibleItemCount = 0;
         std::array<std::uint32_t, 3> expectedSphereLodCounts{};
         std::uint32_t submittedSceneItemCount = 0;
+        std::uint32_t submittedGpuCommandCount = 0;
+        bool submittedClusterCommands = true;
         std::uint32_t completedVisibleItemCount = 0;
-        std::uint32_t completedVisibleClusterInstanceCount = 0;
+        std::uint32_t completedVisibleCullingUnitCount = 0;
         std::array<std::uint32_t, 4> completedSphereLodCounts{};
         std::uint64_t completedSceneTriangleCount = 0;
-        std::uint32_t completedTestedClusterInstanceCount = 0;
-        std::uint32_t completedOccludedClusterInstanceCount = 0;
+        std::uint32_t completedTestedCullingUnitCount = 0;
+        std::uint32_t completedOccludedCullingUnitCount = 0;
         bool completedGpuCullCountersValid = false;
         std::vector<VkSemaphore> uploadWaitSemaphores;
     };
@@ -736,14 +739,15 @@ private:
     };
     struct alignas(16) GpuCullCounters {
         std::uint32_t visibleItemCount = 0;
-        std::uint32_t visibleClusterInstanceCount = 0;
-        std::uint32_t testedClusterInstanceCount = 0;
-        std::uint32_t occludedClusterInstanceCount = 0;
+        std::uint32_t visibleCullingUnitCount = 0;
+        std::uint32_t testedCullingUnitCount = 0;
+        std::uint32_t occludedCullingUnitCount = 0;
         std::array<std::uint32_t, 4> sphereLodCounts{};
     };
     struct DepthPyramidPushConstants {
         std::uint32_t sourceWidth = 0;
         std::uint32_t sourceHeight = 0;
+        std::uint32_t useReductionSampler = 0;
     };
     struct PipelineSet {
         VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
@@ -753,6 +757,7 @@ private:
         VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
         VkPipeline tonemap = VK_NULL_HANDLE;
         VkPipelineLayout cullLayout = VK_NULL_HANDLE;
+        VkPipeline cullSubgroup = VK_NULL_HANDLE;
         VkPipelineLayout depthPyramidLayout = VK_NULL_HANDLE;
         VkPipeline depthPyramid = VK_NULL_HANDLE;
         VkPipeline cull = VK_NULL_HANDLE;
@@ -787,7 +792,7 @@ private:
                   "GpuMeshClusterRange must match GLSL MeshClusterRange layout");
     static_assert(sizeof(GpuCullCounters) == 32,
                   "GpuCullCounters must match GLSL CullCounterData layout");
-    static_assert(sizeof(DepthPyramidPushConstants) == 8);
+    static_assert(sizeof(DepthPyramidPushConstants) == 12);
     static_assert(offsetof(GpuCullCounters, sphereLodCounts) == 16,
                   "GpuCullCounters.sphereLodCounts offset mismatch");
 
@@ -1043,6 +1048,8 @@ private:
         std::uint32_t materialDescriptorCapacity = vulkan_renderer_detail::kMaterialTextureCount;
         bool bindlessMaterialsEnabled = false;
         VkSampler linearSampler = VK_NULL_HANDLE;
+        VkSampler depthReductionSampler = VK_NULL_HANDLE;
+        bool depthReductionSamplerEnabled = false;
         VkSampler textureSampler = VK_NULL_HANDLE;
         VkSampler normalTextureSampler = VK_NULL_HANDLE;
         VkSampler ormTextureSampler = VK_NULL_HANDLE;
@@ -1082,6 +1089,7 @@ private:
         VkPipeline scene = VK_NULL_HANDLE;
         VkPipelineLayout depthPyramidLayout = VK_NULL_HANDLE;
         VkPipeline depthPyramid = VK_NULL_HANDLE;
+        VkPipeline cullSubgroup = VK_NULL_HANDLE;
         VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
         VkPipelineLayout cullLayout = VK_NULL_HANDLE;
         VkPipeline cull = VK_NULL_HANDLE;
@@ -1089,7 +1097,7 @@ private:
         VkPipeline tonemap = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 10> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 11> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };

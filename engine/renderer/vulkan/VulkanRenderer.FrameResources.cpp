@@ -268,7 +268,10 @@ void VulkanRenderer::Impl::updateDepthPyramidDescriptors() const {
             mip == 0U ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                       : VK_IMAGE_LAYOUT_GENERAL;
         const VkDescriptorImageInfo source{
-            resourceOwner_.linearSampler, sourceView, sourceLayout};
+            resourceOwner_.depthReductionSamplerEnabled
+                ? resourceOwner_.depthReductionSampler
+                : resourceOwner_.linearSampler,
+            sourceView, sourceLayout};
         const VkDescriptorImageInfo destination{
             VK_NULL_HANDLE, resourceOwner_.depthPyramidMipViews[mip],
             VK_IMAGE_LAYOUT_GENERAL};

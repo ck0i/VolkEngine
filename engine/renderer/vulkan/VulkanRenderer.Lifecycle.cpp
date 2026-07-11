@@ -42,14 +42,18 @@ VulkanRenderer::Impl::Impl(Window& window, EngineConfig config,
     if (config_.debugOverlay) {
         createImGui();
     }
-    logger()->info("Renderer enabled: dynamicRendering {} sync2 {} timestamps {} validation {} debugMarkers {} memoryBudget {} indirectSceneDraws {} imguiOverlay {} transferUploadSync {}; supported: descriptorIndexing {} bindlessSampledImages {} multiDrawIndirect {} drawIndirectFirstInstance {} samplerAnisotropy {} maxAnisotropy {:.1f} maxDrawIndirectCount {}",
+    logger()->info("Renderer enabled: dynamicRendering {} sync2 {} timestamps {} validation {} debugMarkers {} memoryBudget {} indirectSceneDraws {} imguiOverlay {} transferUploadSync {} depthMinReduction {}; supported: descriptorIndexing {} bindlessSampledImages {} multiDrawIndirect {} drawIndirectFirstInstance {} samplerAnisotropy {} samplerFilterMinmax {} computeSubgroupBallot {} maxAnisotropy {:.1f} maxDrawIndirectCount {}",
                    capabilityName(deviceOwner_.info.dynamicRendering), capabilityName(deviceOwner_.info.synchronization2),
                    capabilityName(deviceOwner_.info.timestampQueries), capabilityName(deviceOwner_.info.validationEnabled),
                    capabilityName(deviceOwner_.info.debugMarkers), capabilityName(deviceOwner_.info.memoryBudget),
                    capabilityName(deviceOwner_.info.indirectSceneDraws), capabilityName(imguiOwner_.initialized),
-                   transferUploadSyncName(deviceOwner_.info.transferUploadSync), capabilityName(deviceOwner_.info.descriptorIndexing),
+                   transferUploadSyncName(deviceOwner_.info.transferUploadSync),
+                   capabilityName(resourceOwner_.depthReductionSamplerEnabled),
+                   capabilityName(deviceOwner_.info.descriptorIndexing),
                    capabilityName(deviceOwner_.info.bindlessSampledImagesSupported), capabilityName(deviceOwner_.info.multiDrawIndirect),
                    capabilityName(deviceOwner_.info.drawIndirectFirstInstance), capabilityName(deviceOwner_.info.samplerAnisotropy),
+                   capabilityName(deviceOwner_.info.samplerFilterMinmax),
+                   capabilityName(deviceOwner_.info.computeSubgroupBallot),
                    deviceOwner_.info.maxSamplerAnisotropy, deviceOwner_.info.maxDrawIndirectCount);
     const GpuResourceRegistry::Stats resourceStats = resourceOwner_.registry.stats();
     logger()->info("Tracked GPU resources: {} live ({} buffers, {} images, {} imported), {:.2f} MiB estimated (buffers {:.2f}, owned images {:.2f}, imported images {:.2f})",
@@ -167,6 +171,12 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
         vkDestroyDescriptorSetLayout(deviceOwner_.device, resourceOwner_.sceneSetLayout, nullptr);
         resourceOwner_.sceneSetLayout = VK_NULL_HANDLE;
     }
+    if (resourceOwner_.depthReductionSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device,
+                         resourceOwner_.depthReductionSampler, nullptr);
+        resourceOwner_.depthReductionSampler = VK_NULL_HANDLE;
+        resourceOwner_.depthReductionSamplerEnabled = false;
+    }
     if (resourceOwner_.linearSampler != VK_NULL_HANDLE) {
         vkDestroySampler(deviceOwner_.device, resourceOwner_.linearSampler, nullptr);
         resourceOwner_.linearSampler = VK_NULL_HANDLE;
@@ -234,12 +244,12 @@ void VulkanRenderer::Impl::waitIdle() {
                 lastFrame.submittedSceneItemCount -
                 std::min(lastFrame.submittedSceneItemCount,
                          lastFrame.completedVisibleItemCount);
-            stats_.visibleClusterInstanceCount =
-                lastFrame.completedVisibleClusterInstanceCount;
-            stats_.testedClusterInstanceCount =
-                lastFrame.completedTestedClusterInstanceCount;
-            stats_.occludedClusterInstanceCount =
-                lastFrame.completedOccludedClusterInstanceCount;
+            stats_.visibleCullingUnitCount =
+                lastFrame.completedVisibleCullingUnitCount;
+            stats_.testedCullingUnitCount =
+                lastFrame.completedTestedCullingUnitCount;
+            stats_.occludedCullingUnitCount =
+                lastFrame.completedOccludedCullingUnitCount;
             stats_.sphereLodHighCount =
                 lastFrame.completedSphereLodCounts[0];
             stats_.sphereLodMediumCount =

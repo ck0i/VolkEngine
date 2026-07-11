@@ -231,6 +231,12 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
     deviceOwner_.queueFamilies = findQueueFamilies(deviceOwner_.physicalDevice);
     vkGetPhysicalDeviceProperties(deviceOwner_.physicalDevice, &deviceOwner_.physicalDeviceProperties);
     vkGetPhysicalDeviceMemoryProperties(deviceOwner_.physicalDevice, &deviceOwner_.physicalDeviceMemoryProperties);
+    VkPhysicalDeviceSubgroupProperties subgroupProperties{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    properties2.pNext = &subgroupProperties;
+    vkGetPhysicalDeviceProperties2(deviceOwner_.physicalDevice, &properties2);
     VkPhysicalDeviceVulkan13Features features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceVulkan12Features features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     features12.pNext = &features13;
@@ -251,6 +257,15 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
     deviceOwner_.info.synchronization2 = features13.synchronization2 == VK_TRUE;
     deviceOwner_.info.descriptorIndexing = features12.descriptorIndexing == VK_TRUE;
     deviceOwner_.info.bindlessSampledImagesSupported = supportsBindlessSampledImages(features12);
+    deviceOwner_.info.samplerFilterMinmax =
+        features12.samplerFilterMinmax == VK_TRUE;
+    deviceOwner_.info.computeSubgroupBallot =
+        (subgroupProperties.supportedStages &
+         VK_SHADER_STAGE_COMPUTE_BIT) != 0U &&
+        (subgroupProperties.supportedOperations &
+         VK_SUBGROUP_FEATURE_BASIC_BIT) != 0U &&
+        (subgroupProperties.supportedOperations &
+         VK_SUBGROUP_FEATURE_BALLOT_BIT) != 0U;
     deviceOwner_.info.multiDrawIndirect = features2.features.multiDrawIndirect == VK_TRUE;
     deviceOwner_.info.drawIndirectFirstInstance = features2.features.drawIndirectFirstInstance == VK_TRUE;
     deviceOwner_.info.samplerAnisotropy = features2.features.samplerAnisotropy == VK_TRUE;
@@ -409,6 +424,9 @@ void VulkanRenderer::Impl::createLogicalDevice() {
         features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
         features12.descriptorBindingPartiallyBound = VK_TRUE;
         features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    }
+    if (supportedFeatures12.samplerFilterMinmax == VK_TRUE) {
+        features12.samplerFilterMinmax = VK_TRUE;
     }
     VkPhysicalDeviceFeatures deviceFeatures{};
     const float deviceMaxSamplerAnisotropy = std::max(1.0f, deviceOwner_.physicalDeviceProperties.limits.maxSamplerAnisotropy);

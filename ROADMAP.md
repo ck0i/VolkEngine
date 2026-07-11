@@ -104,9 +104,9 @@ Current local baseline (11 July 2026):
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
 - A validated 24-frame dense-scene smoke at the odd extent 1281×721 executed GPU cluster culling and temporal Hi-Z, rejected 6,350 of 22,921 tested cluster instances in its captured completed frame, rendered a screenshot, and emitted explicit cull/Hi-Z timings and descriptor pressure without validation errors. A matching no-occlusion GPU capture was pixel-identical.
-- Release measurements on the same driver did not establish S3's crossover gate: at 16K instances the CPU grid/direct path measured 0.487 ms median CPU and 9.140 ms median GPU versus 0.820/15.763 ms for GPU+Hi-Z; at 65K it measured 1.604/27.647 ms versus 2.828/31.687 ms. Hi-Z reduced submitted geometry, but cull, fixed cluster-command granularity, and pyramid cost still outweighed it. S3 remains current, not complete.
+- On the same Intel RPL-S driver, a final paired 110-sample schema-v3 release run at 65,544 instances established the first controlled crossover: default capability-gated subgroup-reserved mesh-command generation plus temporal Hi-Z measured 23.935 ms median GPU frame time versus 27.629 ms for CPU grid culling/direct submission, a 13.4% reduction. The GPU path submitted 15,673,889 triangles instead of 23,992,353 and three draw calls instead of 15. Its CPU-frame median remained higher (3.002 ms versus 1.726 ms) and GPU p95 remained worse (30.526 ms versus 28.128 ms), so this is a bounded crossover result rather than a universal policy claim.
 
-This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, and a validated S3 GPU-generated visibility slice on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness, representative crossover performance, or cross-hardware correctness.
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, and S3's validated GPU-generated visibility and measured crossover foundation on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -195,10 +195,11 @@ Scope:
 Current implementation:
 
 - Capability-gated bindless sampled-image descriptors use stable texture-table indices with a fixed-set fallback.
-- Mesh upload cooks bounded clusters/ranges; compute performs instance and cluster frustum tests, sphere LOD selection, visible-instance compaction, and indexed indirect-command generation.
+- Mesh upload cooks bounded clusters/ranges; compute performs instance and optional cluster frustum tests, sphere LOD selection, visible-instance compaction, and indexed indirect-command generation.
+- Mesh-granularity indirect commands are the measured default. Cluster-granularity commands remain an explicit diagnostic/workload option; subgroup ballot reservation is selected when supported and a bounded atomic fallback preserves portability.
 - Temporal occlusion reads the previous pyramid before current rendering, then conservatively reduces current reverse-Z depth into a half-resolution odd-extent-safe pyramid for the next submission.
 - CPU contracts cover storage-image usage/synchronization and temporal read-before-write graph order. GPU visibility validation compares completed generated counts/commands with a CPU reference when occlusion is intentionally disabled.
-- `RenderStats`, ImGui, and schema-v2 summaries expose descriptor pressure, cooked/visible/tested/occluded clusters, and separate cull/depth/HDR/Hi-Z/final timings.
+- `RenderStats`, ImGui, and schema-v3 summaries expose descriptor pressure, cooked clusters, active culling-unit granularity and visible/tested/occluded counts, plus separate cull/depth/HDR/Hi-Z/final timings.
 
 Exit criteria:
 
@@ -206,6 +207,12 @@ Exit criteria:
 - GPU culling and generated submission are correctness-tested against a bounded CPU reference on controlled scenes.
 - Representative captures show no resource-lifetime, synchronization, descriptor, or visibility errors.
 - Measurements demonstrate the scale at which the GPU-driven path outperforms the current CPU path; unsupported claims are not accepted.
+
+Current evidence:
+
+- The 65,544-instance controlled release pair above establishes the first measured median GPU-frame crossover while retaining explicit CPU and tail-latency counterevidence.
+- Khronos validation plus synchronization validation passes the generated mesh-command path; CPU-reference validation covers command partitions, visible counts, sphere LOD counts, and submitted triangle accounting.
+- Dense material-grid instances carry independently varied metallic/roughness parameters without per-material descriptor rebinding or CPU draw enumeration; generated submission reduces the captured scene to one indirect call per scene pass.
 
 ## S4. Forward+ lighting, shadows, and production PBR baseline — **Next**
 

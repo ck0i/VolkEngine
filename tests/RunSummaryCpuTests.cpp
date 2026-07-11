@@ -39,9 +39,10 @@ int main() {
     summary.stats.assetRecordCount = 6;
     summary.stats.assetCacheHits = 6;
     summary.stats.sceneClusterCount = 87;
-    summary.stats.visibleClusterInstanceCount = 1'540;
-    summary.stats.testedClusterInstanceCount = 2'048;
-    summary.stats.occludedClusterInstanceCount = 508;
+    summary.stats.visibleCullingUnitCount = 1'540;
+    summary.stats.testedCullingUnitCount = 2'048;
+    summary.stats.occludedCullingUnitCount = 508;
+    summary.stats.cullingUnitsAreClusters = true;
     summary.stats.materialDescriptorCount = 3;
     summary.stats.materialDescriptorCapacity = 4'096;
     summary.stats.gpuDrivenVisibility = true;
@@ -57,25 +58,27 @@ int main() {
     summary.frameCount = 120;
     const std::string serialized = ve::serializeRunSummary(summary);
     assert(serialized.find("\"schema\":\"volkengine.run-summary\"") != std::string::npos);
-    assert(serialized.find("\"schema_version\":2") != std::string::npos);
+    assert(serialized.find("\"schema_version\":3") != std::string::npos);
     assert(serialized.find("\"scenario\":\"submission-pressure-v1\"") != std::string::npos);
     assert(serialized.find("\"warmup_frames\":20") != std::string::npos);
     assert(serialized.find("\"hiz_occlusion\":true") !=
+           std::string::npos);
+    assert(serialized.find("\"cluster_indirect_commands\":false") !=
            std::string::npos);
     assert(serialized.find("\"enabled\":true") != std::string::npos);
     assert(serialized.find("\"synchronization_validation\":true") != std::string::npos);
     assert(serialized.find("\"frame_count\":120") != std::string::npos);
     assert(serialized.find("\"gpu_frame\":{\"available\":false,\"reason\":\"GPU timestamp result unavailable\"") != std::string::npos);
     assert(serialized.find("\"host_device_memory\":{\"available\":false") != std::string::npos);
-    assert(serialized.find("\"tested_cluster_instances\":2048") !=
+    assert(serialized.find("\"culling_unit\":\"cluster_instance\"") !=
            std::string::npos);
-    assert(serialized.find("\"occluded_cluster_instances\":508") !=
-           std::string::npos);
+    assert(serialized.find("\"tested_units\":2048") != std::string::npos);
+    assert(serialized.find("\"occluded_units\":508") != std::string::npos);
     assert(serialized.find("\"material_descriptors\":3") !=
            std::string::npos);
     assert(serialized.find("\"material_descriptor_capacity\":4096") !=
            std::string::npos);
-    assert(serialized.find("\"gpu_cluster_cull\":{\"available\":false") !=
+    assert(serialized.find("\"gpu_visibility_cull\":{\"available\":false") !=
            std::string::npos);
     assert(serialized.find("\"gpu_depth_pyramid\":{\"available\":false") !=
            std::string::npos);
@@ -86,6 +89,16 @@ int main() {
     assert(serialized.find("\"cpu_asset_cook\":{\"available\":true,\"value\":1.25,\"unit\":\"ms\"") !=
            std::string::npos);
     assert(serialized.find("\"distributions\":{\"cpu_frame\":{\"unit\":\"ms\",\"sample_count\":100,\"available\":true") !=
+           std::string::npos);
+    ve::RunSummary disabledVisibility = summary;
+    disabledVisibility.stats.gpuDrivenVisibility = false;
+    disabledVisibility.stats.visibleCullingUnitCount = 0;
+    disabledVisibility.stats.testedCullingUnitCount = 0;
+    disabledVisibility.stats.occludedCullingUnitCount = 0;
+    const std::string disabledSerialized =
+        ve::serializeRunSummary(disabledVisibility);
+    assert(disabledSerialized.find(
+               "\"gpu_visibility\":{\"enabled\":false,\"validated\":false,\"culling_unit\":\"none\",\"visible_units\":0,\"tested_units\":0,\"occluded_units\":0") !=
            std::string::npos);
     const std::filesystem::path directory =
         std::filesystem::temp_directory_path() /

@@ -33,6 +33,7 @@ struct EngineConfig {
     bool indirectSceneDraws = true;
     bool gpuVisibilityValidation = false;
     bool depthPyramidOcclusion = true;
+    bool gpuClusterCommands = false;
     bool debugOverlay = true;
     bool gpuTimestamps = true;
     double fixedSimulationStepSeconds = 1.0 / 60.0;

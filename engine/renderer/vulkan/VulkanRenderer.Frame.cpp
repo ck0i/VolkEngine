@@ -333,13 +333,15 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     auto& meshBatches = meshBatchScratch_;
     std::uint32_t sceneDrawCalls = 0;
     if (indirectSceneDrawsEnabled_) {
-        if (resourceOwner_.sceneClusters.size() >
-            deviceOwner_.info.maxDrawIndirectCount) {
+        const std::size_t commandCount =
+            config_.gpuClusterCommands
+                ? resourceOwner_.sceneClusters.size()
+                : resourceOwner_.sceneMeshes.size();
+        if (commandCount > deviceOwner_.info.maxDrawIndirectCount) {
             throw std::runtime_error(
-                "Scene cluster count exceeds maxDrawIndirectCount");
+                "GPU scene command count exceeds maxDrawIndirectCount");
         }
-        sceneDrawCalls =
-            static_cast<std::uint32_t>(resourceOwner_.sceneClusters.size());
+        sceneDrawCalls = static_cast<std::uint32_t>(commandCount);
     } else {
     auto& visibleSceneWork = visibleSceneWorkScratch_;
     auto* instanceData = static_cast<InstanceData*>(frame.instanceData.mapped);
@@ -545,12 +547,13 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     stats_.meshBatchCount = sceneDrawCalls;
     stats_.sceneClusterCount =
         static_cast<unsigned>(resourceOwner_.sceneClusters.size());
-    stats_.visibleClusterInstanceCount =
-        gpuCountersValid ? frame.completedVisibleClusterInstanceCount : 0U;
-    stats_.testedClusterInstanceCount =
-        gpuCountersValid ? frame.completedTestedClusterInstanceCount : 0U;
-    stats_.occludedClusterInstanceCount =
-        gpuCountersValid ? frame.completedOccludedClusterInstanceCount : 0U;
+    stats_.visibleCullingUnitCount =
+        gpuCountersValid ? frame.completedVisibleCullingUnitCount : 0U;
+    stats_.testedCullingUnitCount =
+        gpuCountersValid ? frame.completedTestedCullingUnitCount : 0U;
+    stats_.occludedCullingUnitCount =
+        gpuCountersValid ? frame.completedOccludedCullingUnitCount : 0U;
+    stats_.cullingUnitsAreClusters = config_.gpuClusterCommands;
     stats_.materialDescriptorCount =
         static_cast<unsigned>(resourceOwner_.materialTextures.size());
     stats_.materialDescriptorCapacity =
@@ -893,7 +896,9 @@ void VulkanRenderer::Impl::recordDepthPyramidGraphPass(
             context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
             pipelineOwner_.depthPyramidLayout, 0, 1, &descriptorSet, 0,
             nullptr);
-        const DepthPyramidPushConstants push{sourceWidth, sourceHeight};
+        const DepthPyramidPushConstants push{
+            sourceWidth, sourceHeight,
+            resourceOwner_.depthReductionSamplerEnabled ? 1U : 0U};
         vkCmdPushConstants(context.frame->commandBuffer,
                            pipelineOwner_.depthPyramidLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);

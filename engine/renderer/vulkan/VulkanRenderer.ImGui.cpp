@@ -170,12 +170,16 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
         ImGui::Text("Exposure: %.2f  VSync: %s  Depth prepass: %s (%s)", config_.exposure, config_.vsync ? "on" : "off", stats_.depthPrepassEnabled ? "on" : "off", depthPrepassModeName(config_.depthPrepassMode));
         ImGui::Text("Scene: %u items, %u visible, %u mesh batches, %u scene passes, %s",
                     stats_.sceneItemCount, stats_.visibleItemCount, stats_.meshBatchCount, stats_.scenePassCount,
-                    stats_.indirectSceneDraws ? "multi-draw indirect" : "direct batched");
+                    stats_.indirectSceneDraws
+                        ? (config_.gpuClusterCommands
+                               ? "cluster indirect"
+                               : "mesh indirect")
+                        : "direct batched");
         ImGui::Text(
-            "Clusters: %u cooked, %u visible / %u tested, %u Hi-Z rejected, GPU cull %s%s, Hi-Z %s",
-            stats_.sceneClusterCount, stats_.visibleClusterInstanceCount,
-            stats_.testedClusterInstanceCount,
-            stats_.occludedClusterInstanceCount,
+            "Culling: %u cooked clusters, %u visible / %u tested / %u Hi-Z rejected %s, GPU cull %s%s, Hi-Z %s",
+            stats_.sceneClusterCount, stats_.visibleCullingUnitCount,
+            stats_.testedCullingUnitCount, stats_.occludedCullingUnitCount,
+            stats_.cullingUnitsAreClusters ? "cluster instances" : "instances",
             stats_.gpuDrivenVisibility ? "on" : "off",
             stats_.gpuVisibilityValidated ? " (CPU-validated)" : "",
             stats_.depthPyramidOcclusion

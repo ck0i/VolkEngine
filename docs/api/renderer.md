@@ -98,7 +98,9 @@ Submission/scene fields:
 - `indirectSceneDraws`
 - `sceneTriangleCount`: visible scene geometry before multiplying by depth/HDR scene passes.
 - `triangleCount`: submitted triangle work, preserving scene-pass multiplication and the fullscreen tonemap triangle.
-- `sceneClusterCount`, `visibleClusterInstanceCount`, `testedClusterInstanceCount`, `occludedClusterInstanceCount`: cooked cluster count and completed GPU visibility workload/rejection counters.
+- `sceneClusterCount`: number of cooked geometry clusters.
+- `visibleCullingUnitCount`, `testedCullingUnitCount`, `occludedCullingUnitCount`: completed GPU visibility workload/rejection counters.
+- `cullingUnitsAreClusters`: counter granularity; `false` means scene instances in mesh-command mode, while `true` means cluster instances in cluster-command mode.
 - `materialDescriptorCount`, `materialDescriptorCapacity`: live bindless sampled-image pressure, or fixed-fallback occupancy/capacity.
 
 Grid/LOD fields:

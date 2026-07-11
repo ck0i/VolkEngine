@@ -359,6 +359,34 @@ void VulkanRenderer::Impl::createSampler() {
     samplerInfo.maxLod = 0.0f;
     checkVk(vkCreateSampler(deviceOwner_.device, &samplerInfo, nullptr, &resourceOwner_.linearSampler), "vkCreateSampler");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(resourceOwner_.linearSampler), "Linear Clamp Sampler");
+    VkFormatProperties depthProperties{};
+    VkFormatProperties pyramidProperties{};
+    vkGetPhysicalDeviceFormatProperties(
+        deviceOwner_.physicalDevice, resourceOwner_.depth.format,
+        &depthProperties);
+    vkGetPhysicalDeviceFormatProperties(
+        deviceOwner_.physicalDevice, resourceOwner_.depthPyramid.format,
+        &pyramidProperties);
+    constexpr VkFormatFeatureFlags kMinmaxFeature =
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_MINMAX_BIT;
+    resourceOwner_.depthReductionSamplerEnabled =
+        deviceOwner_.info.samplerFilterMinmax &&
+        (depthProperties.optimalTilingFeatures & kMinmaxFeature) != 0U &&
+        (pyramidProperties.optimalTilingFeatures & kMinmaxFeature) != 0U;
+    if (resourceOwner_.depthReductionSamplerEnabled) {
+        VkSamplerReductionModeCreateInfo reductionInfo{
+            VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO};
+        reductionInfo.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
+        VkSamplerCreateInfo reductionSamplerInfo = samplerInfo;
+        reductionSamplerInfo.pNext = &reductionInfo;
+        checkVk(vkCreateSampler(deviceOwner_.device, &reductionSamplerInfo,
+                                nullptr,
+                                &resourceOwner_.depthReductionSampler),
+                "vkCreateSampler depth reduction");
+        setObjectName(VK_OBJECT_TYPE_SAMPLER,
+                      handleToUint64(resourceOwner_.depthReductionSampler),
+                      "Depth Pyramid Min Reduction Sampler");
+    }
 
     VkSamplerCreateInfo textureSamplerInfo = samplerInfo;
     textureSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;

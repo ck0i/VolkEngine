@@ -40,6 +40,8 @@ struct RenderDeviceInfo {
     bool multiDrawIndirect = false;
     bool drawIndirectFirstInstance = false;
     bool samplerAnisotropy = false;
+    bool samplerFilterMinmax = false;
+    bool computeSubgroupBallot = false;
     float maxSamplerAnisotropy = 1.0f;
     TransferUploadSyncMode transferUploadSync = TransferUploadSyncMode::SameQueueBarrier;
     bool indirectSceneDraws = false;
@@ -67,9 +69,10 @@ struct RenderStats {
     double sceneInstanceBufferMiB = 0.0;
     unsigned meshBatchCount = 0;
     unsigned sceneClusterCount = 0;
-    unsigned visibleClusterInstanceCount = 0;
-    unsigned testedClusterInstanceCount = 0;
-    unsigned occludedClusterInstanceCount = 0;
+    unsigned visibleCullingUnitCount = 0;
+    unsigned testedCullingUnitCount = 0;
+    unsigned occludedCullingUnitCount = 0;
+    bool cullingUnitsAreClusters = false;
     unsigned materialDescriptorCount = 0;
     unsigned materialDescriptorCapacity = 0;
     bool depthPyramidBuildEnabled = false;
