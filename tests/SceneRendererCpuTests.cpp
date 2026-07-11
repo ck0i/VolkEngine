@@ -1,10 +1,9 @@
-#include "renderer/SceneRenderer.hpp"
 #include "renderer/Renderer.hpp"
-
-#include <cstddef>
+#include "renderer/SceneRenderer.hpp"
 #include <array>
-#include <cstdint>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -147,7 +146,8 @@ int main() {
     renderStats.triangleCount = widerTriangleCount;
     expectEqual("RenderStats::triangleCount holds >uint32_t::max() without narrowing", renderStats.triangleCount, widerTriangleCount);
     renderStats.sceneTriangleCount = widerTriangleCount;
-    expectEqual("RenderStats::sceneTriangleCount holds >uint32_t::max() without narrowing", renderStats.sceneTriangleCount, widerTriangleCount);
+    expectEqual("RenderStats::sceneTriangleCount holds >uint32_t::max() without "
+              "narrowing", renderStats.sceneTriangleCount, widerTriangleCount);
     {
         ve::World world;
         const ve::World::Entity entity = world.createEntity();
@@ -461,7 +461,8 @@ int main() {
         }
         expectEqual("SceneRenderList::materialGridTilesCoverRange() false by default", renderList.materialGridTilesCoverRange(), false);
         renderList.setMaterialGridRange(1U, 3U, 5U);
-        expectEqual("SceneRenderList::setMaterialGridRange() clears material grid tile coverage", renderList.materialGridTilesCoverRange(), false);
+        expectEqual("SceneRenderList::setMaterialGridRange() clears material grid "
+                "tile coverage", renderList.materialGridTilesCoverRange(), false);
         constexpr float syntheticSphereBoundsRadius = 0.32f;
         for (std::size_t itemIndex = 1U; itemIndex < 16U; ++itemIndex) {
             const auto itemOffset = static_cast<std::uint32_t>(itemIndex - 1U);
@@ -470,82 +471,133 @@ int main() {
             renderList[itemIndex].mesh = ve::builtin_assets::kSphere;
             renderList[itemIndex].boundsRadius = syntheticSphereBoundsRadius;
             renderList[itemIndex].boundsCenter = {(static_cast<float>(column) - 2.0f) * 2.0f, 0.28f, -4.4f - (static_cast<float>(row) * 1.25f)};
-        }
+      renderList[itemIndex].material.flags.y =
+          itemOffset % 3U == 0U
+              ? static_cast<float>(ve::RenderMaterialClass::Foliage)
+              : static_cast<float>(ve::RenderMaterialClass::Standard);
+    }
         const auto revisionBeforeFirstRebuild = renderList.materialGridTileRevision();
         renderList.rebuildMaterialGridTiles(16U, 16U);
         const auto revisionAfterRebuild = renderList.materialGridTileRevision();
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) covers material grid range", renderList.materialGridTilesCoverRange(), true);
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) creates one test tile", renderList.materialGridTiles().size(), static_cast<std::size_t>(1));
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) advances materialGridTileRevision by one", revisionAfterRebuild, revisionBeforeFirstRebuild + 1U);
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) covers "
+                "material grid range", renderList.materialGridTilesCoverRange(), true);
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) creates one "
+                "test tile", renderList.materialGridTiles().size(), static_cast<std::size_t>(1));
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) advances "
+                "materialGridTileRevision by one", revisionAfterRebuild, revisionBeforeFirstRebuild + 1U);
         if (renderList.materialGridTiles().size() == 1U) {
             const auto& homogeneousTile = renderList.materialGridTiles().front();
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile row begin", homogeneousTile.rowBegin, 0U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile row end", homogeneousTile.rowEnd, 3U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile column begin", homogeneousTile.columnBegin, 0U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile column end", homogeneousTile.columnEnd, 5U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile itemCount", homogeneousTile.itemCount, static_cast<std::size_t>(15));
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile reports same mesh", homogeneousTile.homogeneousMesh, true);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile common mesh", homogeneousTile.commonMesh, ve::builtin_assets::kSphere);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius finite", std::isfinite(homogeneousTile.maxItemBoundsRadius), true);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius positive", homogeneousTile.maxItemBoundsRadius > 0.0f, true);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius bounded by tile radius", homogeneousTile.maxItemBoundsRadius <= homogeneousTile.boundsRadius, true);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius equals per-item radius", homogeneousTile.maxItemBoundsRadius, syntheticSphereBoundsRadius);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile row begin", homogeneousTile.rowBegin, 0U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile row end", homogeneousTile.rowEnd, 3U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile column begin", homogeneousTile.columnBegin, 0U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile column end", homogeneousTile.columnEnd, 5U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile itemCount", homogeneousTile.itemCount, static_cast<std::size_t>(15));
+            expectEqual("SceneRenderList tile caches visible Standard material count",
+                  homogeneousTile.materialClassCounts[static_cast<std::size_t>(
+                      ve::RenderMaterialClass::Standard)],
+                  10U);
+      expectEqual("SceneRenderList tile caches visible Foliage material count",
+                  homogeneousTile.materialClassCounts[static_cast<std::size_t>(
+                      ve::RenderMaterialClass::Foliage)],
+                  5U);
+      expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile reports same mesh", homogeneousTile.homogeneousMesh, true);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile common mesh", homogeneousTile.commonMesh, ve::builtin_assets::kSphere);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile maxItemBoundsRadius finite", std::isfinite(homogeneousTile.maxItemBoundsRadius), true);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile maxItemBoundsRadius positive", homogeneousTile.maxItemBoundsRadius > 0.0f, true);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile maxItemBoundsRadius bounded by tile radius", homogeneousTile.maxItemBoundsRadius <= homogeneousTile.boundsRadius, true);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) "
+                  "homogeneous tile maxItemBoundsRadius equals per-item radius", homogeneousTile.maxItemBoundsRadius, syntheticSphereBoundsRadius);
         }
 
         const auto expectedMaterialGridTileCount = renderList.materialGridTiles().size();
         renderList.push({});
-        expectEqual("SceneRenderList::push(non-grid-item) keeps materialGridTilesCoverRange() true", renderList.materialGridTilesCoverRange(), true);
+        expectEqual("SceneRenderList::push(non-grid-item) keeps "
+                "materialGridTilesCoverRange() true", renderList.materialGridTilesCoverRange(), true);
         expectEqual("SceneRenderList::push(non-grid-item) keeps materialGridTileRevision", renderList.materialGridTileRevision(), revisionAfterRebuild);
-        expectEqual("SceneRenderList::push(non-grid-item) keeps materialGridTiles cache size", renderList.materialGridTiles().size(), expectedMaterialGridTileCount);
+        expectEqual("SceneRenderList::push(non-grid-item) keeps materialGridTiles "
+                "cache size", renderList.materialGridTiles().size(), expectedMaterialGridTileCount);
 
         const auto revisionBeforeOutsideMutation = renderList.materialGridTileRevision();
         renderList[0].mesh = ve::builtin_assets::kCube;
-        expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps material grid tile coverage", renderList.materialGridTilesCoverRange(), true);
-        expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps materialGridTiles cache size", renderList.materialGridTiles().size(), expectedMaterialGridTileCount);
-        expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps materialGridTileRevision", renderList.materialGridTileRevision(), revisionBeforeOutsideMutation);
+        expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps "
+                "material grid tile coverage", renderList.materialGridTilesCoverRange(), true);
+        expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps "
+                "materialGridTiles cache size", renderList.materialGridTiles().size(), expectedMaterialGridTileCount);
+        expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps "
+                "materialGridTileRevision", renderList.materialGridTileRevision(), revisionBeforeOutsideMutation);
 
         const auto revisionBeforeInsideMutation = renderList.materialGridTileRevision();
         renderList[2].mesh = ve::builtin_assets::kCube;
         const auto revisionAfterInsideMutation = renderList.materialGridTileRevision();
-        expectEqual("SceneRenderList::operator[](inside materialGridRange) clears material grid tile coverage", renderList.materialGridTilesCoverRange(), false);
-        expectEqual("SceneRenderList::operator[](inside materialGridRange) clears materialGridTiles cache", renderList.materialGridTiles().empty(), true);
-        expectEqual("SceneRenderList::operator[](inside materialGridRange) advances materialGridTileRevision by one", revisionAfterInsideMutation, revisionBeforeInsideMutation + 1U);
+        expectEqual("SceneRenderList::operator[](inside materialGridRange) clears "
+                "material grid tile coverage", renderList.materialGridTilesCoverRange(), false);
+        expectEqual("SceneRenderList::operator[](inside materialGridRange) clears "
+                "materialGridTiles cache", renderList.materialGridTiles().empty(), true);
+        expectEqual("SceneRenderList::operator[](inside materialGridRange) "
+                "advances materialGridTileRevision by one", revisionAfterInsideMutation, revisionBeforeInsideMutation + 1U);
 
         const auto revisionBeforeSecondRebuild = renderList.materialGridTileRevision();
         renderList.rebuildMaterialGridTiles(16U, 16U);
         const auto revisionAfterSecondRebuild = renderList.materialGridTileRevision();
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile recreates one test tile", renderList.materialGridTiles().size(), static_cast<std::size_t>(1));
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) reports material grid coverage", renderList.materialGridTilesCoverRange(), true);
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) advances materialGridTileRevision by one", revisionAfterSecondRebuild, revisionBeforeSecondRebuild + 1U);
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile "
+                "recreates one test tile", renderList.materialGridTiles().size(), static_cast<std::size_t>(1));
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) reports "
+                "material grid coverage", renderList.materialGridTilesCoverRange(), true);
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) advances "
+                "materialGridTileRevision by one", revisionAfterSecondRebuild, revisionBeforeSecondRebuild + 1U);
         const auto& mixedRange = renderList.materialGridRange();
         expectEqual("SceneRenderList::materialGridRange() remains valid for mixed rebuild", mixedRange.valid, true);
-        expectEqual("SceneRenderList::materialGridRange() preserves firstItem for mixed rebuild", mixedRange.firstItem, static_cast<std::size_t>(1));
+        expectEqual("SceneRenderList::materialGridRange() preserves firstItem for "
+                "mixed rebuild", mixedRange.firstItem, static_cast<std::size_t>(1));
         expectEqual("SceneRenderList::materialGridRange() preserves rows for mixed rebuild", mixedRange.rows, 3U);
-        expectEqual("SceneRenderList::materialGridRange() preserves columns for mixed rebuild", mixedRange.columns, 5U);
+        expectEqual("SceneRenderList::materialGridRange() preserves columns for "
+                "mixed rebuild", mixedRange.columns, 5U);
         if (renderList.materialGridTiles().size() == 1U) {
             const auto& mixedTile = renderList.materialGridTiles().front();
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves range begin", mixedTile.rowBegin, 0U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves range end", mixedTile.rowEnd, 3U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves column begin", mixedTile.columnBegin, 0U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves column end", mixedTile.columnEnd, 5U);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves itemCount", mixedTile.itemCount, static_cast<std::size_t>(15));
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile reports non-homogeneous mesh", mixedTile.homogeneousMesh, false);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile keeps first mesh as common", mixedTile.commonMesh, ve::builtin_assets::kSphere);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile preserves range begin", mixedTile.rowBegin, 0U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile preserves range end", mixedTile.rowEnd, 3U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile preserves column begin", mixedTile.columnBegin, 0U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile preserves column end", mixedTile.columnEnd, 5U);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile preserves itemCount", mixedTile.itemCount, static_cast<std::size_t>(15));
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile reports non-homogeneous mesh", mixedTile.homogeneousMesh, false);
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed "
+                  "tile keeps first mesh as common", mixedTile.commonMesh, ve::builtin_assets::kSphere);
         }
 
         renderList.setMaterialGridRange(2U, 2U, 2U);
-        expectEqual("SceneRenderList::setMaterialGridRange(2, 2, 2) clears material grid tile coverage", renderList.materialGridTilesCoverRange(), false);
+        expectEqual("SceneRenderList::setMaterialGridRange(2, 2, 2) clears "
+                "material grid tile coverage", renderList.materialGridTilesCoverRange(), false);
         expectEqual("SceneRenderList::setMaterialGridRange() clears material grid tiles", renderList.materialGridTiles().empty(), true);
 
         renderList.setMaterialGridRange(1U, 3U, 5U);
         renderList.rebuildMaterialGridTiles(16U, 16U);
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) recreates tile after range reset", renderList.materialGridTiles().size(), static_cast<std::size_t>(1));
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) restores full material grid coverage", renderList.materialGridTilesCoverRange(), true);
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) recreates "
+                "tile after range reset", renderList.materialGridTiles().size(), static_cast<std::size_t>(1));
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) restores "
+                "full material grid coverage", renderList.materialGridTilesCoverRange(), true);
 
         renderList.setMaterialGridRange(renderList.size(), 3U, 5U);
-        expectEqual("SceneRenderList::setMaterialGridRange() with no remaining grid items clears coverage", renderList.materialGridTilesCoverRange(), false);
+        expectEqual("SceneRenderList::setMaterialGridRange() with no remaining "
+                "grid items clears coverage", renderList.materialGridTilesCoverRange(), false);
         renderList.rebuildMaterialGridTiles(16U, 16U);
-        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) fails to set coverage for out-of-range grid", renderList.materialGridTilesCoverRange(), false);
+        expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) fails to "
+                "set coverage for out-of-range grid", renderList.materialGridTilesCoverRange(), false);
 
         renderList.clear();
         const auto& clearedRange = renderList.materialGridRange();

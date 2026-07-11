@@ -8,12 +8,13 @@
 #include <utility>
 
 #if defined(_WIN32)
-#include <windows.h>
 #include <bcrypt.h>
+#include <windows.h>
 #elif defined(__linux__)
 #include <cerrno>
 #include <sys/random.h>
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||     \
+    defined(__OpenBSD__) || defined(__DragonFly__)
 #include <cstdlib>
 #endif
 
@@ -172,7 +173,8 @@ void fillSceneEntityIdBytes(std::array<std::uint8_t, sceneEntityIdByteCount>& by
         }
         throw std::runtime_error("getrandom failed while generating scene entity ID");
     }
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||     \
+    defined(__OpenBSD__) || defined(__DragonFly__)
     arc4random_buf(bytes.data(), bytes.size());
 #else
     throw std::runtime_error("No operating-system CSPRNG is available for scene entity ID generation");
@@ -361,7 +363,8 @@ void SceneRenderList::rebuildMaterialGridTiles(const std::uint32_t tileRows, con
             const MeshAssetHandle commonMesh = items_[firstTileItem].mesh;
             bool homogeneousMesh = true;
             float maxItemBoundsRadius = 0.0f;
-            for (std::uint32_t row = rowBegin; row < rowEnd; ++row) {
+      std::array<unsigned, kRenderMaterialClassCount> materialClassCounts{};
+      for (std::uint32_t row = rowBegin; row < rowEnd; ++row) {
                 const std::size_t rowBase = materialGridRange_.firstItem + (static_cast<std::size_t>(row) * materialGridRange_.columns);
                 for (std::uint32_t column = columnBegin; column < columnEnd; ++column) {
                     const SceneRenderItem& item = items_[rowBase + column];
@@ -372,7 +375,11 @@ void SceneRenderList::rebuildMaterialGridTiles(const std::uint32_t tileRows, con
                     maxY = std::max(maxY, item.boundsCenter.y + item.boundsRadius);
                     maxZ = std::max(maxZ, item.boundsCenter.z + item.boundsRadius);
                     homogeneousMesh = homogeneousMesh && item.mesh == commonMesh;
-                    maxItemBoundsRadius = std::max(maxItemBoundsRadius, item.boundsRadius);
+          const std::size_t materialClass = static_cast<std::size_t>(
+              std::clamp(std::lround(item.material.flags.y), 0L,
+                         static_cast<long>(kRenderMaterialClassCount - 1U)));
+          ++materialClassCounts[materialClass];
+          maxItemBoundsRadius = std::max(maxItemBoundsRadius, item.boundsRadius);
                 }
             }
             const Vec3 tileCenter{(minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f};
@@ -385,6 +392,7 @@ void SceneRenderList::rebuildMaterialGridTiles(const std::uint32_t tileRows, con
                                                         length(tileExtents),
                                                         maxItemBoundsRadius,
                                                         static_cast<std::size_t>(rowEnd - rowBegin) * static_cast<std::size_t>(columnEnd - columnBegin),
+                        materialClassCounts,
                                                         commonMesh,
                                                         homogeneousMesh});
             columnBegin = columnEnd;
@@ -706,7 +714,7 @@ void DemoSceneRenderer::setAuthoredSceneItems(std::vector<SceneRenderItem> items
             materialClass >= static_cast<float>(
                                  RenderMaterialClass::Standard) &&
             materialClass <= static_cast<float>(
-                                 RenderMaterialClass::Emissive) &&
+                                 RenderMaterialClass::Water) &&
             std::round(materialClass) == materialClass;
         if (!item.mesh.valid() || !finite(item.boundsCenter) ||
             !std::isfinite(item.boundsRadius) || item.boundsRadius < 0.0f ||
@@ -847,7 +855,7 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
                                      17.0f,
                                      builtin_assets::kGroundPlane,
                                      Mat4::identity(),
-                                     {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 0.55f}}});
+                                     {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {static_cast<float>(MaterialFeatureGroundGrid), 0.0f, 0.0f, 0.55f}}});
     for (const SceneRenderItem& item : authoredSceneItems_) {
         renderList_.push(item);
     }

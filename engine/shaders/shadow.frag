@@ -14,9 +14,8 @@ layout(location = 1) flat in vec4 vMaterialFlags;
 layout(location = 2) flat in uvec4 vTextureIndices;
 
 void main() {
-    const uint maskedMaterial = 1U;
-    uint materialClass = uint(round(clamp(vMaterialFlags.y, 0.0, 7.0)));
-    if (materialClass != maskedMaterial) return;
+    uint packedFeatures = uint(round(max(vMaterialFlags.x, 0.0)));
+    if ((packedFeatures & 1U) == 0U) return;
     float alpha = 1.0;
     if ((vTextureIndices.w & 1U) != 0U) {
 #if VE_BINDLESS
@@ -26,5 +25,6 @@ void main() {
         alpha = texture(materialTextures[0], vUv).a;
 #endif
     }
-    if (alpha < vMaterialFlags.z) discard;
+    float alphaCutoff = float(packedFeatures >> 8U) / 32767.5;
+    if (alpha < alphaCutoff) discard;
 }

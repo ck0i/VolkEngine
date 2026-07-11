@@ -1,6 +1,6 @@
-#include "renderer/vulkan/VulkanRendererImpl.hpp"
 #include "assets/DerivedDataCache.hpp"
 #include "assets/TextureArtifact.hpp"
+#include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -282,8 +282,8 @@ void VulkanRenderer::Impl::createTextureResources() {
                 if (upload.artifact.id != reference.id ||
                     upload.artifact.role != reference.role ||
                     upload.artifact.colorSpace != reference.colorSpace) {
-                    throw std::runtime_error(
-                        "Authored texture artifact metadata does not match its material reference");
+                    throw std::runtime_error("Authored texture artifact metadata does "
+                                   "not match its material reference");
                 }
                 uploads.push_back(std::move(upload));
                 textureIndex = uploads.size() - 1U;
@@ -318,7 +318,18 @@ void VulkanRenderer::Impl::createTextureResources() {
     for (std::size_t& textureIndex : resourceOwner_.referenceMaterialTextureIndices) {
         if (textureIndex == std::numeric_limits<std::size_t>::max()) textureIndex = 0U;
     }
-    VkCommandBuffer uploadCommands = VK_NULL_HANDLE;
+  for (MaterialTextureBinding &binding :
+       resourceOwner_.materialTextureBindings) {
+    for (std::size_t role = 0U; role < binding.textures.size(); ++role) {
+      if (!binding.textures[role].valid()) {
+        binding.textures[role] = {
+            static_cast<std::uint32_t>(
+                resourceOwner_.referenceMaterialTextureIndices[role]),
+            1U};
+      }
+    }
+  }
+  VkCommandBuffer uploadCommands = VK_NULL_HANDLE;
     VkDeviceSize totalStagingSize = 0;
     Buffer textureStaging;
 
@@ -334,7 +345,8 @@ void VulkanRenderer::Impl::createTextureResources() {
             if (upload.artifact.storage != TextureStorage::Rgba8 ||
                 upload.artifact.mips.size() != 1U) {
                 throw std::runtime_error(
-                    "Authored texture storage is cooked but unsupported by the current Vulkan material upload path: " +
+            "Authored texture storage is cooked but unsupported by the current "
+            "Vulkan material upload path: " +
                     upload.path.generic_string());
             }
             LoadedImageRgba8 baseLevel;
@@ -361,16 +373,19 @@ void VulkanRenderer::Impl::createTextureResources() {
                 upload.mipLevels = buildNormalMapMipChainRgba8(std::move(baseLevel));
             } else if (alphaNeedsCpuMips) {
                 upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);
-                logger()->info("Texture {} uses alpha-weighted CPU albedo mips to avoid transparent texel bleed", upload.path.string());
+                logger()->info("Texture {} uses alpha-weighted CPU albedo mips to "
+                       "avoid transparent texel bleed", upload.path.string());
             } else if (upload.gpuMipGeneration || requestedMipLevels == 1U) {
                 upload.mipLevels = std::vector<LoadedImageRgba8>{std::move(baseLevel)};
             } else if (isAlbedo) {
                 upload.mipLevels = buildAlbedoMipChainRgba8(std::move(baseLevel), upload.format == VK_FORMAT_R8G8B8A8_SRGB);
-                logger()->warn("Texture format {} lacks linear blit/filter support; generated {} CPU albedo mips for {}",
+                logger()->warn("Texture format {} lacks linear blit/filter support; "
+                       "generated {} CPU albedo mips for {}",
                                static_cast<int>(upload.format), upload.mipLevels.size(), upload.path.string());
             } else {
                 upload.mipLevels = buildLinearMipChainRgba8(std::move(baseLevel));
-                logger()->warn("Texture format {} lacks linear blit/filter support; generated {} straight RGBA mips for {}",
+                logger()->warn("Texture format {} lacks linear blit/filter support; "
+                       "generated {} straight RGBA mips for {}",
                                static_cast<int>(upload.format), upload.mipLevels.size(), upload.path.string());
             }
             const std::uint32_t imageMipLevels = upload.gpuMipGeneration ? requestedMipLevels : static_cast<std::uint32_t>(upload.mipLevels.size());
@@ -706,8 +721,8 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
                 if (binding.textures[role].valid() &&
                     binding.textures[role].index !=
                         resourceOwner_.referenceMaterialTextureIndices[role]) {
-                    throw std::runtime_error(
-                        "Fixed material descriptor fallback cannot represent this scene's texture bindings");
+                    throw std::runtime_error("Fixed material descriptor fallback cannot "
+                                   "represent this scene's texture bindings");
                 }
             }
         }
@@ -854,9 +869,10 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
                   handleToUint64(resourceOwner_.depthPyramidSetLayout),
                   "Depth Pyramid Descriptor Set Layout");
 
-    // Renderer-owned descriptor sets are allocated once at startup; the ImGui backend owns a
-    // separate pool so scene/tonemap descriptor pressure stays fixed and free of frame-loop churn.
-    constexpr std::uint32_t sceneSetCount = kMaxFramesInFlight;
+  // Renderer-owned descriptor sets are allocated once at startup; the ImGui
+  // backend owns a separate pool so scene/tonemap descriptor pressure stays
+  // fixed and free of frame-loop churn.
+  constexpr std::uint32_t sceneSetCount = kMaxFramesInFlight;
     constexpr std::uint32_t tonemapSetCount = 1U;
     constexpr std::uint32_t cullSetCount = kMaxFramesInFlight;
     constexpr std::uint32_t depthPyramidSetCount =

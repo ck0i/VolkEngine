@@ -250,6 +250,7 @@ add_library(VolkEngine STATIC
     engine/scene/ScenePersistence.cpp
     engine/streaming/ResidencyManager.cpp
     engine/streaming/WorldPartition.cpp
+    engine/landscape/Landscape.cpp
     engine/platform/Input.cpp
     engine/platform/InputActions.cpp
     engine/platform/Window.cpp
@@ -756,6 +757,15 @@ target_link_libraries(VolkEngineWorldPartitionCpuTest
 volkengine_target_warnings(VolkEngineWorldPartitionCpuTest)
 add_test(NAME WorldPartitionCpu
     COMMAND VolkEngineWorldPartitionCpuTest)
+
+add_executable(VolkEngineLandscapeCpuTest
+    tests/LandscapeCpuTests.cpp)
+target_link_libraries(VolkEngineLandscapeCpuTest
+    PRIVATE
+        VolkEngine)
+volkengine_target_warnings(VolkEngineLandscapeCpuTest)
+add_test(NAME LandscapeCpu
+    COMMAND VolkEngineLandscapeCpuTest)
 
 if(VOLKENGINE_ENABLE_EDITOR)
     add_executable(VolkEngineAuthoringCpuTest

@@ -18,6 +18,12 @@ class SceneImporterRegistry;
 enum class TextureColorSpace : std::uint8_t { Linear, Srgb };
 enum class TextureRole : std::uint8_t { BaseColor, Normal, MetallicRoughness, Occlusion, Emissive };
 enum class MaterialAlphaMode : std::uint8_t { Opaque, Mask };
+enum class MaterialShadingModel : std::uint8_t {
+  Pbr,
+  Foliage,
+  Landscape,
+  Water,
+};
 enum class AnimationTarget : std::uint8_t { Translation, Rotation, Scale, Weights };
 enum class AnimationInterpolation : std::uint8_t { Linear, Step, CubicSpline };
 
@@ -40,6 +46,7 @@ struct ImportedMaterial {
     Vec3 emissiveFactor{};
     float metallicFactor = 1.0f;
     float roughnessFactor = 1.0f;
+  MaterialShadingModel shadingModel = MaterialShadingModel::Pbr;
     MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
     float alphaCutoff = 0.5f;
     bool doubleSided = false;
@@ -80,7 +87,7 @@ struct ImportedAnimationClip {
 
 struct ImportedGltfScene {
     static constexpr std::uint32_t kMeshArtifactSchemaVersion = 3;
-    static constexpr std::uint32_t kMaterialArtifactSchemaVersion = 2;
+    static constexpr std::uint32_t kMaterialArtifactSchemaVersion = 3;
     static constexpr std::uint32_t kSceneArtifactSchemaVersion = 3;
     AssetId sceneId;
     std::filesystem::path sourcePath;

@@ -99,7 +99,8 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     for (std::size_t index = 0; index < renderItems.size(); ++index) {
         const SceneRenderItem& item = renderItems[index];
         const std::size_t materialClass = static_cast<std::size_t>(
-            std::clamp(std::lround(item.material.flags.y), 0L, 7L));
+            std::clamp(std::lround(item.material.flags.y), 0L,
+                   static_cast<long>(kRenderMaterialClassCount - 1U)));
         ++plan.materialClassCounts[materialClass];
         if (updateAllRenderItems ||
             !sameRenderItem(frame.cachedGpuRenderItems[index], item)) {
@@ -112,7 +113,8 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                 item.mesh == builtin_assets::kSphere
                     ? 0U
                     : static_cast<std::uint32_t>(meshBatchIndex(item.mesh)),
-                item.mesh == builtin_assets::kSphere ? 1U : 0U, 0U, 0U};
+                item.mesh == builtin_assets::kSphere ? 1U : 0U,
+          static_cast<std::uint32_t>(materialClass), 0U};
             frame.cachedGpuRenderItems[index] = item;
             renderItemsChanged = true;
         }
@@ -303,7 +305,9 @@ void VulkanRenderer::Impl::validateGpuVisibility(
         frame.completedOccludedCullingUnitCount =
             counters->occludedCullingUnitCount;
         frame.completedSphereLodCounts = counters->sphereLodCounts;
-        frame.completedSceneTriangleCount = 0U;
+    std::ranges::copy(counters->visibleMaterialClassCounts,
+                      frame.completedMaterialClassCounts.begin());
+    frame.completedSceneTriangleCount = 0U;
         for (std::size_t commandIndex = 0;
              commandIndex < frame.submittedGpuCommandCount;
              ++commandIndex) {
@@ -393,12 +397,7 @@ VulkanRenderer::Impl::planSceneVisibility(
     if (renderItems.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
         throw std::runtime_error("Scene visibility exceeds renderer instance-count range");
     }
-    for (const SceneRenderItem& item : renderItems) {
-        const std::size_t materialClass = static_cast<std::size_t>(
-            std::clamp(std::lround(item.material.flags.y), 0L, 7L));
-        ++plan.materialClassCounts[materialClass];
-    }
-    plan.gridRange = renderItems.materialGridRange();
+  plan.gridRange = renderItems.materialGridRange();
     const std::vector<SceneGridTile>& gridTiles = renderItems.materialGridTiles();
     plan.gridItemCount = static_cast<std::size_t>(plan.gridRange.rows) * static_cast<std::size_t>(plan.gridRange.columns);
     const bool gridTilesCoverRange = renderItems.materialGridTilesCoverRange();
@@ -435,7 +434,12 @@ VulkanRenderer::Impl::planSceneVisibility(
         }
         return meshBatchIndex(mesh);
     };
-    const auto acceptVisibleItem = [&](const std::size_t itemIndex, const SceneRenderItem& item) {
+    const auto materialClassFor = [](const SceneRenderItem &item) {
+    return static_cast<std::size_t>(
+        std::clamp(std::lround(item.material.flags.y), 0L,
+                   static_cast<long>(kRenderMaterialClassCount - 1U)));
+  };
+  const auto acceptVisibleItem = [&](const std::size_t itemIndex, const SceneRenderItem& item) {
         const std::size_t meshIndex = meshBatchIndexFor(item.mesh, item.boundsCenter, item.boundsRadius, 0.0f);
         visibleSceneWork.push_back(VisibleSceneWork{
             VisibleSceneWork::Kind::Item, static_cast<std::uint32_t>(meshIndex),
@@ -443,16 +447,18 @@ VulkanRenderer::Impl::planSceneVisibility(
         ++plan.visibleItemCount;
         ++plan.meshInstanceCounts[meshIndex];
         plan.sceneTriangleCount += meshTriangleCounts[meshIndex];
-    };
+    ++plan.materialClassCounts[materialClassFor(item)];
+  };
     const auto acceptHomogeneousTile = [&](const SceneGridTile& tile, const std::size_t tileIndex) -> bool {
         if (!tile.homogeneousMesh ||
             tileIndex > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) ||
             tile.itemCount > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max() - plan.visibleItemCount)) {
             return false;
         }
-        // Sphere tiles are logically homogeneous but camera-dependent LOD is per item.
-        // Fall back to the tile's item loop while retaining its accepted frustum result.
-        if (tile.commonMesh == builtin_assets::kSphere) {
+    // Sphere tiles are logically homogeneous but camera-dependent LOD is per
+    // item. Fall back to the tile's item loop while retaining its accepted
+    // frustum result.
+    if (tile.commonMesh == builtin_assets::kSphere) {
             return false;
         }
         const std::size_t meshIndex = meshBatchIndexFor(tile.commonMesh, tile.boundsCenter, tile.maxItemBoundsRadius, tile.boundsRadius);
@@ -466,7 +472,12 @@ VulkanRenderer::Impl::planSceneVisibility(
         plan.visibleItemCount += static_cast<std::uint32_t>(tile.itemCount);
         plan.meshInstanceCounts[meshIndex] += static_cast<std::uint32_t>(tile.itemCount);
         plan.sceneTriangleCount += static_cast<std::uint64_t>(meshTriangleCounts[meshIndex]) * static_cast<std::uint64_t>(tile.itemCount);
-        return true;
+    for (std::size_t materialClass = 0U;
+         materialClass < kRenderMaterialClassCount; ++materialClass) {
+      plan.materialClassCounts[materialClass] +=
+          tile.materialClassCounts[materialClass];
+    }
+    return true;
     };
     const auto cullItem = [&](const std::size_t itemIndex) {
         const SceneRenderItem& item = renderItems[itemIndex];
@@ -502,7 +513,12 @@ VulkanRenderer::Impl::planSceneVisibility(
             for (std::size_t meshIndex = 0; meshIndex < resourceOwner_.sceneMeshes.size(); ++meshIndex) {
                 plan.meshInstanceCounts[meshIndex] += gridVisibilityCache_.meshInstanceCounts[meshIndex];
             }
-            plan.gridVisibilityCacheHit = true;
+      for (std::size_t materialClass = 0U;
+           materialClass < kRenderMaterialClassCount; ++materialClass) {
+        plan.materialClassCounts[materialClass] +=
+            gridVisibilityCache_.materialClassCounts[materialClass];
+      }
+      plan.gridVisibilityCacheHit = true;
             plan.gridVisibilityWorkItems = gridVisibilityCache_.workItemCount;
         } else {
             plan.gridWorkBegin = visibleSceneWork.size();
@@ -514,6 +530,7 @@ VulkanRenderer::Impl::planSceneVisibility(
             const std::uint32_t gridCulledTileBegin = plan.gridTilesCulled;
             const std::uint32_t gridIntersectedBegin = plan.gridTilesIntersected;
             const auto meshCountBegin = plan.meshInstanceCounts;
+      const auto materialCountBegin = plan.materialClassCounts;
             for (std::size_t tileIndex = 0; tileIndex < gridTiles.size(); ++tileIndex) {
                 const SceneGridTile& tile = gridTiles[tileIndex];
                 const auto visitTileItems = [&](const auto& visitor) {
@@ -563,7 +580,13 @@ VulkanRenderer::Impl::planSceneVisibility(
             gridVisibilityCache_.gridTilesAccepted = plan.gridTilesAccepted - gridAcceptedBegin;
             gridVisibilityCache_.gridTilesCulled = plan.gridTilesCulled - gridCulledTileBegin;
             gridVisibilityCache_.gridTilesIntersected = plan.gridTilesIntersected - gridIntersectedBegin;
-            plan.gridVisibilityWorkItems = gridVisibilityCache_.workItemCount;
+      for (std::size_t materialClass = 0U;
+           materialClass < kRenderMaterialClassCount; ++materialClass) {
+        gridVisibilityCache_.materialClassCounts[materialClass] =
+            plan.materialClassCounts[materialClass] -
+            materialCountBegin[materialClass];
+      }
+      plan.gridVisibilityWorkItems = gridVisibilityCache_.workItemCount;
         }
         cullRange(plan.gridRange.firstItem + plan.gridItemCount, renderItems.size());
     } else {

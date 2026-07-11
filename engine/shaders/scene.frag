@@ -107,10 +107,47 @@ const uint MATERIAL_SKIN = 4U;
 const uint MATERIAL_HAIR = 5U;
 const uint MATERIAL_CLOTH = 6U;
 const uint MATERIAL_EMISSIVE = 7U;
+const uint MATERIAL_LANDSCAPE = 8U;
+const uint MATERIAL_WATER = 9U;
+const uint MATERIAL_FEATURE_ALPHA_MASK = 1U;
+const uint MATERIAL_FEATURE_GROUND_GRID = 4U;
 
 uint materialClass() {
     return uint(round(clamp(vMaterialFlags.y, 0.0,
-                            float(MATERIAL_EMISSIVE))));
+                            float(MATERIAL_WATER))));
+}
+uint packedMaterialFeatures() {
+    return uint(round(max(vMaterialFlags.x, 0.0)));
+}
+bool hasMaterialFeature(uint feature) {
+    return (packedMaterialFeatures() & feature) != 0U;
+}
+float materialAlphaCutoff() {
+    return float(packedMaterialFeatures() >> 8U) / 32767.5;
+}
+float landscapeVariation(vec2 coordinate) {
+    vec2 cell = floor(coordinate);
+    vec2 local = fract(coordinate);
+    local = local * local * (3.0 - 2.0 * local);
+    float a = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+    float b = fract(sin(dot(cell + vec2(1.0, 0.0),
+                            vec2(127.1, 311.7))) * 43758.5453);
+    float c = fract(sin(dot(cell + vec2(0.0, 1.0),
+                            vec2(127.1, 311.7))) * 43758.5453);
+    float d = fract(sin(dot(cell + vec2(1.0),
+                            vec2(127.1, 311.7))) * 43758.5453);
+    return mix(mix(a, b, local.x), mix(c, d, local.x), local.y);
+}
+vec3 landscapeSurface(vec3 normal, vec2 coordinate, float height) {
+    float variation = landscapeVariation(coordinate * 0.37);
+    float slope = smoothstep(0.18, 0.62, 1.0 - normal.y);
+    vec3 meadow = mix(vec3(0.075, 0.19, 0.055),
+                      vec3(0.19, 0.31, 0.08), variation);
+    vec3 rock = mix(vec3(0.19, 0.17, 0.145),
+                    vec3(0.36, 0.32, 0.27), variation);
+    float snow = smoothstep(125.0, 210.0, height) *
+                 smoothstep(0.65, 0.92, normal.y);
+    return mix(mix(meadow, rock, slope), vec3(0.72, 0.77, 0.80), snow);
 }
 vec2 environmentUv(vec3 direction) {
     direction = normalize(direction);
@@ -250,8 +287,8 @@ void main() {
     vec4 baseSample = hasMaterialTexture(1U)
         ? sampleMaterialTexture(0U)
         : vec4(1.0);
-    if (materialClass() == MATERIAL_MASKED &&
-        baseSample.a < vMaterialFlags.z) {
+    if (hasMaterialFeature(MATERIAL_FEATURE_ALPHA_MASK) &&
+        baseSample.a < materialAlphaCutoff()) {
         discard;
     }
     albedo *= baseSample.rgb;
@@ -260,6 +297,25 @@ void main() {
         ambientOcclusion = clamp(orm.r, 0.0, 1.0);
         roughness = clamp(roughness * orm.g, 0.04, 1.0);
         metallic = clamp(metallic * orm.b, 0.0, 1.0);
+    }
+    uint model = materialClass();
+    if (model == MATERIAL_LANDSCAPE) {
+        albedo *= landscapeSurface(n, vUv, vWorldPosition.y);
+        roughness = max(roughness, 0.72);
+        metallic = 0.0;
+    } else if (model == MATERIAL_WATER) {
+        float time = scene.cameraPositionTime.w;
+        vec2 phase = vUv * 9.0;
+        float waveX = sin(phase.x + time * 0.73) * 0.11 +
+                      sin(phase.y * 0.61 + time * 1.07) * 0.07;
+        float waveZ = cos(phase.y - time * 0.67) * 0.11 +
+                      cos(phase.x * 0.53 - time * 0.91) * 0.07;
+        n = normalize(n + vec3(waveX, 0.0, waveZ));
+        float variation = landscapeVariation(vUv * 0.8);
+        albedo = mix(vec3(0.012, 0.075, 0.105),
+                     vec3(0.025, 0.18, 0.21), variation);
+        roughness = 0.12;
+        metallic = 0.06;
     }
 
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
@@ -303,7 +359,8 @@ void main() {
     vec3 ambientSpecular = ambientF * specularEnvironment;
     vec3 ambient = (ambientDiffuse + ambientSpecular) *
                    ambientOcclusion;
-    float groundGrid = vMaterialFlags.x > 0.5 ? gridMask(vUv) : 0.0;
+    float groundGrid =
+        hasMaterialFeature(MATERIAL_FEATURE_GROUND_GRID) ? gridMask(vUv) : 0.0;
     vec3 gridTint = vec3(0.08, 0.09, 0.10) * groundGrid;
     vec3 color = directional + local + ambient +
                  vEmissiveMetallic.rgb + gridTint;

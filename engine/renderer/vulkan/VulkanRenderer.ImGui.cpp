@@ -150,11 +150,12 @@ void VulkanRenderer::Impl::beginImGuiFrame(const Camera &camera,
         ImGui::Separator();
         ImGui::Text("Frame delta: %.3f ms", frameDeltaMs);
         ImGui::Text("CPU render-submit: %.3f ms", stats_.cpuFrameMs);
-        ImGui::Text("CPU phases: scene %.3f / prepare %.3f / record %.3f / submit %.3f ms",
+        ImGui::Text("CPU phases: scene %.3f / prepare %.3f / record %.3f / "
+                  "submit %.3f ms",
                     stats_.cpuSceneBuildMs, stats_.cpuPrepareMs, stats_.cpuCommandRecordMs, stats_.cpuQueueSubmitMs);
         if (stats_.gpuTimestampsValid) {
-            ImGui::Text(
-                "GPU frame: %.3f ms (lights %.3f / cull %.3f / shadows %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
+            ImGui::Text("GPU frame: %.3f ms (lights %.3f / cull %.3f / shadows "
+                    "%.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
                 stats_.gpuFrameMs, stats_.gpuLightAssignmentMs,
                 stats_.gpuCullMs, stats_.gpuShadowMs,
                 stats_.gpuDepthPrepassMs, stats_.gpuHdrSceneMs,
@@ -162,7 +163,8 @@ void VulkanRenderer::Impl::beginImGuiFrame(const Camera &camera,
         } else {
             ImGui::TextUnformatted("GPU frame: pending/unavailable");
         }
-        ImGui::Text("Draws: %u  Culled items: %u  Grid tiles: %u/%u accepted, %u culled, %u intersected",
+        ImGui::Text("Draws: %u  Culled items: %u  Grid tiles: %u/%u accepted, %u "
+                  "culled, %u intersected",
                     stats_.drawCalls, stats_.culledItemCount, stats_.gridTilesAccepted, stats_.gridTileCount,
                     stats_.gridTilesCulled, stats_.gridTilesIntersected);
         ImGui::Text("Grid visibility cache: %s  Work records: %u",
@@ -181,12 +183,14 @@ void VulkanRenderer::Impl::beginImGuiFrame(const Camera &camera,
             stats_.shadowsEnabled ? "on" : "off",
             stats_.shadowViewCount, stats_.shadowAtlasCapacity,
             stats_.shadowAtlasOverflowCount);
-        ImGui::Text(
-            "Materials std/mask/coat/foliage/skin/hair/cloth/emissive: %u/%u/%u/%u/%u/%u/%u/%u",
+        ImGui::Text("Materials "
+                  "std/mask/coat/foliage/skin/hair/cloth/emissive/land/water: "
+                  "%u/%u/%u/%u/%u/%u/%u/%u/%u/%u",
             stats_.materialClassCounts[0], stats_.materialClassCounts[1],
             stats_.materialClassCounts[2], stats_.materialClassCounts[3],
             stats_.materialClassCounts[4], stats_.materialClassCounts[5],
-            stats_.materialClassCounts[6], stats_.materialClassCounts[7]);
+            stats_.materialClassCounts[6], stats_.materialClassCounts[7],
+                  stats_.materialClassCounts[8], stats_.materialClassCounts[9]);
         ImGui::Text("Scene: %u items, %u visible, %u mesh batches, %u scene passes, %s",
                     stats_.sceneItemCount, stats_.visibleItemCount, stats_.meshBatchCount, stats_.scenePassCount,
                     stats_.indirectSceneDraws
@@ -195,7 +199,8 @@ void VulkanRenderer::Impl::beginImGuiFrame(const Camera &camera,
                                : "mesh indirect")
                         : "direct batched");
         ImGui::Text(
-            "Culling: %u cooked clusters, %u visible / %u tested / %u Hi-Z rejected %s, GPU cull %s%s, Hi-Z %s",
+          "Culling: %u cooked clusters, %u visible / %u tested / %u Hi-Z "
+          "rejected %s, GPU cull %s%s, Hi-Z %s",
             stats_.sceneClusterCount, stats_.visibleCullingUnitCount,
             stats_.testedCullingUnitCount, stats_.occludedCullingUnitCount,
             stats_.cullingUnitsAreClusters ? "cluster instances" : "instances",
@@ -227,18 +232,22 @@ void VulkanRenderer::Impl::beginImGuiFrame(const Camera &camera,
         ImGui::Text("Texture sampling: anisotropy %s (%.1fx)",
                     deviceOwner_.info.samplerAnisotropy ? "enabled" : "off",
                     deviceOwner_.info.maxSamplerAnisotropy);
-        ImGui::Text("Frame graph: %u passes, %u logical resources, %u barriers, %u physical allocations",
+        ImGui::Text("Frame graph: %u passes, %u logical resources, %u barriers, "
+                  "%u physical allocations",
                     stats_.graphPassCount, stats_.graphResourceCount, stats_.graphBarrierCount,
                     stats_.graphPhysicalAllocationCount);
-        ImGui::Text("Frame graph memory: %.2f / %.2f MiB requested/allocated; compile %.3f ms, generation %llu (%s)",
+        ImGui::Text("Frame graph memory: %.2f / %.2f MiB requested/allocated; "
+                  "compile %.3f ms, generation %llu (%s)",
                     bytesToMiB(stats_.graphTransientRequestedBytes),
                     bytesToMiB(stats_.graphTransientAllocatedBytes), stats_.cpuGraphCompileMs,
                     static_cast<unsigned long long>(stats_.graphRecompileCount),
                     stats_.graphLastCompileWasResize ? "resize" : "startup");
-        ImGui::Text("GPU resources: %u live (%u buffers, %u images, %u imported), %.2f MiB",
+        ImGui::Text("GPU resources: %u live (%u buffers, %u images, %u "
+                  "imported), %.2f MiB",
                     resourceStats.liveResources, resourceStats.buffers, resourceStats.images,
                     resourceStats.importedImages, bytesToMiB(resourceStats.bytes));
-        ImGui::Text("Resource bytes: buffers %.2f MiB, owned images %.2f MiB, imported images %.2f MiB",
+        ImGui::Text("Resource bytes: buffers %.2f MiB, owned images %.2f MiB, "
+                  "imported images %.2f MiB",
                     bytesToMiB(resourceStats.bufferBytes), bytesToMiB(resourceStats.ownedImageBytes),
                     bytesToMiB(resourceStats.importedImageBytes));
     }

@@ -496,7 +496,7 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
   }
 }
 
-inline std::array<std::filesystem::path, 15>
+inline std::array<std::filesystem::path, 16>
 shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
   return {
       shaderDirectory / "scene.vert.spv",
@@ -514,6 +514,7 @@ shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
         shaderDirectory / "shadow.vert.spv",
         shaderDirectory / "shadow.frag.spv",
         shaderDirectory / "shadow_bindless.frag.spv",
+      shaderDirectory / "atmosphere.frag.spv",
     };
 }
 } // namespace vulkan_renderer_detail
@@ -717,7 +718,9 @@ private:
         std::uint32_t completedVisibleItemCount = 0;
         std::uint32_t completedVisibleCullingUnitCount = 0;
         std::array<std::uint32_t, 4> completedSphereLodCounts{};
-        std::uint64_t completedSceneTriangleCount = 0;
+        std::array<unsigned, kRenderMaterialClassCount>
+        completedMaterialClassCounts{};
+    std::uint64_t completedSceneTriangleCount = 0;
         std::uint32_t completedTestedCullingUnitCount = 0;
         std::uint32_t completedOccludedCullingUnitCount = 0;
         bool completedGpuCullCountersValid = false;
@@ -792,6 +795,9 @@ private:
         Vec4 lightColor;
         Vec4 ambientSkyColor;
     Vec4 ambientGroundColor;
+    Vec4 cameraForwardTanHalfFov;
+    Vec4 cameraRightAspect;
+    Vec4 cameraUpAtmosphere;
   };
 
   struct alignas(16) InstanceData {
@@ -824,7 +830,9 @@ private:
         std::uint32_t testedCullingUnitCount = 0;
         std::uint32_t occludedCullingUnitCount = 0;
         std::array<std::uint32_t, 4> sphereLodCounts{};
-    };
+    std::array<std::uint32_t, kRenderMaterialClassCount>
+        visibleMaterialClassCounts{};
+  };
     struct DepthPyramidPushConstants {
         std::uint32_t sourceWidth = 0;
         std::uint32_t sourceHeight = 0;
@@ -855,7 +863,8 @@ private:
         VkPipeline depthPrepass = VK_NULL_HANDLE;
         VkPipeline scene = VK_NULL_HANDLE;
         VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
-        VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
+    VkPipeline atmosphere = VK_NULL_HANDLE;
+    VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
         VkPipeline tonemap = VK_NULL_HANDLE;
         VkPipelineLayout cullLayout = VK_NULL_HANDLE;
         VkPipeline cullSubgroup = VK_NULL_HANDLE;
@@ -872,7 +881,7 @@ private:
     std::array<VkFence, kMaxFramesInFlight> completionFences{};
   };
 
-  static_assert(sizeof(SceneUniforms) == 144,
+  static_assert(sizeof(SceneUniforms) == 192,
                 "SceneUniforms must match GLSL SceneData layout");
   static_assert(offsetof(SceneUniforms, viewProjection) == 0,
                 "SceneUniforms.viewProjection offset mismatch");
@@ -886,6 +895,12 @@ private:
                 "SceneUniforms.ambientSkyColor offset mismatch");
   static_assert(offsetof(SceneUniforms, ambientGroundColor) == 128,
                 "SceneUniforms.ambientGroundColor offset mismatch");
+  static_assert(offsetof(SceneUniforms, cameraForwardTanHalfFov) == 144,
+                "SceneUniforms.cameraForwardTanHalfFov offset mismatch");
+  static_assert(offsetof(SceneUniforms, cameraRightAspect) == 160,
+                "SceneUniforms.cameraRightAspect offset mismatch");
+  static_assert(offsetof(SceneUniforms, cameraUpAtmosphere) == 176,
+                "SceneUniforms.cameraUpAtmosphere offset mismatch");
   static_assert(sizeof(InstanceData) == 176,
                 "InstanceData must match GLSL SceneInstance layout");
   static_assert(offsetof(InstanceData, model) == 0,
@@ -910,11 +925,12 @@ private:
                   "GpuCullUniforms must match GLSL CullData layout");
     static_assert(sizeof(GpuMeshClusterRange) == 8,
                   "GpuMeshClusterRange must match GLSL MeshClusterRange layout");
-    static_assert(sizeof(GpuCullCounters) == 32,
+    static_assert(sizeof(GpuCullCounters) == 80,
                   "GpuCullCounters must match GLSL CullCounterData layout");
-    static_assert(sizeof(DepthPyramidPushConstants) == 12);
     static_assert(offsetof(GpuCullCounters, sphereLodCounts) == 16,
                   "GpuCullCounters.sphereLodCounts offset mismatch");
+  static_assert(offsetof(GpuCullCounters, visibleMaterialClassCounts) == 32,
+                "GpuCullCounters.visibleMaterialClassCounts offset mismatch");
     static_assert(sizeof(GpuLightingUniforms) == 1616,
                   "GpuLightingUniforms must match GLSL LightingData layout");
     static_assert(offsetof(GpuLightingUniforms, directional) == 64);
@@ -1331,7 +1347,8 @@ private:
         VkPipeline depthPyramid = VK_NULL_HANDLE;
         VkPipeline cullSubgroup = VK_NULL_HANDLE;
         VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
-        VkPipelineLayout cullLayout = VK_NULL_HANDLE;
+    VkPipeline atmosphere = VK_NULL_HANDLE;
+    VkPipelineLayout cullLayout = VK_NULL_HANDLE;
         VkPipeline cull = VK_NULL_HANDLE;
         VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
         VkPipeline tonemap = VK_NULL_HANDLE;
@@ -1341,7 +1358,7 @@ private:
         VkPipeline shadow = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 15> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 16> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };
@@ -1377,7 +1394,7 @@ private:
         std::vector<std::uint32_t> meshInstanceCounts;
         std::uint32_t visibleItemCount = 0;
         std::uint64_t sceneTriangleCount = 0;
-        std::array<unsigned, 8> materialClassCounts{};
+        std::array<unsigned, kRenderMaterialClassCount> materialClassCounts{};
         Vec3 cameraPosition{};
         Vec3 cameraForward{1.0f, 0.0f, 0.0f};
         std::uint32_t culledItemCount = 0;
@@ -1410,7 +1427,8 @@ private:
         std::uint32_t gridTilesAccepted = 0;
         std::uint32_t gridTilesCulled = 0;
         std::uint32_t gridTilesIntersected = 0;
-    };
+    std::array<unsigned, kRenderMaterialClassCount> materialClassCounts{};
+  };
 
     struct InstanceSortKey {
     float depth = 0.0f;

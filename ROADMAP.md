@@ -71,7 +71,7 @@ Implemented:
 - Forward+ tiled local-light assignment for bounded point and spot lights, one directional light, deterministic light-list overflow, and one compute dispatch per frame.
 - A fixed 2048² depth atlas provides three directional cascades plus deterministic local spot-shadow slots, slope-scaled receiver bias, stable cascade fitting, guarded projected-depth sampling, and explicit atlas-pressure telemetry.
 - HDR image-based diffuse/specular lighting uses a mipmapped linear environment map, bounded spherical reflection probes, exposure compensation, and ACES output.
-- The packed PBR path covers standard, masked, clear-coat, foliage, skin, hair, cloth, and emissive classes without per-material descriptor growth; bindless sampled images remain capability-gated with fixed descriptors as fallback.
+- The packed PBR path covers standard, masked, clear-coat, foliage, skin, hair, cloth, emissive, landscape, and water classes without per-material descriptor growth; analytic atmosphere, procedural terrain response, and GPU foliage wind share the Forward+ path.
 - CPU fallback visibility plus capability-gated GPU cluster frustum/LOD/temporal-occlusion culling, visible-instance compaction, and generated multi-draw indirect submission.
 - Upload synchronization, pipeline caching, shader hot reload, per-pass GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
 - Executable frame-graph variants drive Forward+ assignment, cull, shadow atlas, depth, HDR, temporal depth-pyramid, tone-map, and screenshot work with explicit synchronization/lifetime contracts and machine-readable diagnostics.
@@ -82,7 +82,7 @@ Current limits:
 - GPU submission currently uses a flat bounded-cluster list; it does not yet traverse a cluster hierarchy or provide fine-grained mesh/cluster LOD beyond the existing sphere mesh tiers.
 - The temporal Hi-Z implementation is correctness-proven on one integrated Vulkan driver, but representative cross-driver crossover gates are not yet established.
 - The frame graph does not schedule multiple queues or physically alias Vulkan memory yet; current depth/HDR logical transients intentionally use separate allocation classes and are realized at swapchain scope.
-- There is no virtual texture pipeline, GPU-page streaming scene representation, scalable terrain/world renderer, hardware ray tracing, or production global illumination path.
+- There is no virtual texture pipeline, GPU-page streaming scene representation, hardware ray tracing, production global illumination, cloud/weather/volumetric stack, or terrain-specific GPU page representation.
 
 ### Assets, tools, and delivery
 
@@ -97,6 +97,7 @@ Implemented:
 - Unified asynchronous runtime artifact residency, canonical partition manifests
   and cell artifacts, transactional coarse/fine frontier publication, bounded
   per-frame streaming traces, and a live deterministic Vulkan traversal gate.
+- Deterministic bounded landscape fields, brushes, collision/query samples, skirted hierarchical terrain patches, low-poly vegetation meshes, biome-driven foliage scatter, and water-patch cooking feed the same cooked-world/partition/runtime asset path.
 - Twenty-seven CPU test executables plus sandbox, editor, and partition-benchmark help tests.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
@@ -109,7 +110,7 @@ Current limits:
 ### Verified baseline
 
 Current local baseline (11 July 2026):
-- `ctest --preset linux-debug` passed all 30 registered tests; the editor-free `linux-runtime` preset passed all 28 of its registered tests and its generated build contains no `engine/editor` source or editor target.
+- `ctest --preset linux-debug` passed all 31 registered tests; the editor-free `linux-runtime` preset passed all 29 of its registered tests and its generated build contains no `engine/editor` source or editor target.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
@@ -132,7 +133,8 @@ Current local baseline (11 July 2026):
   summary plus an inspected 1280×720 screenshot. Validation was requested but
   unavailable locally; the controlled GPU workflow now runs this same gate with
   validation required.
-This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, S5's bounded parallel execution plus transactional background asset-publication path, S6's reflected authoring-to-cooked-runtime creator loop, and M1's bounded asynchronous residency/partition traversal contract on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
+- The M2 `landscape-traversal-v1` gate completed 1,320 Vulkan frames and 1,260 measured traversal samples over a deterministic 28 km out-and-back route. Its canonical 21-cell hierarchy streamed 21 terrain patches across three LOD tiers, 667 biome-selected foliage instances across three reusable meshes, and 16 water patches while analytic atmosphere and GPU vertex wind remained active. Schema-v7 evidence recorded a stable SHA-256 content identity, fifteen publications, eleven origin shifts, four evictions, six backpressure events, zero coverage gaps, partial loads, main-thread IO, IO/missing-dependency/OOM failures, and CPU/GPU p95 frame times of 1.718/14.528 ms under explicit 16.667 ms budgets. The run emitted an inspected 1280×720 screenshot; validation was requested but unavailable locally.
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, S5's bounded parallel execution plus transactional background asset-publication path, S6's reflected authoring-to-cooked-runtime creator loop, M1's bounded asynchronous residency/partition traversal contract, and M2's reproducible streamed natural-landscape benchmark on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -381,18 +383,22 @@ pinned-frontier OOM, canonical manifests, hierarchy/coverage rejection,
 corrupt-cell repair, shared-frontier retry, transactional publication, origin
 rebasing, and zero-gap traversal.
 
-## M2. Terrain, foliage, procedural generation, and atmosphere — **Later**
+## M2. Terrain, foliage, procedural generation, and atmosphere — **Current**
 
-Depends on the streaming and GPU-driven foundations.
+The cinematic natural-landscape benchmark now runs through the M1 streaming path and the S3/S4 GPU renderer.
 
-- Build terrain clip/LOD, layered landscape materials, collision/query data, and streamed editing/cooking.
-- Add GPU-driven foliage placement, culling, wind, density tiers, and biome rules.
-- Add deterministic procedural scatter/generation suitable for authoring and reproducible cooking.
-- Add atmosphere, sky, clouds/weather, volumetrics, water, decals, and effects in measured increments needed by the benchmark.
+Implemented contract:
 
-Exit gate: the large natural-landscape benchmark is reproducible, traversable, visually stable, and fully instrumented under explicit scene, memory, loading, CPU, and GPU budgets.
+- `LandscapeField` provides bounded deterministic height, normal, moisture, temperature, and biome queries plus revisioned radial height brushes. The same query contract supports cooking, collision/placement queries, and reproducible edits.
+- `cookTerrainPatch` emits local-space, skirted indexed patches at three hierarchy-selected LOD tiers. Each partition cell owns a stable generated mesh ID; complete coarse/fine frontiers publish through existing `VECW` transactions and origin rebasing.
+- Deterministic biome/slope/density scatter cooks grass, shrub, and tree instances into streamed cells. Reusable low-poly meshes keep geometry compact; existing GPU visibility, indirect submission, shadows, and shader-side wind handle runtime work without a second foliage renderer.
+- Landscape and water are explicit material ABI classes. Procedural altitude/slope/moisture response, bounded water shading, analytic sky/atmosphere, and camera-relative foliage motion execute in the existing Forward+/HDR passes.
+- Generated benchmark assets augment the cooked reference bundle transactionally before renderer construction. Untextured generated materials receive valid renderer fallback bindings without per-material descriptor growth.
+- Schema-v7 summaries and the M2 ImGui overlay expose seed/content identity, LOD geometry, biome and species distributions, edit revision, visible terrain/foliage/water counts, traversal distance, budgets, residency pressure, and CPU/GPU distributions.
 
-## M3. Published fidelity and performance benchmark — **Later**
+Exit gate: **Met.** `VolkEnginePartitionBenchmark --benchmark-gate` requires the full 1,200-frame measured traversal, visible terrain/foliage/water, at least 1,200 valid CPU and GPU timing samples, CPU/GPU p95 within the declared 16.667 ms budgets, zero coverage gaps/partial loads/main-thread IO/IO/OOM/missing-dependency failures, and resident bytes within budget. Focused contracts cover deterministic fields, seams, LOD metadata, brushes, water, all foliage density/species paths, bounded scatter failures, generated mesh bounds, material-class telemetry, and schema-v7 serialization.
+
+## M3. Published fidelity and performance benchmark — **Next**
 
 The initial target is a scene-budgeted native 3840×2160 at 60 FPS on an RTX 4070/RX 7800 XT-class GPU paired with a modern eight-core desktop CPU. A separate 120+ FPS scalability mode should publish its own resolution, content, and feature budgets rather than weakening the 4K claim invisibly.
 

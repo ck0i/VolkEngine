@@ -11,8 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <string>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,7 +35,9 @@ struct SceneRenderItem {
     RenderMaterial material{};
 };
 
-static_assert(sizeof(SceneRenderItem) == 176, "SceneRenderItem layout changed; keep cull fields packed before model/material");
+static_assert(sizeof(SceneRenderItem) == 176,
+              "SceneRenderItem layout changed; keep cull fields packed before "
+              "model/material");
 static_assert(offsetof(SceneRenderItem, boundsCenter) == 0, "SceneRenderItem boundsCenter should stay first for culling");
 static_assert(offsetof(SceneRenderItem, boundsRadius) == 12, "SceneRenderItem boundsRadius should stay with boundsCenter");
 static_assert(offsetof(SceneRenderItem, mesh) == 16, "SceneRenderItem mesh should stay in the first cache line");
@@ -58,6 +60,7 @@ struct SceneGridTile {
     float boundsRadius = 0.0f;
     float maxItemBoundsRadius = 0.0f;
     std::size_t itemCount = 0;
+  std::array<unsigned, kRenderMaterialClassCount> materialClassCounts{};
     MeshAssetHandle commonMesh = builtin_assets::kCube;
     bool homogeneousMesh = false;
 };

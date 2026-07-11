@@ -375,7 +375,8 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
             if (input.type != cgltf_type_scalar || input.component_type != cgltf_component_type_r_32f ||
                 input.count == 0U || input.count > options.maximumAnimationKeyframes ||
                 input.count > std::numeric_limits<std::uint32_t>::max()) {
-                throw std::runtime_error("glTF animation input accessor is invalid or exceeds the keyframe limit");
+                throw std::runtime_error("glTF animation input accessor is invalid or "
+                                 "exceeds the keyframe limit");
             }
             ImportedAnimationChannel channel;
             channel.targetNode = static_cast<std::uint32_t>(sourceChannel.target_node - data->nodes);
@@ -398,7 +399,8 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
                      : output.count != minimumOutputCount) ||
                 output.count > options.maximumAnimationValues / outputComponents) {
                 throw std::runtime_error(
-                    "glTF animation output accessor is incompatible with its target or exceeds the value limit");
+            "glTF animation output accessor is incompatible with its target or "
+            "exceeds the value limit");
             }
             std::array<float, 4> outputValue{};
             for (cgltf_size value = 0; value < output.count; ++value) {
@@ -413,7 +415,9 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
                 float time = 0.0f;
                 if (!cgltf_accessor_read_float(&input, keyframe, &time, 1U) || !std::isfinite(time) ||
                     time < 0.0f || (keyframe != 0U && time <= previous)) {
-                    throw std::runtime_error("glTF animation keyframe times must be finite, non-negative, and strictly increasing");
+                    throw std::runtime_error(
+              "glTF animation keyframe times must be finite, non-negative, and "
+              "strictly increasing");
                 }
                 if (keyframe == 0U) channel.startTime = time;
                 previous = time;
@@ -531,7 +535,8 @@ ImportedMeshPrimitive deserializeMeshArtifact(const std::span<const std::byte> b
 }
 
 std::vector<std::byte> serializeMaterialArtifact(const ImportedMaterial& material) {
-    if (!material.id.valid() || material.textures.size() > 64U) {
+    if (!material.id.valid() || material.textures.size() > 64U ||
+      material.shadingModel > MaterialShadingModel::Water) {
         throw std::runtime_error("Material artifact is invalid");
     }
     BinaryWriter writer;
@@ -543,6 +548,7 @@ std::vector<std::byte> serializeMaterialArtifact(const ImportedMaterial& materia
     writer.pod(material.emissiveFactor);
     writer.pod(material.metallicFactor);
     writer.pod(material.roughnessFactor);
+  writer.pod(static_cast<std::uint8_t>(material.shadingModel));
     writer.pod(static_cast<std::uint8_t>(material.alphaMode));
     writer.pod(material.alphaCutoff);
     writer.pod(static_cast<std::uint8_t>(material.doubleSided));
@@ -574,10 +580,16 @@ ImportedMaterial deserializeMaterialArtifact(const std::span<const std::byte> by
     material.emissiveFactor = reader.pod<Vec3>();
     material.metallicFactor = reader.pod<float>();
     material.roughnessFactor = reader.pod<float>();
-    material.alphaMode = static_cast<MaterialAlphaMode>(reader.pod<std::uint8_t>());
+    material.shadingModel =
+      static_cast<MaterialShadingModel>(reader.pod<std::uint8_t>());
+  material.alphaMode = static_cast<MaterialAlphaMode>(reader.pod<std::uint8_t>());
     material.alphaCutoff = reader.pod<float>();
     material.doubleSided = reader.pod<std::uint8_t>() != 0U;
-    const auto count = reader.pod<std::uint32_t>();
+  if (material.shadingModel > MaterialShadingModel::Water ||
+      material.alphaMode > MaterialAlphaMode::Mask) {
+    throw std::runtime_error("Material artifact enum is invalid");
+  }
+  const auto count = reader.pod<std::uint32_t>();
     if (count > 64U) {
         throw std::runtime_error("Material artifact texture count exceeds limit");
     }

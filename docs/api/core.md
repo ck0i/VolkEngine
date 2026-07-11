@@ -59,8 +59,13 @@ return app.run(ve::RunOptions{.maxFrames = 120});
 `Application` owns the main `Window`, `Camera`, bounded `JobSystem`, active `ReferenceAssetBundle`, concrete `VulkanRenderer` facade, demo/world scene extractors, wall `Clock`, and `FixedStepClock`. Asset cooking starts before platform/renderer construction. With `assetHotReload` enabled, subsequent cooks execute in the background; the main thread only polls completion and publishes a validated candidate at a frame boundary. Publication replaces GPU geometry, clusters, textures, descriptors, authored draws, and visibility caches transactionally, while failure leaves the prior CPU/GPU bundle live.
 `run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback zero or more times per rendered frame using the configured fixed step. `runWithInput(world, update, options)` additionally passes a read-only `InputState` snapshot to each substep. Input transitions and accumulated cursor/scroll motion are retained across render frames that emit no simulation update, delivered once to the first available substep, then consumed; held state persists for later substeps. Camera input remains render-rate and uses the bounded wall delta. Both world callback paths then extract the latest world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
 
-Creator/runtime integration uses three narrow application seams:
+Creator/runtime integration uses narrow application seams:
 
+- `Application(config, augment, context)` invokes a non-owning asset-bundle
+  augmentation callback after deterministic reference cooking and before
+  renderer construction. Generated mesh/material data therefore enters the
+  same runtime upload and handle path without a second renderer API; callback
+  context must outlive construction.
 - `instantiateCookedWorld(destination, source)` resolves cooked authored
   mesh/material IDs through the active renderer and transactionally replaces
   `destination`; any stale asset or invalid cooked record leaves it unchanged.
@@ -77,9 +82,13 @@ Creator/runtime integration uses three narrow application seams:
   Returning `true` declares that the callback transactionally replaced runtime
   world content, so presentation history is reset before extraction.
 - `configureStreamingRun(manifestHash, contentHash, budgetBytes)` and
-  `updateStreamingRunStats(stats, sample)` populate bounded schema-v6 traversal
+  `updateStreamingRunStats(stats, sample)` populate bounded schema-v7 traversal
   evidence. Aggregate updates must not supply sample storage; `Application`
   owns and caps the trace at 4,096 frames.
+- `configureLandscapeRun(stats)` validates immutable procedural identity,
+  geometry/content counts, traversal distance, and CPU/GPU budgets.
+  `updateLandscapeRunVisibility()` folds renderer-completed visible
+  landscape/foliage/water counts into the same schema-v7 record.
 
 These methods expose no Vulkan handles and do not make `Application` own an
 editor document or shell.

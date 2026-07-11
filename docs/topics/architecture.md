@@ -10,6 +10,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | `engine/platform` | GLFW process runtime, window, input, framebuffer resize state, Vulkan surface creation. | `GlfwRuntime`, `Window`. |
 | `engine/scene` | Runtime reflection metadata, stable scene component payloads, legacy world snapshots, and optimized cooked-world loading/instantiation. | `SceneTypeRegistry`, generated/explicit/external schemas, `CookedWorld`, runtime instantiation. |
 | `engine/renderer` | Renderer contracts, lighting/material ABI and bounded planning contracts, world-to-scene extraction, scene submission data, procedural/imported mesh helpers, image loading, executable frame graph, and resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, lighting/environment records, `WorldSceneExtractor`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
+| `engine/landscape` | Deterministic bounded landscape queries and cook-time terrain, water, foliage scatter, and reusable vegetation geometry. | `LandscapeField`, `TerrainPatch`, `FoliageInstance`, generation functions. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle, renderer entry points, and transactional authored-asset publication. | `VulkanRenderer`, `draw`, `reloadReferenceAssets`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
@@ -18,6 +19,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | `engine/editor` | Editor-only authoring document, command history, glTF conversion, cooker, session interactions, and optional ImGui shell. | `AuthoringDocument`, `EditorSession`, `AuthoringCooker`; excluded when `VOLKENGINE_ENABLE_EDITOR=OFF`. |
 | `samples/sandbox` | Demo app, CLI flags, smoke scenarios. | Executable entry point, not engine API. |
 | `samples/editor` | Interim creator executable and runtime publication wiring. | `VolkEngineEditor`, built only when editor and ImGui options are both enabled. |
+| `samples/partition` | M1/M2 streamed-world and natural-landscape traversal gate, profiler, and schema-v7 evidence. | Executable integration benchmark, not engine API. |
 
 ## Ownership model
 
@@ -58,6 +60,10 @@ graph TD
   the live `World`. Candidate build/rebase occurs in temporary `CookedWorld`
   storage and a revisioned commit changes partition ownership only after the
   application has instantiated the complete world.
+- `LandscapeField` is caller-owned deterministic cook/query state. Generated
+  terrain and foliage become ordinary imported mesh/material records before
+  renderer construction, then ordinary stable IDs in cooked partition cells;
+  neither the renderer nor partition runtime owns a parallel landscape scene.
 - `World` owns generational entities and component pools. `WorldSystemScheduler` owns compiled deterministic execution phases, reusable parallel-job storage, and one deferred command buffer; system callbacks and contexts remain caller-owned. Explicit read-only callbacks may share a phase through `JobSystem`, while every mutable callback and dependency boundary remains serial. Caller-owned standalone `WorldCommandBuffer` instances stage structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneParent`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns reusable render-list, local-pose history, and hierarchy-resolution storage. The generic ECS owns no child lists or hierarchy lifecycle hooks.
 - Typed `SimulationEventChannel` instances are scheduler-owned setup resources with fixed inline payload storage. Systems observe the previous successful step and publish the next FIFO batch; callback/overflow rollback and partial-command-playback promotion keep event lifetime aligned with the scheduler's actual mutation boundary.
 - Scheduler-owned `SimulationTimerQueue` resources add delayed and recurring typed payloads on integer successful-step ticks. Schedule/cancel mutations share the same rollback/promotion boundary as event channels, while monotonic handles and fixed storage avoid wall-time drift, stale-handle aliasing, and steady-state allocation.
@@ -103,13 +109,15 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
    succeeds does it commit the matching cell revision, evict superseded cells,
    and reset extraction history. An incomplete or failed candidate leaves the
    old world/frontier pinned and renderable.
+   The M2 benchmark uses this seam to sample camera height, publish generated
+   terrain/foliage/water cells, and collect visible-class and timing evidence.
 4. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. For scheduler-backed worlds, `WorldSceneExtractor` prepares TRS history, compiled systems execute single-threaded in dependency order, the scheduler plays structural commands once, and the extractor captures the successful state. Pending input edges/motion reach only the first emitted step while held state persists; failures discard scheduler commands, invalidate presentation history, and propagate.
 5. The world run path builds a presentation snapshot with retained-debt alpha. It interpolates each entity's local translation/scale and shortest-path quaternion rotation one completed fixed step behind simulation, then iteratively resolves parent matrices before submission. New/recycled/teleported entities reset their local history; dead or stale parents detach and cyclic dependents are omitted. Both run paths then call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows the reusable list synchronously.
-6. `Visibility.cpp` computes visibility and work planning for LOD/grid batching and canonical material-class counts. `Lighting.cpp` validates the scene's directional/environment/local/probe records; the Vulkan lighting owner prepares bounded tile/atlas buffers and shadow cameras, then frame code fills mapped instance records.
+6. `Visibility.cpp` computes visibility and work planning for LOD/grid batching. CPU visibility increments material-class histograms only for accepted items and cached tiles; GPU visibility writes post-frustum per-class counters into the completed frame record. `Lighting.cpp` validates the scene's directional/environment/local/probe records; the Vulkan lighting owner prepares bounded tile/atlas buffers and shadow cameras, then frame code fills mapped instance records.
 7. `Frame.cpp` executes the selected compiled graph. Graph callbacks emit synchronization barriers and record Forward+ assignment, visibility cull, shadow atlas, optional depth, HDR PBR/environment shading, depth-pyramid, tonemap/ImGui, and optional screenshot work; one graphics submission/presentation remains the outer frame ownership boundary.
 8. `RenderStats`, `RenderDeviceInfo`, bounded job counters, residency/partition
-   metrics, and schema-v6 frame traces expose the actual renderer and streaming
-   paths.
+   metrics, visible landscape-class counts, and schema-v7 traversal/landscape
+   records expose the actual renderer, streaming, and benchmark paths.
 
 Scene files are loaded before entering `Application::run` and saved after it returns. Persistence therefore performs no frame-loop work and never competes with scheduler queries, deferred structural playback, extraction, or renderer borrowing.
 
@@ -138,4 +146,8 @@ Its private `Impl` keeps Vulkan internals isolated from application code, which 
   residency, hierarchical frontier selection, combined-world publication, and
   origin rebasing. Publication currently rebuilds/extracts the complete active
   frontier; it is not yet a GPU-page streaming scene representation.
+- Landscape patches are deterministically CPU-cooked into hierarchy-selected
+  local-space LOD meshes and queried through the same field used for placement;
+  GPU visibility/submission and foliage deformation are runtime work. This is
+  not a terrain-specific GPU page/virtual-texture architecture.
 - Descriptor indexing enables a capability-gated bindless sampled-image table with stable texture indices; the Vulkan baseline retains a fixed descriptor fallback for unsupported devices.

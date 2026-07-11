@@ -19,7 +19,11 @@ struct CookedWorld;
 
 class Application {
 public:
+  using ReferenceAssetAugmentCallback = void (*)(void *context,
+                                                 ReferenceAssetBundle &bundle);
   explicit Application(EngineConfig config);
+  Application(EngineConfig config, ReferenceAssetAugmentCallback augment,
+              void *context);
   using WorldUpdateCallback = void (*)(World &, double simulationElapsedSeconds,
                                        double simulationDeltaSeconds);
   using WorldInputUpdateCallback = void (*)(World &, const InputState &,
@@ -49,12 +53,16 @@ public:
                              std::uint64_t budgetBytes);
   void updateStreamingRunStats(const StreamingRunStats &stats,
                                StreamingFrameSample sample);
+  void configureLandscapeRun(LandscapeRunStats stats);
+  void updateLandscapeRunVisibility();
 
 private:
   int runInternal(World *world, WorldUpdateCallback update,
                   WorldInputUpdateCallback inputUpdate,
                   WorldSystemScheduler *scheduler, const RunOptions &options);
   void pollAssetReload(double elapsedSeconds);
+  ReferenceAssetAugmentCallback referenceAssetAugment_ = nullptr;
+  void *referenceAssetAugmentContext_ = nullptr;
   EngineConfig config_;
   JobSystem jobs_;
   ReferenceAssetCookTask referenceAssetCook_;
@@ -70,6 +78,7 @@ private:
   DemoSceneRenderer sceneRenderer_;
   WorldSceneExtractor worldSceneExtractor_;
   FrameUpdateCallback frameUpdateCallback_ = nullptr;
+  LandscapeRunStats landscapeStats_;
   void *frameUpdateContext_ = nullptr;
   StreamingRunStats streamingStats_;
     Clock clock_;

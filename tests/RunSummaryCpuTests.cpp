@@ -1,10 +1,10 @@
 #include "core/FileSystem.hpp"
 #include "core/RunSummary.hpp"
 
-#include <charconv>
 #include <cassert>
-#include <filesystem>
+#include <charconv>
 #include <exception>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -93,7 +93,7 @@ int main() {
   summary.stats.shadowAtlasCapacity = 16;
   summary.stats.shadowAtlasOverflowCount = 2;
   summary.stats.reflectionProbeCount = 3;
-  summary.stats.materialClassCounts = {8U, 1U, 4U, 3U, 2U, 2U, 5U, 6U};
+  summary.stats.materialClassCounts = {8U, 1U, 4U, 3U, 2U, 2U, 5U, 6U, 9U, 2U};
   summary.stats.shadowsEnabled = true;
   summary.stats.environmentMapEnabled = true;
   summary.stats.effectiveExposure = 1.25;
@@ -140,10 +140,29 @@ int main() {
        1U, 10U, 10U, 1U, false},
       {61U, -6'976.0F, 0.0F, -7'168.0F, 0.0F, 13'000U, 15U, 0U,
        0U, 10U, 10U, 0U, false}};
+  summary.landscape.enabled = true;
+  summary.landscape.seed = 73U;
+  summary.landscape.contentHash = std::string(64U, 'c');
+  summary.landscape.terrainPatchesByLod = {16U, 4U, 1U};
+  summary.landscape.terrainVertices = 47'000U;
+  summary.landscape.terrainTriangles = 88'000U;
+  summary.landscape.biomeSampleCounts = {10U, 20U, 30U, 40U};
+  summary.landscape.foliageInstancesBySpecies = {120U, 45U, 11U};
+  summary.landscape.waterPatchCount = 16U;
+  summary.landscape.editBrushCount = 3U;
+  summary.landscape.editRevision = 4U;
+  summary.landscape.traversalDistanceMeters = 28'000.0F;
+  summary.landscape.atmosphere = true;
+  summary.landscape.gpuFoliageWind = true;
+  summary.landscape.maxVisibleLandscapeInstances = 7U;
+  summary.landscape.maxVisibleFoliageInstances = 81U;
+  summary.landscape.maxVisibleWaterInstances = 3U;
+  summary.landscape.cpuFrameBudgetMs = 16.667;
+  summary.landscape.gpuFrameBudgetMs = 16.667;
   const std::string serialized = ve::serializeRunSummary(summary);
   assert(serialized.find("\"schema\":\"volkengine.run-summary\"") !=
          std::string::npos);
-  assert(jsonUnsigned(serialized, "schema_version") == 6U);
+  assert(jsonUnsigned(serialized, "schema_version") == 7U);
   assert(serialized.find("\"scenario\":\"submission-pressure-v1\"") !=
          std::string::npos);
   assert(serialized.find("\"warmup_frames\":20") != std::string::npos);
@@ -189,7 +208,8 @@ int main() {
   assert(
       serialized.find(
           "\"material_classes\":{\"standard\":8,\"masked\":1,\"clear_coat\":4,"
-          "\"foliage\":3,\"skin\":2,\"hair\":2,\"cloth\":5,\"emissive\":6}") !=
+          "\"foliage\":3,\"skin\":2,\"hair\":2,\"cloth\":5,\"emissive\":6,"
+          "\"landscape\":9,\"water\":2}") !=
       std::string::npos);
   assert(serialized.find("\"gpu_light_assignment\":{\"available\":false") !=
          std::string::npos);
@@ -208,6 +228,19 @@ int main() {
   assert(jsonUnsigned(serialized, "coverage_gap_frames") == 0U);
   assert(jsonUnsigned(serialized, "max_visible_instances") == 42U);
   assert(jsonUnsigned(serialized, "max_scene_triangles") == 84U);
+  assert(serialized.find(
+             "\"landscape\":{\"enabled\":true,\"seed\":73,\"content_hash\":"
+             "\"" +
+             std::string(64U, 'c') +
+             "\",\"terrain_patches_by_lod\":[16,4,1],\"terrain_vertices\":"
+             "47000,\"terrain_triangles\":88000") != std::string::npos);
+  assert(
+      serialized.find(
+          "\"foliage_instances\":{\"grass\":120,\"shrub\":45,\"tree\":11}") !=
+      std::string::npos);
+  assert(serialized.find(
+             "\"max_visible\":{\"landscape\":7,\"foliage\":81,\"water\":3}") !=
+         std::string::npos);
   assert(jsonUnsigned(serialized, "frame") == 60U);
   assert(serialized.find("\"frame\":61") != std::string::npos);
   assert(serialized.find("\"cpu_asset_cook\":{\"available\":true,\"value\":1."

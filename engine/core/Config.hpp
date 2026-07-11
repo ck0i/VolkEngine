@@ -29,6 +29,7 @@ struct EngineConfig {
   bool assetHotReload = false;
   bool indirectSceneDraws = true;
   bool shadows = true;
+  bool atmosphere = true;
   bool gpuVisibilityValidation = false;
     bool depthPyramidOcclusion = true;
     bool gpuClusterCommands = false;

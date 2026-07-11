@@ -241,7 +241,8 @@ std::string serializeRunSummary(const RunSummary& summary) {
       << ",\"skin\":" << summary.stats.materialClassCounts[4]
       << ",\"hair\":" << summary.stats.materialClassCounts[5]
       << ",\"cloth\":" << summary.stats.materialClassCounts[6]
-      << ",\"emissive\":" << summary.stats.materialClassCounts[7] << "}},\n"
+      << ",\"emissive\":" << summary.stats.materialClassCounts[7] << ",\"landscape\":" << summary.stats.materialClassCounts[8]
+      << ",\"water\":" << summary.stats.materialClassCounts[9] << "}},\n"
       << "  \"frame_graph\":{\"passes\":" << summary.stats.graphPassCount
       << ",\"logical_resources\":" << summary.stats.graphResourceCount
       << ",\"barriers\":" << summary.stats.graphBarrierCount
@@ -321,7 +322,38 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << ",\"pending_cells\":" << sample.pendingCells
            << ",\"coverage_gap\":" << sample.coverageGap << '}';
   }
-  output << "]},\n  \"timings\":{";
+  output << "]},\n  \"landscape\":{\"enabled\":" << summary.landscape.enabled
+         << ",\"seed\":" << summary.landscape.seed << ",\"content_hash\":";
+  appendEscaped(output, summary.landscape.contentHash);
+  output << ",\"terrain_patches_by_lod\":["
+         << summary.landscape.terrainPatchesByLod[0] << ','
+         << summary.landscape.terrainPatchesByLod[1] << ','
+         << summary.landscape.terrainPatchesByLod[2]
+         << "],\"terrain_vertices\":" << summary.landscape.terrainVertices
+         << ",\"terrain_triangles\":" << summary.landscape.terrainTriangles
+         << ",\"biome_samples\":{\"alpine\":"
+         << summary.landscape.biomeSampleCounts[0]
+         << ",\"meadow\":" << summary.landscape.biomeSampleCounts[1]
+         << ",\"forest\":" << summary.landscape.biomeSampleCounts[2]
+         << ",\"wetland\":" << summary.landscape.biomeSampleCounts[3]
+         << "},\"foliage_instances\":{\"grass\":"
+         << summary.landscape.foliageInstancesBySpecies[0]
+         << ",\"shrub\":" << summary.landscape.foliageInstancesBySpecies[1]
+         << ",\"tree\":" << summary.landscape.foliageInstancesBySpecies[2]
+         << "},\"water_patches\":" << summary.landscape.waterPatchCount
+         << ",\"edit_brushes\":" << summary.landscape.editBrushCount
+         << ",\"edit_revision\":" << summary.landscape.editRevision
+         << ",\"traversal_distance_m\":"
+         << summary.landscape.traversalDistanceMeters
+         << ",\"atmosphere\":" << summary.landscape.atmosphere
+         << ",\"gpu_foliage_wind\":" << summary.landscape.gpuFoliageWind
+         << ",\"max_visible\":{\"landscape\":"
+         << summary.landscape.maxVisibleLandscapeInstances
+         << ",\"foliage\":" << summary.landscape.maxVisibleFoliageInstances
+         << ",\"water\":" << summary.landscape.maxVisibleWaterInstances
+         << "},\"budgets_ms\":{\"cpu\":" << summary.landscape.cpuFrameBudgetMs
+         << ",\"gpu\":" << summary.landscape.gpuFrameBudgetMs
+         << "}},\n  \"timings\":{";
   appendMetric(output, "cpu_frame", summary.stats.cpuFrameMs, "ms", true,
                "not recorded");
   output << ',';

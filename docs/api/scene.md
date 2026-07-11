@@ -1,8 +1,9 @@
 # Scene API
 
 Headers: `engine/renderer/SceneRenderer.hpp`, `engine/scene/SceneReflection.hpp`,
-`engine/scene/CookedWorld.hpp`; implementation spans the corresponding source
-files plus editor-only authoring code under `engine/editor`.
+`engine/scene/CookedWorld.hpp`, `engine/landscape/Landscape.hpp`; implementation
+spans the corresponding source files plus editor-only authoring code under
+`engine/editor`.
 
 The scene API provides renderer-facing data, a CPU-only `WorldSceneExtractor`
 bridge, stable reflected authoring metadata, and a deterministic cooked-world
@@ -39,12 +40,15 @@ Current packing:
 - `albedoRoughness.a`: roughness.
 - `emissiveMetallic.rgb`: emissive color.
 - `emissiveMetallic.a`: metallic.
-- `flags.x`: ground-grid overlay enable.
-- `flags.y`: integral `RenderMaterialClass` ABI value (`Standard`, `Masked`, `ClearCoat`, `Foliage`, `Skin`, `Hair`, `Cloth`, or `Emissive`).
-- `flags.z`: alpha cutoff for the masked class, or class-response strength for the other specialized models.
+- `flags.x`: integral `MaterialFeature` bits (`AlphaMask`, `DoubleSided`,
+  `GroundGrid`) with a quantized alpha cutoff in bits 8–23 for masked draws.
+- `flags.y`: integral `RenderMaterialClass` ABI value (`Standard`, `Masked`,
+  `ClearCoat`, `Foliage`, `Skin`, `Hair`, `Cloth`, `Emissive`, `Landscape`, or
+  `Water`).
+- `flags.z`: class-response strength; foliage uses it as wind amplitude.
 - `flags.w`: normal-map strength in `[0, 4]`.
 
-Texture availability is encoded separately from this vec4 by the three `TextureAssetHandle` roles (base color, normal, ORM). Invalid, non-integral material classes and negative class/normal parameters are rejected before renderer borrowing.
+Texture availability is encoded separately from this vec4 by the three `TextureAssetHandle` roles (base color, normal, ORM). Materials without an authored role receive the renderer's valid reference fallback handle; this preserves one descriptor/instance ABI for generated materials. Invalid, non-integral class/feature values and negative class/normal parameters are rejected before renderer borrowing.
 
 ## Lighting and environment records
 
@@ -234,6 +238,29 @@ the caller publishes the complete combined world. Metrics report traversal,
 publication, origin-shift, retained-frontier, partial-failure, active/desired,
 pending, and coverage-gap state.
 
+## Deterministic landscape cooking
+
+`LandscapeField` is an immutable-seed procedural query with a bounded,
+revisioned brush list. `sample(worldX, worldZ)` returns finite height, normal,
+moisture, temperature, and `LandscapeBiome`; `height()` is the cheaper scalar
+query used by collision/camera placement. Invalid configuration, coordinates,
+or brushes fail before mutation.
+
+`cookTerrainPatch(field, desc)` produces a local-space indexed patch with
+`resolution + 1` vertices per side, deterministic normals/UVs, explicit LOD
+metadata, and skirts on all four boundaries. Resolution is power-of-two and
+bounded; callers place the local mesh at `desc.center`, which makes patches
+compatible with partition origin rebasing. `createWaterPatch()` produces a
+bounded reusable plane at an explicit level.
+
+`scatterFoliage(field, desc)` hashes integer candidate cells from seed and
+coordinates, then applies deterministic density, biome, slope, spacing, jitter,
+and capacity rules. It returns authored world positions, yaw, scale, and
+`Grass`/`Shrub`/`Tree` species; exceeding the declared instance capacity is an
+error rather than silent truncation. `createGrassClusterMesh()`,
+`createShrubMesh()`, and `createTreeMesh()` provide reusable bounded low-poly
+geometry.
+
 ## `SceneGridRange`
 
 Describes a contiguous grid in a `SceneRenderList`:
@@ -253,6 +280,8 @@ Precomputed culling/homogeneity record:
 - aggregate `boundsCenter` and `boundsRadius` for tile frustum tests.
 - `maxItemBoundsRadius` — conservative aggregate radius retained for tile metadata; sphere LOD selection remains per item.
 - `itemCount`.
+- fixed per-`RenderMaterialClass` histogram, built with the tile and reused by
+  whole-tile visibility accounting without revisiting every item.
 - `commonMesh` and `homogeneousMesh`.
 
 The aggregate tile radius is for culling, not item LOD. Fully accepted homogeneous sphere tiles reuse the tile frustum result but still classify each sphere independently into high/medium/low mesh batches.

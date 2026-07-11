@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 
 
@@ -24,6 +25,21 @@ void Camera::setAspect(const float aspect) {
         throw std::runtime_error("Camera aspect ratio must be finite and positive");
     }
     aspect_ = aspect;
+}
+
+void Camera::setProjection(const float verticalFovRadians,
+                           const float nearPlane, const float farPlane) {
+  if (!std::isfinite(verticalFovRadians) || verticalFovRadians <= 0.0F ||
+      verticalFovRadians >= std::numbers::pi_v<float> ||
+      !std::isfinite(nearPlane) || nearPlane <= 0.0F ||
+      !std::isfinite(farPlane) || farPlane <= nearPlane) {
+    throw std::runtime_error(
+        "Camera projection must have a finite field of view and ordered "
+        "positive clip planes");
+  }
+  verticalFov_ = verticalFovRadians;
+  nearPlane_ = nearPlane;
+  farPlane_ = farPlane;
 }
 
 void Camera::setPosition(const Vec3 position) {

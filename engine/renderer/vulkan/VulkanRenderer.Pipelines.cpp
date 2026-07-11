@@ -35,7 +35,8 @@ constexpr double kShaderHotReloadMaxRetryDelaySeconds = 4.0;
         throw std::runtime_error("Failed to read SPIR-V file: " + path.string());
     }
     if (words[0] == kByteSwappedSpirvMagic) {
-        throw std::runtime_error("SPIR-V file appears byte-swapped instead of native little-endian words: " + path.string());
+        throw std::runtime_error("SPIR-V file appears byte-swapped instead of "
+                             "native little-endian words: " + path.string());
     }
     if (words[0] != kSpirvMagic) {
         throw std::runtime_error("SPIR-V file has invalid magic number: " + path.string());
@@ -138,12 +139,14 @@ void VulkanRenderer::Impl::savePipelineCache() const {
         }
     }
     if (result != VK_SUCCESS) {
-        logger()->warn("Skipping Vulkan pipeline cache save; cache kept growing during readback");
+        logger()->warn("Skipping Vulkan pipeline cache save; cache kept growing "
+                   "during readback");
         return;
     }
 
     if (!pipelineCacheDataMatchesDevice(data)) {
-        logger()->warn("Skipping Vulkan pipeline cache save; generated cache header does not match selected device");
+        logger()->warn("Skipping Vulkan pipeline cache save; generated cache "
+                   "header does not match selected device");
         return;
     }
 
@@ -180,7 +183,8 @@ void VulkanRenderer::Impl::savePipelineCache() const {
         std::filesystem::rename(temporaryPath, path, error);
     }
     if (error) {
-        logger()->warn("Failed to publish Vulkan pipeline cache {}; discarded temporary cache {}: {}",
+        logger()->warn("Failed to publish Vulkan pipeline cache {}; discarded "
+                   "temporary cache {}: {}",
                        path.string(), temporaryPath.string(), error.message());
         std::error_code cleanupError;
         std::filesystem::remove(temporaryPath, cleanupError);
@@ -196,7 +200,8 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     VkShaderModule sceneFrag = VK_NULL_HANDLE;
     VkShaderModule tonemapVert = VK_NULL_HANDLE;
     VkShaderModule tonemapFrag = VK_NULL_HANDLE;
-    VkShaderModule depthPrepassVert = VK_NULL_HANDLE;
+    VkShaderModule atmosphereFrag = VK_NULL_HANDLE;
+  VkShaderModule depthPrepassVert = VK_NULL_HANDLE;
     VkShaderModule cullCompute = VK_NULL_HANDLE;
     VkShaderModule cullSubgroupCompute = VK_NULL_HANDLE;
     VkShaderModule depthPyramidCompute = VK_NULL_HANDLE;
@@ -211,6 +216,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             shaderPaths[resourceOwner_.bindlessMaterialsEnabled ? 5U : 1U]);
         tonemapVert = createShaderModule(shaderPaths[2]);
         tonemapFrag = createShaderModule(shaderPaths[3]);
+    atmosphereFrag = createShaderModule(shaderPaths[15]);
         depthPrepassVert = createShaderModule(
             shaderPaths[indirectSceneDrawsEnabled_ ? 8U : 4U]);
         cullCompute = createShaderModule(shaderPaths[6]);
@@ -480,8 +486,20 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         VkPipelineDepthStencilStateCreateInfo noDepth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         VkPipelineRasterizationStateCreateInfo noCullRasterizer = rasterizer;
         noCullRasterizer.cullMode = VK_CULL_MODE_NONE;
+    const std::array<VkPipelineShaderStageCreateInfo, 2> atmosphereStages{
+        shaderStage(VK_SHADER_STAGE_VERTEX_BIT, tonemapVert),
+        shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, atmosphereFrag)};
+    VkGraphicsPipelineCreateInfo atmosphereInfo = makeGraphicsPipelineInfo(
+        sceneRendering, atmosphereStages, emptyVertexInput, noCullRasterizer,
+        noDepth, blend, pipelines.sceneLayout);
+    checkVk(vkCreateGraphicsPipelines(deviceOwner_.device, pipelineOwner_.cache,
+                                      1U, &atmosphereInfo, nullptr,
+                                      &pipelines.atmosphere),
+            "vkCreateGraphicsPipelines atmosphere");
+    setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.atmosphere),
+                  "Atmosphere Pipeline");
 
-        VkPushConstantRange tonemapPushRange{};
+    VkPushConstantRange tonemapPushRange{};
         tonemapPushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         tonemapPushRange.offset = 0;
         tonemapPushRange.size = sizeof(TonemapPushConstants);
@@ -523,7 +541,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         if (cullCompute != VK_NULL_HANDLE) {
             vkDestroyShaderModule(deviceOwner_.device, cullCompute, nullptr);
         }
-        if (depthPrepassVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr); }
+        if (atmosphereFrag != VK_NULL_HANDLE) {
+      vkDestroyShaderModule(deviceOwner_.device, atmosphereFrag, nullptr);
+    }
+    if (depthPrepassVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr); }
         if (tonemapFrag != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, tonemapFrag, nullptr); }
         if (tonemapVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, tonemapVert, nullptr); }
         if (sceneFrag != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, sceneFrag, nullptr); }
@@ -532,7 +553,8 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         throw;
     }
 
-    vkDestroyShaderModule(deviceOwner_.device, shadowFrag, nullptr);
+  vkDestroyShaderModule(deviceOwner_.device, atmosphereFrag, nullptr);
+  vkDestroyShaderModule(deviceOwner_.device, shadowFrag, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, shadowVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, lightAssignmentCompute, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, depthPyramidCompute, nullptr);
@@ -565,7 +587,11 @@ void VulkanRenderer::Impl::destroyPipelineSet(PipelineSet& pipelines) const {
     if (pipelines.cullSubgroup != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.cullSubgroup, nullptr); pipelines.cullSubgroup = VK_NULL_HANDLE; }
     if (pipelines.cull != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.cull, nullptr); pipelines.cull = VK_NULL_HANDLE; }
     if (pipelines.cullLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.cullLayout, nullptr); pipelines.cullLayout = VK_NULL_HANDLE; }
-    if (pipelines.tonemap != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.tonemap, nullptr); pipelines.tonemap = VK_NULL_HANDLE; }
+    if (pipelines.atmosphere != VK_NULL_HANDLE) {
+    vkDestroyPipeline(deviceOwner_.device, pipelines.atmosphere, nullptr);
+    pipelines.atmosphere = VK_NULL_HANDLE;
+  }
+  if (pipelines.tonemap != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.tonemap, nullptr); pipelines.tonemap = VK_NULL_HANDLE; }
     if (pipelines.tonemapLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.tonemapLayout, nullptr); pipelines.tonemapLayout = VK_NULL_HANDLE; }
     if (pipelines.depthPrepass != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.depthPrepass, nullptr); pipelines.depthPrepass = VK_NULL_HANDLE; }
     if (pipelines.scene != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.scene, nullptr); pipelines.scene = VK_NULL_HANDLE; }
@@ -579,7 +605,8 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelines.depthPrepass = pipelineOwner_.depthPrepass;
     pipelines.scene = pipelineOwner_.scene;
     pipelines.sceneNoPrepass = pipelineOwner_.sceneNoPrepass;
-    pipelines.tonemapLayout = pipelineOwner_.tonemapLayout;
+    pipelines.atmosphere = pipelineOwner_.atmosphere;
+  pipelines.tonemapLayout = pipelineOwner_.tonemapLayout;
     pipelines.tonemap = pipelineOwner_.tonemap;
     pipelines.cullLayout = pipelineOwner_.cullLayout;
     pipelines.cull = pipelineOwner_.cull;
@@ -594,6 +621,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelineOwner_.sceneLayout = VK_NULL_HANDLE;
     pipelineOwner_.depthPrepass = VK_NULL_HANDLE;
     pipelineOwner_.scene = VK_NULL_HANDLE;
+  pipelineOwner_.atmosphere = VK_NULL_HANDLE;
     pipelineOwner_.sceneNoPrepass = VK_NULL_HANDLE;
     pipelineOwner_.tonemapLayout = VK_NULL_HANDLE;
     pipelineOwner_.tonemap = VK_NULL_HANDLE;
@@ -637,6 +665,7 @@ void VulkanRenderer::Impl::installPipelineSet(const PipelineSet& pipelines) {
     pipelineOwner_.depthPrepass = pipelines.depthPrepass;
     pipelineOwner_.scene = pipelines.scene;
     pipelineOwner_.sceneNoPrepass = pipelines.sceneNoPrepass;
+  pipelineOwner_.atmosphere = pipelines.atmosphere;
     pipelineOwner_.tonemapLayout = pipelines.tonemapLayout;
     pipelineOwner_.tonemap = pipelines.tonemap;
     pipelineOwner_.cullLayout = pipelines.cullLayout;
@@ -692,7 +721,8 @@ void VulkanRenderer::Impl::pollShaderHotReload(const double elapsedSeconds) {
     } catch (const std::exception& e) {
         pipelineOwner_.hotReloadRetryDelaySeconds =
             std::min(pipelineOwner_.hotReloadRetryDelaySeconds * 2.0, kShaderHotReloadMaxRetryDelaySeconds);
-        logger()->warn("Shader hot reload failed; keeping existing pipelines and retrying in {:.1f}s: {}",
+        logger()->warn("Shader hot reload failed; keeping existing pipelines and "
+                   "retrying in {:.1f}s: {}",
                        pipelineOwner_.hotReloadRetryDelaySeconds, e.what());
         return;
     }
@@ -719,7 +749,8 @@ void VulkanRenderer::Impl::pollShaderHotReload(const double elapsedSeconds) {
     installPipelineSet(nextPipelines);
     pipelineOwner_.hotReloadRetryDelaySeconds = kShaderHotReloadInitialRetryDelaySeconds;
     refreshShaderWriteTimes();
-    logger()->info("Reloaded graphics pipelines from updated shader bytecode; retiring previous set after tracked frame fences signal");
+    logger()->info("Reloaded graphics pipelines from updated shader bytecode; "
+                 "retiring previous set after tracked frame fences signal");
 }
 
 VkShaderModule VulkanRenderer::Impl::createShaderModule(const std::filesystem::path& path) const {

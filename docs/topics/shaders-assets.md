@@ -4,9 +4,11 @@ This page covers runtime file flow. Current ownership is split across these back
 
 - `SceneImporter.cpp`, `GltfImporter.cpp`, and `TextureArtifact.cpp` — importer dispatch, authored-scene conversion, and engine-native texture validation/serialization.
 - `ReferenceAssetPipeline.cpp`, `AssetDatabase.cpp`, and `DerivedDataCache.cpp` — dependency records, deterministic cooking, cache publication, and transactional reload.
+- `Landscape.cpp` — deterministic field/brush queries, terrain and water mesh
+  cooking, biome foliage scatter, and reusable vegetation meshes.
 - `VulkanRenderer.Pipelines.cpp` — SPIR-V validation/loading, pipeline set construction, pipeline cache load/save, and hot-reload rebuild/retire.
 - `VulkanRenderer.Lighting.cpp` — Forward+ descriptors, bounded tile/light uploads, and directional/local shadow camera preparation.
-- `VulkanRenderer.Resources.cpp` — texture asset upload/sampler/descriptor setup and texture resource lifetime.
+- `VulkanRenderer.Resources.cpp` — texture asset upload/sampler/descriptor setup, per-role fallback binding for untextured generated materials, and texture resource lifetime.
 - `VulkanRenderer.Meshes.cpp` — procedural geometry, imported OBJ mesh loading, mesh upload, and shared vertex/index buffer ownership.
 - `VulkanRenderer.Screenshot.cpp` — screenshot path and file-publish behavior.
 
@@ -40,15 +42,17 @@ Valid SPIR-V is read directly into aligned `std::uint32_t` storage before `vkCre
 
 ## Scene shader data flow
 
-`scene.vert` reads packed instance material constants and texture indices from the scene SSBO and emits material values as flat fragment inputs while position, normal, UV, and tangent remain interpolated. `scene.frag` consumes the per-frame Forward+ tile lists, directional/local light records, shadow views/atlas, environment map, and bounded reflection-probe array through the shared lighting descriptor set.
+`scene.vert` reads packed instance material constants and texture indices from the scene SSBO and emits material values as flat fragment inputs while position, normal, UV, and tangent remain interpolated. `common/foliage_wind.glsl` applies the same camera-relative, elapsed-time displacement in camera, depth, and shadow vertex paths. `scene.frag` consumes the per-frame Forward+ tile lists, directional/local light records, shadow views/atlas, environment map, and bounded reflection-probe array through the shared lighting descriptor set.
 
-The fragment path applies GGX/Smith/Schlick direct light, inverse-square/range-window point and spot attenuation, stable directional cascade selection, local spot-shadow lookup, roughness-dependent environment LOD, diffuse environment irradiance approximation, probe blending, and ambient occlusion in linear HDR. Standard, masked, clear-coat, foliage, skin, hair, cloth, and emissive responses share one material-class ABI and pipeline layout. Base-color alpha discard is legal because device selection explicitly requires/enables Vulkan 1.3 `shaderDemoteToHelperInvocation`.
+The fragment path applies GGX/Smith/Schlick direct light, inverse-square/range-window point and spot attenuation, stable directional cascade selection, local spot-shadow lookup, roughness-dependent environment LOD, diffuse environment irradiance approximation, probe blending, and ambient occlusion in linear HDR. Standard, masked, clear-coat, foliage, skin, hair, cloth, emissive, landscape, and water responses share one material-class ABI and pipeline layout. Landscape derives bounded altitude/slope/moisture variation without a new descriptor; water adds Fresnel/reflection response. Base-color alpha discard is legal because device selection explicitly requires/enables Vulkan 1.3 `shaderDemoteToHelperInvocation`.
 
-Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis. Material availability comes from separately packed texture-mask bits; `RenderMaterial::flags.y/z/w` carry class, class strength or alpha cutoff, and normal strength.
+Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis. Material availability comes from separately packed texture-mask bits; `RenderMaterial::flags.x/y/z/w` carry feature/cutoff bits, class, class strength, and normal strength.
 
 `light_assign.comp` uses one workgroup per 16×16 tile. It derives a conservative tile frustum, tests a bounded 256-light array, and writes each tile's fixed 64-index partition plus an exact overflow counter. `depth_pyramid.comp` remains the temporal reverse-Z reduction path.
 
 Camera depth uses `scene_depth.vert`; opaque casters omit a fragment stage, while masked casters add `shadow.frag` so the prepass preserves authored alpha cutoff. Shadow atlas rendering uses `shadow.vert` for both caster classes and adds `shadow.frag` only for masked geometry; push constants select the shadow-view matrix and packed atlas scale/bias.
+
+`atmosphere.frag` reconstructs a world ray from the uploaded camera basis, evaluates a bounded analytic horizon/zenith/sun response, and initializes HDR before scene geometry. It uses no textures or extra frame-graph resources.
 
 ## Shader hot reload
 
@@ -100,6 +104,9 @@ Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNor
 - uses separate descriptor samplers for color/scalar maps and normal maps: albedo/ORM can enable device anisotropy and use generated material mip ranges, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.
 
 Current geometry path (`VulkanRenderer.Meshes.cpp`):
+- imports deterministic M2 terrain patches and reusable grass/shrub/tree/water
+  meshes through the same `ImportedMeshPrimitive` and startup upload arrays;
+  stable generated IDs remain ordinary runtime handles.
 - creates procedural cube/sphere/plane meshes in memory.
 
 - resolves `EngineConfig::importedModelPath` relative to `EngineConfig::assetDirectory`, normalizes it, and rejects relative paths that escape the asset root; absolute overrides are accepted.
@@ -110,4 +117,4 @@ Current geometry path (`VulkanRenderer.Meshes.cpp`):
 - converts triangle-list CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes; uploaded indices are reordered for post-transform vertex-cache locality, then vertices are remapped to first-use order for vertex-fetch locality.
 - writes all startup mesh vertex/index payloads directly into one mapped staging buffer, then submits one transfer/graphics upload command during startup.
 
-The source path accepts common stb_image-backed formats, Radiance HDR, and bounded non-supercompressed KTX2 BC1/BC3/BC7 artifacts. Material libraries, BasisLZ/Zstd transcoding, runtime HDR/BC upload, and streaming remain future work.
+The source path accepts common stb_image-backed formats, Radiance HDR, and bounded non-supercompressed KTX2 BC1/BC3/BC7 artifacts. Material libraries, BasisLZ/Zstd transcoding, runtime HDR/BC upload, and GPU-native texture/page streaming remain future work.

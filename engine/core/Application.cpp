@@ -35,16 +35,41 @@ RenderMaterial renderMaterial(const ImportedMaterial &material,
                          material.emissiveFactor.z, material.metallicFactor},
                         {}};
   result.textures = renderer.materialTextureHandles(material.id);
+  RenderMaterialClass materialClass = RenderMaterialClass::Standard;
+  switch (material.shadingModel) {
+  case MaterialShadingModel::Pbr:
+    break;
+  case MaterialShadingModel::Foliage:
+    materialClass = RenderMaterialClass::Foliage;
+    break;
+  case MaterialShadingModel::Landscape:
+    materialClass = RenderMaterialClass::Landscape;
+    break;
+  case MaterialShadingModel::Water:
+    materialClass = RenderMaterialClass::Water;
+    break;
+  }
+  if (material.alphaMode == MaterialAlphaMode::Mask &&
+      material.shadingModel == MaterialShadingModel::Pbr)
+    materialClass = RenderMaterialClass::Masked;
   result.flags.y =
-      static_cast<float>(material.alphaMode == MaterialAlphaMode::Mask
-                             ? RenderMaterialClass::Masked
-                             : RenderMaterialClass::Standard);
+      static_cast<float>(materialClass);
+  result.flags.z =
+      material.shadingModel == MaterialShadingModel::Foliage ? 0.72F : 0.0F;
+  std::uint32_t features = MaterialFeatureNone;
   if (material.alphaMode == MaterialAlphaMode::Mask) {
-        result.flags.z = material.baseColorFactor.w > 0.0F
+    features |= MaterialFeatureAlphaMask;
+    const float effectiveCutoff = material.baseColorFactor.w > 0.0F
             ? material.alphaCutoff / material.baseColorFactor.w
             : 2.0F;
-    }
-    float normalScale = 1.0f;
+    const auto quantizedCutoff = static_cast<std::uint32_t>(
+        std::lround(std::clamp(effectiveCutoff, 0.0F, 2.0F) * 32'767.5F));
+    features |= quantizedCutoff << 8U;
+  }
+  if (material.doubleSided)
+    features |= MaterialFeatureDoubleSided;
+  result.flags.x = static_cast<float>(features);
+  float normalScale = 1.0f;
     for (const ImportedTextureReference& texture : material.textures) {
         switch (texture.role) {
         case TextureRole::BaseColor:
@@ -127,10 +152,25 @@ std::vector<SceneRenderItem> referenceDraws(const ImportedGltfScene& scene,
   return draws;
 }
 
+ReferenceAssetBundle
+augmentReferenceAssets(ReferenceAssetBundle bundle,
+                       const Application::ReferenceAssetAugmentCallback augment,
+                       void *const context) {
+  if (augment != nullptr)
+    augment(context, bundle);
+  return bundle;
+}
+
 } // namespace
 
 Application::Application(EngineConfig config)
-    : config_(std::move(config)),
+    : Application(std::move(config), nullptr, nullptr) {}
+
+Application::Application(EngineConfig config,
+                         const ReferenceAssetAugmentCallback augment,
+                         void *const context)
+    : referenceAssetAugment_(augment), referenceAssetAugmentContext_(context),
+      config_(std::move(config)),
       jobs_({config_.jobWorkerCount, config_.maximumJobs,
              config_.maximumJobDependencies, config_.jobTimelineCapacity}),
       referenceAssetCook_(jobs_, config_.assetDirectory,
@@ -139,7 +179,9 @@ Application::Application(EngineConfig config)
                        config_.maximumSimulationAccumulatedSeconds,
                        config_.maximumSimulationSubsteps),
       simulationInputTracker_{}, glfwRuntime_{}, window_(glfwRuntime_, config_),
-      camera_{}, referenceAssets_(referenceAssetCook_.take()),
+      camera_{}, referenceAssets_(augmentReferenceAssets(referenceAssetCook_.take(),
+                                              referenceAssetAugment_,
+                                              referenceAssetAugmentContext_)),
       renderer_(window_, config_, referenceAssets_), sceneRenderer_{},
       worldSceneExtractor_{}, clock_{} {
   const VkExtent2D extent = window_.framebufferExtent();
@@ -175,6 +217,39 @@ void Application::configureStreamingRun(std::string manifestHash,
   streamingStats_.budgetBytes = budgetBytes;
   streamingStats_.frames.reserve(
       StreamingRunStats::kMaximumFrameSamples);
+}
+
+void Application::configureLandscapeRun(LandscapeRunStats stats) {
+  if (stats.seed == 0U || stats.contentHash.empty() ||
+      stats.terrainVertices == 0U || stats.terrainTriangles == 0U ||
+      stats.traversalDistanceMeters <= 0.0F ||
+      !std::isfinite(stats.traversalDistanceMeters) ||
+      stats.cpuFrameBudgetMs <= 0.0 || stats.gpuFrameBudgetMs <= 0.0 ||
+      !std::isfinite(stats.cpuFrameBudgetMs) ||
+      !std::isfinite(stats.gpuFrameBudgetMs)) {
+    throw std::invalid_argument(
+        "Landscape run identity, content, and budgets are required");
+  }
+  stats.enabled = true;
+  landscapeStats_ = std::move(stats);
+}
+
+void Application::updateLandscapeRunVisibility() {
+  if (!landscapeStats_.enabled)
+    throw std::logic_error("Landscape run telemetry is not configured");
+  const RenderStats stats = renderer_.stats();
+  landscapeStats_.maxVisibleLandscapeInstances =
+      std::max(landscapeStats_.maxVisibleLandscapeInstances,
+               stats.materialClassCounts[static_cast<std::size_t>(
+                   RenderMaterialClass::Landscape)]);
+  landscapeStats_.maxVisibleFoliageInstances =
+      std::max(landscapeStats_.maxVisibleFoliageInstances,
+               stats.materialClassCounts[static_cast<std::size_t>(
+                   RenderMaterialClass::Foliage)]);
+  landscapeStats_.maxVisibleWaterInstances =
+      std::max(landscapeStats_.maxVisibleWaterInstances,
+               stats.materialClassCounts[static_cast<std::size_t>(
+                   RenderMaterialClass::Water)]);
 }
 
 void Application::updateStreamingRunStats(
@@ -261,6 +336,9 @@ void Application::pollAssetReload(const double elapsedSeconds) {
 
   try {
     ReferenceAssetBundle candidate = pendingAssetReload_->take();
+    candidate =
+        augmentReferenceAssets(std::move(candidate), referenceAssetAugment_,
+                               referenceAssetAugmentContext_);
     if (candidate.database.serialize() !=
         referenceAssets_.database.serialize()) {
       renderer_.reloadReferenceAssets(std::move(candidate));
@@ -514,7 +592,7 @@ int Application::runInternal(World *world, const WorldUpdateCallback update,
     writeRunSummaryAtomic(options.summaryPath,
                           RunSummary{config_, options, finalDevice, finalStats,
                                      distributions, jobStats, streamingStats_,
-                                     renderedFrames,
+                                     landscapeStats_, renderedFrames,
                                      0});
     logger()->info("Saved run summary {}", options.summaryPath.string());
   }

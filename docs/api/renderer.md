@@ -109,7 +109,7 @@ Lighting/material fields:
 - `localLightCount`, `lightListOverflowCount`: submitted bounded light count and completed Forward+ tile-index overflow.
 - `shadowViewCount`, `shadowAtlasCapacity`, `shadowAtlasOverflowCount`: active directional/local atlas views, fixed slot capacity, and deterministic slot pressure.
 - `reflectionProbeCount`: active bounded spherical probes.
-- `materialClassCounts[8]`: visible submitted instance counts indexed by the canonical `RenderMaterialClass` ABI.
+- `materialClassCounts[10]`: post-frustum visible instance counts indexed by the canonical `RenderMaterialClass` ABI. GPU-driven mode reports the latest completed counter buffer; CPU fallback reports accepted items and cached tile histograms.
 - `shadowsEnabled`, `environmentMapEnabled`, `effectiveExposure`: actual renderer path and frame exposure after scene compensation.
 
 Grid/LOD fields:

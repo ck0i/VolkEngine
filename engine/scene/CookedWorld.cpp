@@ -117,7 +117,7 @@ bool validResolvedMaterial(const RenderMaterial &material) {
          material.flags.y >=
              static_cast<float>(RenderMaterialClass::Standard) &&
          material.flags.y <=
-             static_cast<float>(RenderMaterialClass::Emissive) &&
+             static_cast<float>(RenderMaterialClass::Water) &&
          material.flags.z >= 0.0F && material.flags.w >= 0.0F;
 }
 

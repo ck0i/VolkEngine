@@ -2,6 +2,7 @@
 #include "assets/GltfImporter.hpp"
 #include "core/Application.hpp"
 #include "core/FileSystem.hpp"
+#include "landscape/Landscape.hpp"
 #include "streaming/WorldPartition.hpp"
 
 #if VOLKENGINE_ENABLE_IMGUI
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -25,6 +27,58 @@ constexpr std::uint64_t kTraversalWarmupFrames = 60U;
 constexpr std::uint64_t kTraversalFrames = 1'200U;
 constexpr float kTraversalMinimumX = -7'000.0F;
 constexpr float kTraversalMaximumX = 7'000.0F;
+constexpr std::uint64_t kLandscapeSeed = 0x4d324c414e445343ULL;
+
+ve::AssetId landscapeAssetId(const std::string_view name) {
+  return ve::AssetId::derive(ve::builtin_assets::kReferenceSceneId,
+                             "m2/landscape/" + std::string(name));
+}
+
+ve::AssetId terrainMeshId(const ve::AssetId cell) noexcept {
+  return ve::AssetId::derive(cell, "m2/terrain");
+}
+
+constexpr ve::AssetId kLandscapeEntityNamespace{0x4d324c414e44454eULL, 0U};
+
+void appendRenderable(ve::CookedWorld &world, const std::uint64_t identity,
+                      std::string name, const ve::TransformTRS transform,
+                      const ve::AssetId mesh, const ve::AssetId material) {
+  world.identities.push_back({kLandscapeEntityNamespace.high, identity + 1U});
+  world.names.push_back(std::move(name));
+  world.parentIndices.push_back(std::numeric_limits<std::uint32_t>::max());
+  world.transforms.push_back(transform);
+  world.renderableMask.push_back(1U);
+  world.renderables.push_back({mesh, material, true});
+}
+
+ve::ImportedMeshPrimitive generatedMesh(ve::AssetId id, std::string name,
+                                        ve::MeshData mesh,
+                                        const ve::AssetId material) {
+  ve::ImportedMeshPrimitive result;
+  result.id = id;
+  result.name = std::move(name);
+  result.clusters = ve::buildMeshClusters(mesh);
+  result.mesh = std::move(mesh);
+  result.material = material;
+  return result;
+}
+
+ve::ImportedMaterial
+generatedMaterial(const ve::AssetId id, std::string name,
+                  const ve::Vec4 baseColor, const float metallic,
+                  const float roughness,
+                  const ve::MaterialShadingModel shadingModel,
+                  const bool doubleSided = false) {
+  ve::ImportedMaterial result;
+  result.id = id;
+  result.name = std::move(name);
+  result.baseColorFactor = baseColor;
+  result.metallicFactor = metallic;
+  result.roughnessFactor = roughness;
+  result.shadingModel = shadingModel;
+  result.doubleSided = doubleSided;
+  return result;
+}
 
 ve::AssetId cellId(const std::uint64_t value) {
   return {0x4d3153545245414dULL, value};
@@ -94,10 +148,32 @@ struct BenchmarkArtifacts {
   std::string manifestHash;
   std::string contentHash;
   std::uint64_t residencyBudget = 0U;
+  std::vector<ve::ImportedMaterial> generatedMaterials;
+  std::vector<ve::ImportedMeshPrimitive> generatedMeshes;
+  ve::LandscapeRunStats landscapeStats;
+  bool assetsPublished = false;
 };
+
+void publishLandscapeAssets(void *context, ve::ReferenceAssetBundle &bundle) {
+  auto &artifacts = *static_cast<BenchmarkArtifacts *>(context);
+  if (artifacts.assetsPublished)
+    throw std::logic_error("Landscape benchmark assets were already published");
+  bundle.scene.materials.insert(
+      bundle.scene.materials.end(),
+      std::make_move_iterator(artifacts.generatedMaterials.begin()),
+      std::make_move_iterator(artifacts.generatedMaterials.end()));
+  bundle.scene.meshes.insert(
+      bundle.scene.meshes.end(),
+      std::make_move_iterator(artifacts.generatedMeshes.begin()),
+      std::make_move_iterator(artifacts.generatedMeshes.end()));
+  artifacts.generatedMaterials.clear();
+  artifacts.generatedMeshes.clear();
+  artifacts.assetsPublished = true;
+}
 
 BenchmarkArtifacts cookBenchmark(
     const std::filesystem::path &root, const ve::ImportedGltfScene &reference,
+    const ve::LandscapeField &landscape,
     std::vector<std::pair<ve::ResidencyResourceDesc, std::vector<std::byte>>>
         &dependencies) {
   if (reference.meshes.empty() || reference.materials.empty())
@@ -128,6 +204,44 @@ BenchmarkArtifacts cookBenchmark(
   }
 
   BenchmarkArtifacts result;
+  const ve::AssetId landscapeMaterial = landscapeAssetId("material/terrain");
+  const ve::AssetId foliageMaterial = landscapeAssetId("material/foliage");
+  const ve::AssetId waterMaterial = landscapeAssetId("material/water");
+  const std::array foliageMeshes{landscapeAssetId("mesh/grass"),
+                                 landscapeAssetId("mesh/shrub"),
+                                 landscapeAssetId("mesh/tree")};
+  const ve::AssetId waterMesh = landscapeAssetId("mesh/water");
+  result.generatedMaterials.push_back(generatedMaterial(
+      landscapeMaterial, "M2 Landscape", {0.34F, 0.38F, 0.28F, 1.0F}, 0.02F,
+      0.82F, ve::MaterialShadingModel::Landscape));
+  result.generatedMaterials.push_back(generatedMaterial(
+      foliageMaterial, "M2 Foliage", {0.16F, 0.42F, 0.12F, 1.0F}, 0.0F, 0.76F,
+      ve::MaterialShadingModel::Foliage, true));
+  result.generatedMaterials.push_back(
+      generatedMaterial(waterMaterial, "M2 Water", {0.06F, 0.20F, 0.28F, 1.0F},
+                        0.15F, 0.18F, ve::MaterialShadingModel::Water, true));
+  result.generatedMeshes.push_back(
+      generatedMesh(foliageMeshes[0], "M2 Grass Cluster",
+                    ve::createGrassClusterMesh(), foliageMaterial));
+  result.generatedMeshes.push_back(generatedMesh(
+      foliageMeshes[1], "M2 Shrub", ve::createShrubMesh(), foliageMaterial));
+  result.generatedMeshes.push_back(generatedMesh(
+      foliageMeshes[2], "M2 Tree", ve::createTreeMesh(), foliageMaterial));
+  result.generatedMeshes.push_back(generatedMesh(
+      waterMesh, "M2 Water Patch",
+      ve::createWaterPatch({}, 640.0F, landscape.config().waterLevel,
+                           1.0F / 128.0F),
+      waterMaterial));
+  result.landscapeStats.seed = landscape.config().seed;
+  result.landscapeStats.editBrushCount =
+      static_cast<std::uint32_t>(landscape.brushes().size());
+  result.landscapeStats.editRevision = landscape.revision();
+  result.landscapeStats.traversalDistanceMeters =
+      2.0F * (kTraversalMaximumX - kTraversalMinimumX);
+  result.landscapeStats.atmosphere = true;
+  result.landscapeStats.gpuFoliageWind = true;
+  result.landscapeStats.cpuFrameBudgetMs = 16.667;
+  result.landscapeStats.gpuFrameBudgetMs = 16.667;
   result.manifest.cells.push_back({cellId(1U),
                                    {},
                                    {},
@@ -167,11 +281,67 @@ BenchmarkArtifacts cookBenchmark(
     aggregateContent.insert(aggregateContent.end(), bytes.begin(), bytes.end());
   std::uint64_t maximumCellBytes = 0U;
   std::ranges::sort(result.manifest.cells, {}, &ve::WorldPartitionCell::id);
+  constexpr std::array<std::uint32_t, 3> terrainResolutions{32U, 16U, 8U};
+  constexpr std::array<float, 3> foliageScales{1.6F, 2.8F, 8.0F};
   for (std::size_t index = 0U; index < result.manifest.cells.size(); ++index) {
     ve::WorldPartitionCell &cell = result.manifest.cells[index];
-    const ve::CookedWorld world =
+    const bool leaf = cell.splitDistance == 0.0F;
+    const std::uint32_t lod = !cell.parent.valid() ? 2U : (leaf ? 0U : 1U);
+    ve::TerrainPatch terrain =
+        ve::cookTerrainPatch(landscape, {{cell.center.x, cell.center.z},
+                                         cell.halfExtent,
+                                         terrainResolutions[lod],
+                                         lod,
+                                         32.0F * static_cast<float>(lod + 1U),
+                                         1.0F / 128.0F});
+    const ve::AssetId terrainMesh = terrainMeshId(cell.id);
+    result.landscapeStats.terrainPatchesByLod[lod] += 1U;
+    result.landscapeStats.terrainVertices += terrain.mesh.vertices.size();
+    result.landscapeStats.terrainTriangles += terrain.mesh.indices.size() / 3U;
+    result.generatedMeshes.push_back(
+        generatedMesh(terrainMesh, "M2 Terrain " + std::to_string(cell.id.low),
+                      std::move(terrain.mesh), landscapeMaterial));
+
+    ve::CookedWorld world =
         makeCellWorld(cell, reference.meshes.front().id,
                       reference.meshes.front().material, index + 1U);
+    const std::uint64_t identityBase =
+        static_cast<std::uint64_t>(index + 1U) * 100'000U;
+    appendRenderable(
+        world, identityBase, "Terrain",
+        {{cell.center.x, 0.0F, cell.center.z}, {}, {1.0F, 1.0F, 1.0F}},
+        terrainMesh, landscapeMaterial);
+    if (leaf) {
+      const std::vector<ve::FoliageInstance> foliage =
+          ve::scatterFoliage(landscape, {{cell.center.x, cell.center.z},
+                                         cell.halfExtent * 0.88F,
+                                         320.0F,
+                                         0.82F,
+                                         42.0F,
+                                         192U,
+                                         ve::FoliageDensity::Medium,
+                                         kLandscapeSeed ^ cell.id.low});
+      for (std::size_t foliageIndex = 0U; foliageIndex < foliage.size();
+           ++foliageIndex) {
+        const ve::FoliageInstance &instance = foliage[foliageIndex];
+        const std::size_t species = static_cast<std::size_t>(instance.species);
+        ++result.landscapeStats.foliageInstancesBySpecies[species];
+        const float halfYaw = instance.yawRadians * 0.5F;
+        const float scale = instance.scale * foliageScales[species];
+        appendRenderable(world, identityBase + foliageIndex + 2U,
+                         "Foliage " + std::to_string(foliageIndex),
+                         {instance.position,
+                          {0.0F, std::sin(halfYaw), 0.0F, std::cos(halfYaw)},
+                          {scale, scale, scale}},
+                         foliageMeshes[species], foliageMaterial);
+      }
+      appendRenderable(
+          world, identityBase + 99'999U, "Water",
+          {{cell.center.x, 0.0F, cell.center.z}, {}, {1.0F, 1.0F, 1.0F}},
+          waterMesh, waterMaterial);
+      ++result.landscapeStats.waterPatchCount;
+    }
+    ve::validateCookedWorld(world);
     const std::vector<std::byte> bytes = ve::encodeCookedWorld(world);
     ve::writeBinaryFileAtomic(root / cell.artifactPath, bytes);
     cell.estimatedBytes = bytes.size();
@@ -179,23 +349,50 @@ BenchmarkArtifacts cookBenchmark(
         std::max(maximumCellBytes, static_cast<std::uint64_t>(bytes.size()));
     aggregateContent.insert(aggregateContent.end(), bytes.begin(), bytes.end());
   }
+  for (std::uint32_t z = 0U; z < 16U; ++z) {
+    for (std::uint32_t x = 0U; x < 64U; ++x) {
+      const float worldX =
+          kTraversalMinimumX + (kTraversalMaximumX - kTraversalMinimumX) *
+                                   (static_cast<float>(x) / 63.0F);
+      const float worldZ =
+          -3'500.0F + 7'000.0F * (static_cast<float>(z) / 15.0F);
+      const std::size_t biome =
+          static_cast<std::size_t>(landscape.sample(worldX, worldZ).biome);
+      ++result.landscapeStats.biomeSampleCounts[biome];
+    }
+  }
+  const std::uint64_t streamingContentBytes = aggregateContent.size();
+  for (const ve::ImportedMaterial &material : result.generatedMaterials) {
+    const std::vector<std::byte> bytes =
+        ve::serializeMaterialArtifact(material);
+    aggregateContent.insert(aggregateContent.end(), bytes.begin(), bytes.end());
+  }
+  for (const ve::ImportedMeshPrimitive &mesh : result.generatedMeshes) {
+    const std::vector<std::byte> bytes = ve::serializeMeshArtifact(mesh);
+    aggregateContent.insert(aggregateContent.end(), bytes.begin(), bytes.end());
+  }
   const std::vector<std::byte> manifestBytes =
       ve::encodeWorldPartition(result.manifest);
   ve::writeBinaryFileAtomic(root / "benchmark.vepartition", manifestBytes);
   result.manifestHash = ve::hashBytes(manifestBytes).hex();
   result.contentHash = ve::hashBytes(aggregateContent).hex();
+  result.landscapeStats.contentHash = result.contentHash;
   result.residencyBudget =
-      std::max(maximumCellBytes * 6U,
-               static_cast<std::uint64_t>(aggregateContent.size() * 3U / 4U));
+      std::max(maximumCellBytes * 8U, streamingContentBytes * 9U / 10U);
   return result;
 }
 
 struct TraversalContext {
   ve::ResidencyManager *residency = nullptr;
   ve::WorldPartitionRuntime *partition = nullptr;
+  const ve::LandscapeField *landscape = nullptr;
   bool metricsReset = false;
-  bool gateEnabled = false;
   std::uint64_t priorGapFrames = 0U;
+  ve::BoundedMetricSamples cpuFrameSamples;
+  ve::BoundedMetricSamples gpuFrameSamples;
+  std::uint32_t maximumVisibleLandscape = 0U;
+  std::uint32_t maximumVisibleFoliage = 0U;
+  std::uint32_t maximumVisibleWater = 0U;
   ve::StreamingRunStats current;
 };
 
@@ -255,11 +452,31 @@ bool updateTraversal(void *context, ve::Application &application,
     }
   }
   const ve::Vec3 origin = traversal.partition->worldOrigin();
-  camera.setPosition({observer.x - origin.x, 1.6F, 5.0F - origin.z});
+  const float cameraHeight =
+      traversal.landscape->height(observer.x, observer.z) + 120.0F;
+  camera.setPosition({observer.x - origin.x, cameraHeight, 5.0F - origin.z});
 
   const ve::ResidencyMetrics residencyMetrics = traversal.residency->metrics();
   const ve::PartitionMetrics partitionMetrics = traversal.partition->metrics();
   const ve::RenderStats renderStats = application.renderStats();
+  if (traversal.metricsReset) {
+    traversal.cpuFrameSamples.add(renderStats.cpuFrameMs);
+    if (renderStats.gpuTimestampsValid)
+      traversal.gpuFrameSamples.add(renderStats.gpuFrameMs);
+  }
+  application.updateLandscapeRunVisibility();
+  traversal.maximumVisibleLandscape =
+      std::max(traversal.maximumVisibleLandscape,
+               renderStats.materialClassCounts[static_cast<std::size_t>(
+                   ve::RenderMaterialClass::Landscape)]);
+  traversal.maximumVisibleFoliage =
+      std::max(traversal.maximumVisibleFoliage,
+               renderStats.materialClassCounts[static_cast<std::size_t>(
+                   ve::RenderMaterialClass::Foliage)]);
+  traversal.maximumVisibleWater =
+      std::max(traversal.maximumVisibleWater,
+               renderStats.materialClassCounts[static_cast<std::size_t>(
+                   ve::RenderMaterialClass::Water)]);
   const std::uint32_t maxVisible = std::max(
       traversal.current.maxVisibleInstances, renderStats.visibleItemCount);
   const std::uint64_t maxTriangles = std::max(
@@ -289,9 +506,12 @@ void drawStreamingOverlay(void *context,
   const ve::StreamingRunStats &stats = traversal.current;
   ImGui::SetNextWindowPos({12.0F, 28.0F}, ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.78F);
-  if (ImGui::Begin("M1 streaming profiler")) {
+  if (ImGui::Begin("M2 landscape streaming profiler")) {
     ImGui::Text("CPU %.3f ms / GPU %.3f ms", frame.stats.cpuFrameMs,
                 frame.stats.gpuFrameMs);
+    ImGui::Text("Terrain/foliage/water %u / %u / %u",
+                traversal.maximumVisibleLandscape,
+                traversal.maximumVisibleFoliage, traversal.maximumVisibleWater);
     ImGui::Text("Resident %.2f MiB / peak %.2f MiB",
                 static_cast<double>(stats.residentBytes) / (1024.0 * 1024.0),
                 static_cast<double>(stats.peakResidentBytes) /
@@ -325,12 +545,13 @@ void drawStreamingOverlay(void *context,
 int main(int argc, char **argv) {
   try {
     ve::EngineConfig config;
-    config.applicationName = "VolkEngine M1 Partition Benchmark";
+    config.applicationName = "VolkEngine M2 Landscape Benchmark";
     config.assetHotReload = false;
+    config.atmosphere = true;
     ve::RunOptions run;
     run.maxFrames = kTraversalWarmupFrames + kTraversalFrames + 60U;
     run.warmupFrames = kTraversalWarmupFrames;
-    run.scenarioName = "partition-traversal-v1";
+    run.scenarioName = "landscape-traversal-v1";
     bool gate = false;
     for (int index = 1; index < argc; ++index) {
       const std::string_view option{argv[index]};
@@ -369,7 +590,11 @@ int main(int argc, char **argv) {
       }
     }
 
-    ve::Application application{config};
+    ve::LandscapeField landscape{
+        {kLandscapeSeed, 8.0F, 220.0F, 2'400.0F, -18.0F}};
+    landscape.addBrush({{-2'000.0F, 0.0F}, 900.0F, 42.0F, 2.2F});
+    landscape.addBrush({{1'500.0F, -900.0F}, 650.0F, -28.0F, 1.8F});
+    landscape.addBrush({{4'800.0F, 700.0F}, 1'100.0F, 34.0F, 2.6F});
     const ve::ImportedGltfScene reference =
         ve::importGltfScene(config.assetDirectory / "reference_scene.gltf",
                             ve::builtin_assets::kReferenceSceneId);
@@ -377,8 +602,11 @@ int main(int argc, char **argv) {
         config.cacheDirectory / "partition-benchmark";
     std::vector<std::pair<ve::ResidencyResourceDesc, std::vector<std::byte>>>
         dependencies;
-    const BenchmarkArtifacts artifacts =
-        cookBenchmark(benchmarkRoot, reference, dependencies);
+    BenchmarkArtifacts artifacts =
+        cookBenchmark(benchmarkRoot, reference, landscape, dependencies);
+    ve::Application application{config, publishLandscapeAssets, &artifacts};
+    if (!artifacts.assetsPublished)
+      throw std::logic_error("Landscape benchmark assets were not published");
 
     ve::ResidencyManager residency{
         application.jobSystem(),
@@ -400,8 +628,13 @@ int main(int argc, char **argv) {
     application.configureStreamingRun(artifacts.manifestHash,
                                       artifacts.contentHash,
                                       artifacts.residencyBudget);
+    application.configureLandscapeRun(artifacts.landscapeStats);
 
-    TraversalContext traversal{&residency, &partition, false, gate, 0U, {}};
+    TraversalContext traversal{
+        .residency = &residency,
+        .partition = &partition,
+        .landscape = &landscape,
+    };
     application.setFrameUpdateCallback(updateTraversal, &traversal);
     application.setRendererOverlay(drawStreamingOverlay, &traversal);
     ve::World world;
@@ -412,9 +645,20 @@ int main(int argc, char **argv) {
     if (gate) {
       const ve::ResidencyMetrics residencyMetrics = residency.metrics();
       const ve::PartitionMetrics partitionMetrics = partition.metrics();
+      const ve::MetricDistribution cpuFrames =
+          traversal.cpuFrameSamples.distribution();
+      const ve::MetricDistribution gpuFrames =
+          traversal.gpuFrameSamples.distribution();
       if (partitionMetrics.traversalFrames < kTraversalFrames ||
           traversal.current.maxVisibleInstances == 0U ||
           traversal.current.maxSceneTriangles == 0U ||
+          traversal.maximumVisibleLandscape == 0U ||
+          traversal.maximumVisibleFoliage == 0U ||
+          traversal.maximumVisibleWater == 0U ||
+          cpuFrames.sampleCount < kTraversalFrames ||
+          gpuFrames.sampleCount < kTraversalFrames ||
+          cpuFrames.p95 > artifacts.landscapeStats.cpuFrameBudgetMs ||
+          gpuFrames.p95 > artifacts.landscapeStats.gpuFrameBudgetMs ||
           partitionMetrics.coverageGapFrames != 0U ||
           partitionMetrics.partialLoadFailures != 0U ||
           residencyMetrics.mainThreadIoOperations != 0U ||
@@ -428,7 +672,15 @@ int main(int argc, char **argv) {
                   << partitionMetrics.partialLoadFailures << ", main IO "
                   << residencyMetrics.mainThreadIoOperations << ", resident "
                   << residencyMetrics.residentBytes << "/"
-                  << artifacts.residencyBudget << '\n';
+                  << artifacts.residencyBudget << ", OOM/IO/missing "
+                  << residencyMetrics.outOfMemoryFailures << '/'
+                  << residencyMetrics.ioFailures << '/'
+                  << residencyMetrics.missingDependencyFailures
+                  << ", visible terrain/foliage/water "
+                  << traversal.maximumVisibleLandscape << '/'
+                  << traversal.maximumVisibleFoliage << '/'
+                  << traversal.maximumVisibleWater << ", CPU/GPU p95 "
+                  << cpuFrames.p95 << '/' << gpuFrames.p95 << " ms\n";
         return 2;
       }
     }

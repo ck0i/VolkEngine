@@ -5,6 +5,7 @@
 #include "core/MetricDistribution.hpp"
 #include "renderer/Renderer.hpp"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -63,8 +64,30 @@ struct StreamingRunStats {
 };
 
 
+struct LandscapeRunStats {
+  bool enabled = false;
+  std::uint64_t seed = 0U;
+  std::string contentHash;
+  std::array<std::uint32_t, 3> terrainPatchesByLod{};
+  std::uint64_t terrainVertices = 0U;
+  std::uint64_t terrainTriangles = 0U;
+  std::array<std::uint32_t, 4> biomeSampleCounts{};
+  std::array<std::uint32_t, 3> foliageInstancesBySpecies{};
+  std::uint32_t waterPatchCount = 0U;
+  std::uint32_t editBrushCount = 0U;
+  std::uint64_t editRevision = 0U;
+  float traversalDistanceMeters = 0.0F;
+  bool atmosphere = false;
+  bool gpuFoliageWind = false;
+  std::uint32_t maxVisibleLandscapeInstances = 0U;
+  std::uint32_t maxVisibleFoliageInstances = 0U;
+  std::uint32_t maxVisibleWaterInstances = 0U;
+  double cpuFrameBudgetMs = 0.0;
+  double gpuFrameBudgetMs = 0.0;
+};
+
 struct RunSummary {
-  static constexpr std::uint32_t kSchemaVersion = 6;
+  static constexpr std::uint32_t kSchemaVersion = 7;
 
   EngineConfig config;
   RunOptions options;
@@ -73,6 +96,7 @@ struct RunSummary {
   RunMetricDistributions distributions;
   JobSystemStats jobs;
   StreamingRunStats streaming;
+  LandscapeRunStats landscape;
   std::uint64_t frameCount = 0;
   int exitStatus = 0;
 };

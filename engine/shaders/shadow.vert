@@ -1,8 +1,10 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
+#include "common/scene_uniforms.glsl"
 #include "common/scene_instances.glsl"
 #include "common/lighting.glsl"
+#include "common/foliage_wind.glsl"
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 2) in vec2 inUv;
@@ -18,7 +20,8 @@ layout(push_constant) uniform ShadowPushConstants {
 void main() {
     uint instanceIndex = shadowInstanceIndices[gl_InstanceIndex];
     SceneInstance instance = instanceData.instances[instanceIndex];
-    vec4 world = instance.model * vec4(inPosition, 1.0);
+    vec3 localPosition = applyFoliageWind(inPosition, instance);
+    vec4 world = instance.model * vec4(localPosition, 1.0);
     gl_Position =
         lighting.shadowViewProjection[pushData.shadowViewIndex] * world;
     vUv = inUv;

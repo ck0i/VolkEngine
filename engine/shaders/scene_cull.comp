@@ -65,6 +65,7 @@ layout(std430, set = 0, binding = 6) buffer CullCounterData {
     uint testedCullingUnitCount;
     uint occludedCullingUnitCount;
     uvec4 sphereLodCounts;
+    uint visibleMaterialClassCounts[10];
 } counters;
 layout(set = 0, binding = 7) uniform sampler2D depthPyramidTexture;
 
@@ -166,6 +167,9 @@ void main() {
         return;
     }
     atomicAdd(counters.visibleItemCount, 1);
+    atomicAdd(counters.visibleMaterialClassCounts[
+                  min(candidate.metadata.z, 9U)],
+              1U);
 
     const uint meshIndex = selectedMesh(candidate);
     const MeshClusterRange range = meshRanges[meshIndex];

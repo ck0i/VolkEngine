@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Camera.hpp"
+#include "renderer/Lighting.hpp"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -86,7 +87,7 @@ struct RenderStats {
     unsigned shadowAtlasCapacity = 0;
     unsigned shadowAtlasOverflowCount = 0;
     unsigned reflectionProbeCount = 0;
-    std::array<unsigned, 8> materialClassCounts{};
+    std::array<unsigned, kRenderMaterialClassCount> materialClassCounts{};
     bool shadowsEnabled = false;
     bool environmentMapEnabled = false;
     double effectiveExposure = 1.0;

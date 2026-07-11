@@ -311,6 +311,7 @@ void VulkanRenderer::Impl::waitIdle() {
       stats_.sphereLodMediumCount = lastFrame.completedSphereLodCounts[1];
       stats_.sphereLodLowCount = lastFrame.completedSphereLodCounts[2];
       stats_.sceneTriangleCount = lastFrame.completedSceneTriangleCount;
+      stats_.materialClassCounts = lastFrame.completedMaterialClassCounts;
       stats_.triangleCount =
           stats_.sceneTriangleCount * lastFrame.submittedScenePassCount + 1ULL;
       stats_.gpuVisibilityValidated = config_.gpuVisibilityValidation;

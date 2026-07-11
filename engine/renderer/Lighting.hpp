@@ -31,12 +31,16 @@ enum class RenderMaterialClass : std::uint32_t {
     Hair = 5,
     Cloth = 6,
     Emissive = 7,
+  Landscape = 8,
+  Water = 9,
 };
+inline constexpr std::size_t kRenderMaterialClassCount = 10U;
 
 enum MaterialFeature : std::uint32_t {
     MaterialFeatureNone = 0,
     MaterialFeatureAlphaMask = 1U << 0U,
     MaterialFeatureDoubleSided = 1U << 1U,
+  MaterialFeatureGroundGrid = 1U << 2U,
 };
 
 struct alignas(16) RenderLocalLight {

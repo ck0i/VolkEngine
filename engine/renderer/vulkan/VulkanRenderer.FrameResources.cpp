@@ -13,7 +13,8 @@ VkDeviceSize VulkanRenderer::Impl::checkedSceneInstanceBufferSize(std::size_t ca
 
     const VkDeviceSize instanceBufferSize = static_cast<VkDeviceSize>(sizeof(InstanceData) * capacity);
     if (instanceBufferSize > deviceOwner_.physicalDeviceProperties.limits.maxStorageBufferRange) {
-        throw std::runtime_error("Scene instance storage exceeds VkPhysicalDeviceLimits::maxStorageBufferRange");
+        throw std::runtime_error("Scene instance storage exceeds "
+                             "VkPhysicalDeviceLimits::maxStorageBufferRange");
     }
     return instanceBufferSize;
 }
@@ -920,7 +921,8 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
     stats_.graphTransientAllocatedBytes = diagnosticGraph.transientStats().allocatedBytes;
     ++stats_.graphRecompileCount;
     stats_.graphLastCompileWasResize = resizeRecompile;
-    logger()->info("Compiled frame graph variants (depth prepass {}): {} cached topologies, {} resources",
+    logger()->info("Compiled frame graph variants (depth prepass {}): {} cached "
+                 "topologies, {} resources",
                    depthPrepassModeName(config_.depthPrepassMode),
                    (depthPrepassAvailable ? 2U : 0U) + (depthPrepassOffAvailable ? 2U : 0U),
                    graphOwner_.variants[baseVariantIndex].graph.resourceCount());
@@ -929,13 +931,20 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
 void VulkanRenderer::Impl::updateUniforms(FrameResources& frame, const Camera& camera, const Mat4& viewProjection, const double elapsedSeconds) {
     const Vec3 position = camera.position();
     const Vec3 lightDirection = normalize(Vec3{-0.45f, -1.0f, -0.35f});
-    const SceneUniforms uniforms{
+    const Vec3 forward = camera.forward();
+  const Vec3 right = camera.right();
+  const Vec3 up = normalize(cross(right, forward));
+  const float tanHalfFov = std::tan(camera.verticalFov() * 0.5F);
+  const SceneUniforms uniforms{
         viewProjection,
         {position.x, position.y, position.z, static_cast<float>(elapsedSeconds)},
         {lightDirection.x, lightDirection.y, lightDirection.z, 0.0f},
         {1.0f, 0.93f, 0.82f, 8.0f},
         {0.46f, 0.58f, 0.82f, 0.055f},
         {0.14f, 0.12f, 0.10f, 0.030f},
+      {forward.x, forward.y, forward.z, tanHalfFov},
+      {right.x, right.y, right.z, camera.aspect()},
+      {up.x, up.y, up.z, config_.atmosphere ? 1.0F : 0.0F},
     };
     std::memcpy(frame.sceneUniforms.mapped, &uniforms, sizeof(uniforms));
 }
@@ -953,11 +962,14 @@ void VulkanRenderer::Impl::restoreFrameFenceAfterSubmitFailure(FrameResources& f
         if (oldFence != VK_NULL_HANDLE) {
             vkDestroyFence(deviceOwner_.device, oldFence, nullptr);
         }
-        logger()->error("vkQueueSubmit frame failed with VkResult {}; restored frame {} fence to signaled before throwing",
+        logger()->error("vkQueueSubmit frame failed with VkResult {}; restored "
+                    "frame {} fence to signaled before throwing",
                         static_cast<int>(submitResult),
                         frameIndex);
     } else {
-        logger()->error("vkQueueSubmit frame failed with VkResult {}; failed to restore frame {} fence to signaled state (vkCreateFence returned {})",
+        logger()->error(
+        "vkQueueSubmit frame failed with VkResult {}; failed to restore frame "
+        "{} fence to signaled state (vkCreateFence returned {})",
                         static_cast<int>(submitResult),
                         frameIndex,
                         static_cast<int>(fenceResult));

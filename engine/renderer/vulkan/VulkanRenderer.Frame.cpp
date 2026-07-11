@@ -35,7 +35,8 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
         throw std::runtime_error("Scene build duration must be finite and non-negative");
     }
     if (acquireRecoveryFailed_) {
-        throw std::runtime_error("Renderer acquire recovery previously failed; refusing semaphore reuse");
+        throw std::runtime_error("Renderer acquire recovery previously failed; "
+                             "refusing semaphore reuse");
     }
     if (swapchainOwner_.handle == VK_NULL_HANDLE) {
         recreateSwapchain();
@@ -103,10 +104,12 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
         }
         if (retryScreenshotRequest) {
             if (!readback_.swapchainTransferSourceSupported()) {
-                logger()->warn("Screenshot requested but swapchain images do not support TRANSFER_SRC usage");
+                logger()->warn("Screenshot requested but swapchain images do not "
+                       "support TRANSFER_SRC usage");
                 retryScreenshotRequest = false;
             } else if (!screenshotFormatSupported()) {
-                logger()->warn("Screenshot requested but swapchain format {} is not BGRA8/RGBA8 UNORM",
+                logger()->warn("Screenshot requested but swapchain format {} is not "
+                       "BGRA8/RGBA8 UNORM",
                                static_cast<int>(swapchainOwner_.format));
                 retryScreenshotRequest = false;
             } else {
@@ -581,7 +584,9 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     stats_.shadowAtlasOverflowCount =
         frame.shadowAtlasOverflowCount;
     stats_.reflectionProbeCount = frame.reflectionProbeCount;
-    stats_.materialClassCounts = visibility.materialClassCounts;
+    stats_.materialClassCounts = gpuCountersValid
+                                   ? frame.completedMaterialClassCounts
+                                   : visibility.materialClassCounts;
     stats_.shadowsEnabled =
         config_.shadows && indirectSceneDrawsEnabled_;
     stats_.environmentMapEnabled =
@@ -1022,7 +1027,18 @@ void VulkanRenderer::Impl::recordHdrGraphPass(const FrameGraphRecordContext& con
     rendering.pColorAttachments = &colorAttachment;
     rendering.pDepthAttachment = &depthAttachment;
     vkCmdBeginRendering(context.frame->commandBuffer, &rendering);
-    vkCmdBindPipeline(context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+  if (config_.atmosphere) {
+    vkCmdBindPipeline(context.frame->commandBuffer,
+                      VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipelineOwner_.atmosphere);
+    const VkDescriptorSet sceneSet =
+        resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame];
+    vkCmdBindDescriptorSets(
+        context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelineOwner_.sceneLayout, 0U, 1U, &sceneSet, 0U, nullptr);
+    vkCmdDraw(context.frame->commandBuffer, 3U, 1U, 0U, 0U);
+  }
+  vkCmdBindPipeline(context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       context.useDepthPrepass ? pipelineOwner_.scene : pipelineOwner_.sceneNoPrepass);
     recordSceneBatches(context);
     vkCmdEndRendering(context.frame->commandBuffer);
