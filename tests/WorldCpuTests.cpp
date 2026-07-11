@@ -27,7 +27,7 @@ void operator delete(void* allocation) noexcept {
 }
 
 void operator delete(void* allocation, std::size_t) noexcept {
-    std::free(allocation);
+    ::operator delete(allocation);
 }
 
 namespace {

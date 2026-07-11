@@ -58,6 +58,14 @@ function(volkengine_target_warnings target)
             target_compile_options(${target} PRIVATE -Werror)
         endif()
     endif()
+    if("${target}" MATCHES "Test$")
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${target} PRIVATE -UNDEBUG)
+        endif()
+    endif()
+
 
     if(VOLKENGINE_ENABLE_SANITIZERS)
         if(MSVC)
@@ -468,4 +476,11 @@ target_include_directories(VolkEngineWorldCpuTest
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
 volkengine_target_warnings(VolkEngineWorldCpuTest)
 add_test(NAME WorldCpu
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    foreach(target IN ITEMS
+            VolkEngineWorldSchedulerCpuTest
+            VolkEngineWorldCpuTest)
+        target_compile_options(${target} PRIVATE -Wno-mismatched-new-delete)
+    endforeach()
+endif()
     COMMAND VolkEngineWorldCpuTest)

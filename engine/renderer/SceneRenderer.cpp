@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #if defined(_WIN32)
+#include <windows.h>
 #include <bcrypt.h>
 #elif defined(__linux__)
 #include <cerrno>

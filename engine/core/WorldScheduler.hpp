@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -154,7 +155,7 @@ public:
         try {
             const std::size_t count = systems_.size();
             indegrees_.assign(count, 0U);
-            emitted_.assign(count, false);
+            emitted_.assign(count, 0U);
             executionOrder_.reserve(count);
 
             for (std::size_t systemIndex = 0U; systemIndex < count; ++systemIndex) {
@@ -170,7 +171,7 @@ public:
             for (std::size_t emittedCount = 0U; emittedCount < count; ++emittedCount) {
                 std::size_t next = count;
                 for (std::size_t candidate = 0U; candidate < count; ++candidate) {
-                    if (!emitted_[candidate] && indegrees_[candidate] == 0U) {
+                    if (emitted_[candidate] == 0U && indegrees_[candidate] == 0U) {
                         next = candidate;
                         break;
                     }
@@ -179,11 +180,11 @@ public:
                     throw std::runtime_error("World system dependency cycle detected");
                 }
 
-                emitted_[next] = true;
+                emitted_[next] = 1U;
                 executionOrder_.push_back(next);
                 const std::string& completedName = systems_[next].name;
                 for (std::size_t dependent = 0U; dependent < count; ++dependent) {
-                    if (emitted_[dependent]) {
+                    if (emitted_[dependent] != 0U) {
                         continue;
                     }
                     for (const std::string& dependency : systems_[dependent].dependencies) {
@@ -322,7 +323,7 @@ private:
     std::vector<System> systems_;
     std::vector<std::size_t> executionOrder_;
     std::vector<std::size_t> indegrees_;
-    std::vector<bool> emitted_;
+    std::vector<std::uint8_t> emitted_;
     std::vector<std::unique_ptr<detail::SimulationStepResource>> simulationResources_;
     WorldCommandBuffer commands_;
     bool compiled_ = false;

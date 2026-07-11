@@ -142,6 +142,7 @@
         "VolkEngineRunSummaryCpuTest",
         "VolkEngineAssetPipelineCpuTest",
         "VolkEngineVulkanFrameGraphSyncCpuTest",
+        "VolkEngineVulkanReadbackStateCpuTest",
         "VolkEngineSceneRendererTest",
         "VolkEngineWorldSceneCpuTest",
         "VolkEngineScenePersistenceCpuTest",
