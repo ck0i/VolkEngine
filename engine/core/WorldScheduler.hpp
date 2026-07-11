@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/SimulationEvents.hpp"
+#include "core/SimulationTimers.hpp"
+
 #include "core/World.hpp"
 #include "platform/Input.hpp"
 
@@ -76,9 +78,9 @@ public:
         emitted_.reserve(systemCount);
     }
 
-    void reserveEventChannels(const std::size_t channelCount) {
+    void reserveSimulationResources(const std::size_t resourceCount) {
         ensureNotExecuting();
-        eventChannels_.reserve(channelCount);
+        simulationResources_.reserve(resourceCount);
     }
 
     template <typename T, std::size_t Capacity>
@@ -88,9 +90,23 @@ public:
         auto channel = std::unique_ptr<SimulationEventChannel<T, Capacity>>(
             new SimulationEventChannel<T, Capacity>());
         SimulationEventChannel<T, Capacity>& reference = *channel;
-        auto control = std::unique_ptr<detail::SimulationEventChannelControl>(
-            static_cast<detail::SimulationEventChannelControl*>(channel.release()));
-        eventChannels_.push_back(std::move(control));
+        auto resource = std::unique_ptr<detail::SimulationStepResource>(
+            static_cast<detail::SimulationStepResource*>(channel.release()));
+        simulationResources_.push_back(std::move(resource));
+        invalidateCompilation();
+        return reference;
+    }
+
+    template <typename T, std::size_t Capacity>
+    [[nodiscard]] SimulationTimerQueue<T, Capacity>& createTimerQueue() {
+        ensureNotExecuting();
+
+        auto queue = std::unique_ptr<SimulationTimerQueue<T, Capacity>>(
+            new SimulationTimerQueue<T, Capacity>());
+        SimulationTimerQueue<T, Capacity>& reference = *queue;
+        auto resource = std::unique_ptr<detail::SimulationStepResource>(
+            static_cast<detail::SimulationStepResource*>(queue.release()));
+        simulationResources_.push_back(std::move(resource));
         invalidateCompilation();
         return reference;
     }
@@ -201,25 +217,22 @@ public:
         }
 
         executing_ = true;
-        for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
-            channel->checkpoint();
+        for (const std::unique_ptr<detail::SimulationStepResource>& resource : simulationResources_) {
+            resource->checkpoint();
         }
 
         CommandWriter commandWriter{commands_};
         try {
+            ensureSimulationResourcesWithinCapacity();
             for (const std::size_t systemIndex : executionOrder_) {
                 const System& system = systems_[systemIndex];
                 system.callback(system.context, world, commandWriter, input, elapsed, delta);
             }
-            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
-                if (channel->overflowed()) {
-                    throw std::overflow_error("Simulation event channel capacity exceeded");
-                }
-            }
+            ensureSimulationResourcesWithinCapacity();
         } catch (...) {
             commands_.discard();
-            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
-                channel->rollback();
+            for (const std::unique_ptr<detail::SimulationStepResource>& resource : simulationResources_) {
+                resource->rollback();
             }
             executing_ = false;
             throw;
@@ -227,15 +240,15 @@ public:
 
         try {
             ExecutionResult result = commands_.playback(world);
-            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
-                channel->promote();
+            for (const std::unique_ptr<detail::SimulationStepResource>& resource : simulationResources_) {
+                resource->promote();
             }
             executing_ = false;
             return result;
         } catch (...) {
             commands_.discard();
-            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
-                channel->promote();
+            for (const std::unique_ptr<detail::SimulationStepResource>& resource : simulationResources_) {
+                resource->promote();
             }
             executing_ = false;
             throw;
@@ -287,6 +300,14 @@ private:
         return nullptr;
     }
 
+    void ensureSimulationResourcesWithinCapacity() const {
+        for (const std::unique_ptr<detail::SimulationStepResource>& resource : simulationResources_) {
+            if (resource->overflowed()) {
+                throw std::overflow_error("Simulation step resource capacity exceeded");
+            }
+        }
+    }
+
     void ensureNotExecuting() const {
         if (executing_) {
             throw std::logic_error("World system scheduler mutation during execution is forbidden");
@@ -302,7 +323,7 @@ private:
     std::vector<std::size_t> executionOrder_;
     std::vector<std::size_t> indegrees_;
     std::vector<bool> emitted_;
-    std::vector<std::unique_ptr<detail::SimulationEventChannelControl>> eventChannels_;
+    std::vector<std::unique_ptr<detail::SimulationStepResource>> simulationResources_;
     WorldCommandBuffer commands_;
     bool compiled_ = false;
     bool executing_ = false;

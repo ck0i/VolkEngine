@@ -1,4 +1,6 @@
 #pragma once
+#include "core/SimulationStepResource.hpp"
+
 
 #include <array>
 #include <cstddef>
@@ -13,29 +15,8 @@ class WorldSystemScheduler;
 template <typename T, std::size_t Capacity>
 class SimulationEventChannel;
 
-namespace detail {
-
-class SimulationEventChannelControl {
-private:
-    constexpr SimulationEventChannelControl() noexcept = default;
-
-    virtual void checkpoint() noexcept = 0;
-    virtual void rollback() noexcept = 0;
-    virtual void promote() noexcept = 0;
-    [[nodiscard]] virtual bool overflowed() const noexcept = 0;
-
-    friend class ::ve::WorldSystemScheduler;
-    template <typename T, std::size_t Capacity>
-    friend class ::ve::SimulationEventChannel;
-
-public:
-    virtual ~SimulationEventChannelControl() = default;
-};
-
-} // namespace detail
-
 template <typename T, std::size_t Capacity>
-class SimulationEventChannel final : private detail::SimulationEventChannelControl {
+class SimulationEventChannel final : private detail::SimulationStepResource {
     static_assert(Capacity > 0U, "Simulation event channel capacity must be positive");
     static_assert(std::is_trivially_copyable_v<T>, "Simulation event payloads must be trivially copyable");
     static_assert(std::is_nothrow_default_constructible_v<T>,

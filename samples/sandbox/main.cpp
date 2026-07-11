@@ -1,6 +1,7 @@
 #include "core/Application.hpp"
 #include "core/Log.hpp"
 #include "core/SimulationEvents.hpp"
+#include "core/SimulationTimers.hpp"
 #include "core/WorldScheduler.hpp"
 #include "platform/InputActions.hpp"
 #include "renderer/SceneRenderer.hpp"
@@ -33,14 +34,18 @@ struct SandboxArgs {
 
 struct SpinController {
     double angleRadians = 0.0;
+    float direction = 1.0f;
     bool paused = false;
 };
+
+struct SpinDirectionFlip {};
 
 struct PauseRequested {};
 
 struct SandboxSystemContext {
     ve::InputActionMap inputActions;
     ve::SimulationEventChannel<PauseRequested, 8> *pauseRequests = nullptr;
+    ve::SimulationTimerQueue<SpinDirectionFlip, 8> *directionFlips = nullptr;
 };
 
 template <typename Integer> Integer parseInteger(const std::string_view value, const std::string_view optionName) {
@@ -135,6 +140,8 @@ void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler:
                       const ve::InputState &, const double, const double deltaSeconds) {
     const auto &sandboxContext = *static_cast<const SandboxSystemContext *>(context);
     const std::span<const PauseRequested> pauseRequests = sandboxContext.pauseRequests->events();
+    const std::span<const ve::SimulationTimerEvent<SpinDirectionFlip>> directionFlips =
+        sandboxContext.directionFlips->events();
 
     world.each<ve::WorldSceneTransform, SpinController>(
         [&](const ve::World::Entity, ve::WorldSceneTransform &transform, SpinController &spin) {
@@ -142,8 +149,12 @@ void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler:
                 static_cast<void>(pauseRequest);
                 spin.paused = !spin.paused;
             }
+            for (const ve::SimulationTimerEvent<SpinDirectionFlip> &directionFlip : directionFlips) {
+                static_cast<void>(directionFlip);
+                spin.direction = -spin.direction;
+            }
             if (!spin.paused) {
-                spin.angleRadians += deltaSeconds * 0.55;
+                spin.angleRadians += deltaSeconds * 0.55 * static_cast<double>(spin.direction);
             }
             transform.current.rotation = ve::rotationY(static_cast<float>(spin.angleRadians));
         });
@@ -262,8 +273,14 @@ int main(int argc, char **argv) {
         sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::gamepadButton(0U, ve::GamepadButton::A));
         constexpr std::array<std::string_view, 1> spinDependencies{"pause-input"};
         ve::WorldSystemScheduler scheduler;
-        scheduler.reserveEventChannels(1);
+        scheduler.reserveSimulationResources(2);
         sandboxContext.pauseRequests = &scheduler.createEventChannel<PauseRequested, 8>();
+        sandboxContext.directionFlips = &scheduler.createTimerQueue<SpinDirectionFlip, 8>();
+        const ve::TimerHandle directionFlipHandle =
+            sandboxContext.directionFlips->schedule(120U, SpinDirectionFlip{}, 120U);
+        if (!directionFlipHandle) {
+            throw std::runtime_error("Failed to schedule sandbox spin direction timer");
+        }
         scheduler.reserveSystems(2);
         scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{"pause-input", &publishPauseRequests, &sandboxContext});
         scheduler.addSystem(

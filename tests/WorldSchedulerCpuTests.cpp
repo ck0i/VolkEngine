@@ -326,7 +326,7 @@ void rejectEventSchedulerMutation(void* context,
         state.creationRejected = true;
     }
     try {
-        state.scheduler->reserveEventChannels(2U);
+        state.scheduler->reserveSimulationResources(2U);
     } catch (const std::logic_error&) {
         state.reservationRejected = true;
     }
@@ -334,6 +334,115 @@ void rejectEventSchedulerMutation(void* context,
         state.channel->reset();
     } catch (const std::logic_error&) {
         state.resetRejected = true;
+    }
+}
+
+struct TimerPayload {
+    int value = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<TimerPayload>);
+
+using TimerQueue = ve::SimulationTimerQueue<TimerPayload, 4U>;
+
+static_assert(!std::is_default_constructible_v<TimerQueue>);
+static_assert(!std::is_copy_constructible_v<TimerQueue>);
+static_assert(!std::is_copy_assignable_v<TimerQueue>);
+static_assert(!std::is_move_constructible_v<TimerQueue>);
+static_assert(!std::is_move_assignable_v<TimerQueue>);
+static_assert(std::is_trivially_copyable_v<ve::TimerHandle>);
+
+struct TimerObserveContext {
+    TimerQueue* queue = nullptr;
+    std::array<TimerPayload, 16> payloads{};
+    std::array<ve::TimerHandle, 16> handles{};
+    std::size_t observedCount = 0U;
+    bool cancelDue = false;
+    bool scheduleOnObserve = false;
+    bool scheduleSucceeded = false;
+    bool throwNow = false;
+};
+
+void observeTimers(void* context,
+                   ve::World&,
+                   ve::WorldSystemScheduler::CommandWriter&,
+                   const ve::InputState&,
+                   double,
+                   double) {
+    auto& state = *static_cast<TimerObserveContext*>(context);
+    for (const ve::SimulationTimerEvent<TimerPayload>& event : state.queue->events()) {
+        state.payloads[state.observedCount] = event.payload;
+        state.handles[state.observedCount] = event.handle;
+        ++state.observedCount;
+        if (state.cancelDue) {
+            (void)state.queue->cancel(event.handle);
+        }
+    }
+    if (state.scheduleOnObserve) {
+        state.scheduleSucceeded = state.queue->schedule(1U, {14}).valid();
+        state.scheduleOnObserve = false;
+    }
+    if (state.throwNow) {
+        state.throwNow = false;
+        throw std::runtime_error("timer system failure");
+    }
+}
+
+struct TimerScheduleContext {
+    TimerQueue* queue = nullptr;
+    bool schedule = false;
+    bool scheduled = false;
+};
+
+void scheduleTimer(void* context,
+                   ve::World&,
+                   ve::WorldSystemScheduler::CommandWriter&,
+                   const ve::InputState&,
+                   double,
+                   double) {
+    auto& state = *static_cast<TimerScheduleContext*>(context);
+    if (state.schedule) {
+        state.scheduled = state.queue->schedule(1U, {22}).valid();
+        state.schedule = false;
+    }
+}
+
+struct TimerResetContext {
+    TimerQueue* queue = nullptr;
+    bool resetRejected = false;
+};
+
+void rejectTimerReset(void* context,
+                      ve::World&,
+                      ve::WorldSystemScheduler::CommandWriter&,
+                      const ve::InputState&,
+                      double,
+                      double) {
+    auto& state = *static_cast<TimerResetContext*>(context);
+    try {
+        state.queue->reset();
+    } catch (const std::logic_error&) {
+        state.resetRejected = true;
+    }
+}
+
+struct TimerPlaybackContext {
+    TimerQueue* queue = nullptr;
+    ve::World::Entity entity{};
+    std::size_t observedCount = 0U;
+};
+
+void queueCommandAndObserveTimer(void* context,
+                                 ve::World&,
+                                 ve::WorldSystemScheduler::CommandWriter& commands,
+                                 const ve::InputState&,
+                                 double,
+                                 double) {
+    auto& state = *static_cast<TimerPlaybackContext*>(context);
+    const std::size_t dueCount = state.queue->events().size();
+    state.observedCount += dueCount;
+    if (dueCount != 0U) {
+        commands.emplace<Health>(state.entity, Health{99});
     }
 }
 
@@ -484,7 +593,7 @@ int main() {
 
     {
         ve::WorldSystemScheduler scheduler;
-        scheduler.reserveEventChannels(2U);
+        scheduler.reserveSimulationResources(2U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         auto& otherEvents = scheduler.createEventChannel<OtherEventPayload, 2U>();
         expectTrue("typed event channels initially expose empty current batches",
@@ -508,7 +617,7 @@ int main() {
     {
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(3U);
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         EventProducerContext first{&events, {1, 11}};
         EventProducerContext second{&events, {2, 22}};
@@ -535,7 +644,7 @@ int main() {
     {
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1U);
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         EventReadContext consumer{&events};
         scheduler.addSystem("external-consumer", &readAndMaybePublish, &consumer);
@@ -551,7 +660,7 @@ int main() {
 
     {
         ve::WorldSystemScheduler scheduler;
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         scheduler.compile();
         expectTrue("event channel capacity reports overflow through publish",
@@ -574,7 +683,7 @@ int main() {
         const ve::World::Entity entity = overflowWorld.createEntity();
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1U);
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
         scheduler.reserveDeferredCommandSlots(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         OverflowCommandContext context{&events, entity};
@@ -590,7 +699,7 @@ int main() {
     {
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1U);
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         EventReadContext context{&events};
         scheduler.addSystem("rollback-reader", &readAndMaybePublish, &context);
@@ -621,7 +730,7 @@ int main() {
         playbackWorld.emplace<Position>(entity, 1);
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1U);
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
         scheduler.reserveDeferredCommandSlots(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         PlaybackEventContext context{&events, entity};
@@ -646,7 +755,7 @@ int main() {
 
     {
         ve::WorldSystemScheduler scheduler;
-        scheduler.reserveEventChannels(2U);
+        scheduler.reserveSimulationResources(2U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         expectTrue("scheduler-owned event channel reference remains usable while scheduler lives", events.events().empty());
         scheduler.compile();
@@ -680,8 +789,268 @@ int main() {
 
     {
         ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSimulationResources(2U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        expectTrue("scheduler owns non-default-constructible timer queues", timers.events().empty() && timers.currentTick() == 0U);
+        scheduler.compile();
+        auto& otherTimers = scheduler.createTimerQueue<TimerPayload, 2U>();
+        expectTrue("timer queue factory retains ownership and invalidates compilation",
+                   !scheduler.compiled() && otherTimers.events().empty());
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(2U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        TimerScheduleContext callbackSchedule{&timers, true};
+        scheduler.addSystem("timer-observer", &observeTimers, &observed);
+        scheduler.addSystem("timer-callback-schedule", &scheduleTimer, &callbackSchedule);
+        scheduler.compile();
+        const ve::TimerHandle delayed = timers.schedule(2U, {1});
+        (void)scheduler.execute(world, {}, 1000.0, 0.125);
+        expectTrue("timer scheduling uses integer steps and never fires in its scheduling step",
+                   delayed.valid() && callbackSchedule.scheduled && observed.observedCount == 0U &&
+                       timers.currentTick() == 1U);
+        const ve::TimerHandle normalizedZero = timers.schedule(0U, {2});
+        (void)scheduler.execute(world, {}, 1000.125, 0.125);
+        expectTrue("zero-delay timer cannot fire in the step in which it is externally scheduled",
+                   normalizedZero.valid() && observed.observedCount == 1U && observed.payloads[0].value == 22);
+        (void)scheduler.execute(world, {}, 1000.25, 0.125);
+        expectTrue("zero-delay timer fires on the next integer step and one-shots honor their due boundary",
+                   observed.observedCount == 3U && observed.payloads[1].value == 1 &&
+                       observed.payloads[2].value == 2 && timers.currentTick() == 3U);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1U);
-        scheduler.reserveEventChannels(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        scheduler.addSystem("timer-repeat-observer", &observeTimers, &observed);
+        const ve::TimerHandle first = timers.schedule(1U, {1});
+        const ve::TimerHandle second = timers.schedule(1U, {2});
+        const ve::TimerHandle third = timers.schedule(1U, {3});
+        scheduler.compile();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        expectTrue("pending timers count as active before their first promotion",
+                   timers.active(first) && timers.active(second) && timers.active(third) && timers.activeCount() == 3U);
+        (void)scheduler.execute(world, {}, 0.02, 0.01);
+        expectTrue("equal due timers are delivered FIFO by monotonic handle",
+                   observed.observedCount == 3U && observed.payloads[0].value == 1 &&
+                       observed.payloads[1].value == 2 && observed.payloads[2].value == 3 &&
+                       observed.handles[0] == first && observed.handles[1] == second && observed.handles[2] == third);
+        expectTrue("expired one-shot handles become stale after promotion",
+                   !timers.active(first) && timers.activeCount() == 0U && !timers.cancel(first));
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        scheduler.addSystem("timer-cadence-observer", &observeTimers, &observed);
+        const ve::TimerHandle repeated = timers.schedule(1U, {7}, 2U);
+        scheduler.compile();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        (void)scheduler.execute(world, {}, 0.02, 0.01);
+        (void)scheduler.execute(world, {}, 0.03, 0.01);
+        expectTrue("repeating timer skips non-due integer ticks", observed.observedCount == 1U && timers.active(repeated));
+        (void)scheduler.execute(world, {}, 0.04, 0.01);
+        expectTrue("repeating timer resumes at its exact repeat cadence",
+                   observed.observedCount == 2U && observed.payloads[0].value == 7 && observed.payloads[1].value == 7);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        const ve::TimerHandle pending = timers.schedule(3U, {1});
+        scheduler.compile();
+        expectTrue("cancel accepts active and pending handles only once",
+                   timers.active(pending) && timers.activeCount() == 1U && timers.cancel(pending) &&
+                       !timers.active(pending) && timers.activeCount() == 0U && !timers.cancel(pending) &&
+                       !timers.cancel({}));
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        expectTrue("canceled pending timer never reaches active storage", !timers.active(pending) && timers.activeCount() == 0U);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        scheduler.addSystem("timer-external-cancel", &observeTimers, &observed);
+        const ve::TimerHandle active = timers.schedule(2U, {6});
+        scheduler.compile();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        expectTrue("external cancel accepts a committed active timer", timers.active(active) && timers.cancel(active));
+        (void)scheduler.execute(world, {}, 0.02, 0.01);
+        (void)scheduler.execute(world, {}, 0.03, 0.01);
+        expectTrue("external cancellation suppresses future due delivery",
+                   !timers.active(active) && observed.observedCount == 0U);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        observed.cancelDue = true;
+        scheduler.addSystem("timer-current-due-cancel", &observeTimers, &observed);
+        const ve::TimerHandle repeated = timers.schedule(1U, {9}, 1U);
+        scheduler.compile();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        (void)scheduler.execute(world, {}, 0.02, 0.01);
+        expectTrue("cancel cannot erase the immutable current due batch",
+                   observed.observedCount == 1U && observed.handles[0] == repeated && !timers.active(repeated));
+        (void)scheduler.execute(world, {}, 0.03, 0.01);
+        expectTrue("current-batch cancellation prevents only future repeats", observed.observedCount == 1U);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        scheduler.addSystem("timer-rollback-observer", &observeTimers, &observed);
+        expectTrue("timer rollback seed schedule succeeds", timers.schedule(1U, {13}).valid());
+        scheduler.compile();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        const ve::TimerHandle preStepPending = timers.schedule(5U, {15});
+        observed.scheduleOnObserve = true;
+        observed.throwNow = true;
+        expectThrows<std::runtime_error>("callback failure rolls timer state back", [&] {
+            (void)scheduler.execute(world, {}, 0.02, 0.01);
+        });
+        expectTrue("callback failure retains due timers and preserves pre-step pending schedules",
+                   preStepPending.valid() && observed.observedCount == 1U && observed.scheduleSucceeded &&
+                       timers.currentTick() == 1U && timers.active(preStepPending) && timers.activeCount() == 2U);
+        observed.scheduleOnObserve = true;
+        observed.scheduleSucceeded = false;
+        (void)scheduler.execute(world, {}, 0.03, 0.01);
+        expectTrue("retry redelivers the due timer and commits its replacement",
+                   observed.observedCount == 2U && observed.payloads[0].value == 13 &&
+                       observed.payloads[1].value == 13 && observed.scheduleSucceeded &&
+                       timers.currentTick() == 2U && timers.active(preStepPending) && timers.activeCount() == 2U);
+    }
+
+    {
+        ve::World playbackWorld;
+        const ve::World::Entity entity = playbackWorld.createEntity();
+        playbackWorld.emplace<Position>(entity, 1);
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveDeferredCommandSlots(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerPlaybackContext context{&timers, entity};
+        scheduler.addSystem("timer-playback-commit", &queueCommandAndObserveTimer, &context);
+        expectTrue("timer playback failure seed schedule succeeds", timers.schedule(1U, {17}).valid());
+        scheduler.compile();
+        (void)scheduler.execute(playbackWorld, {}, 0.01, 0.01);
+        playbackWorld.each<Position>([&](auto&&...) {
+            expectThrows<std::logic_error>("playback failure commits timer transaction before rethrow", [&] {
+                (void)scheduler.execute(playbackWorld, {}, 0.02, 0.01);
+            });
+        });
+        (void)scheduler.execute(playbackWorld, {}, 0.03, 0.01);
+        expectTrue("playback failure consumes due timers rather than retrying against a changed world",
+                   context.observedCount == 1U && timers.activeCount() == 0U);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerResetContext context{&timers};
+        scheduler.addSystem("timer-reset-guard", &rejectTimerReset, &context);
+        scheduler.compile();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        expectTrue("timer queue reset is rejected during scheduler transaction", context.resetRejected);
+        timers.reset();
+        expectTrue("timer queue reset clears state and restores tick zero",
+                   timers.currentTick() == 0U && timers.activeCount() == 0U && timers.events().empty());
+        const ve::TimerHandle beforeReset = timers.schedule(1U, {21});
+        timers.reset();
+        const ve::TimerHandle afterReset = timers.schedule(1U, {22});
+        expectTrue("timer reset never aliases stale handles",
+                   beforeReset.valid() && afterReset.valid() && beforeReset != afterReset &&
+                       !timers.cancel(beforeReset) && timers.active(afterReset));
+    }
+
+    {
+        ve::World overflowWorld;
+        const ve::World::Entity entity = overflowWorld.createEntity();
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveDeferredCommandSlots(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 2U>();
+        struct OverflowContext {
+            ve::World::Entity entity{};
+        } context{entity};
+        scheduler.addSystem("timer-overflow-before-playback",
+                            +[](void* raw,
+                                ve::World&,
+                                ve::WorldSystemScheduler::CommandWriter& commands,
+                                const ve::InputState&,
+                                double,
+                                double) {
+                                const auto& state = *static_cast<OverflowContext*>(raw);
+                                commands.emplace<Health>(state.entity, Health{24});
+                            },
+                            &context);
+        const ve::TimerHandle first = timers.schedule(1U, {1});
+        const ve::TimerHandle second = timers.schedule(1U, {2});
+        const ve::TimerHandle invalid = timers.schedule(1U, {3});
+        scheduler.compile();
+        expectTrue("timer capacity returns an invalid handle and latches overflow",
+                   first.valid() && second.valid() && !invalid.valid() && !timers.active(invalid));
+        expectThrows<std::overflow_error>("timer overflow aborts before command playback", [&] {
+            (void)scheduler.execute(overflowWorld, {}, 0.01, 0.01);
+        });
+        expectThrows<std::overflow_error>("timer overflow latch remains until reset", [&] {
+            (void)scheduler.execute(overflowWorld, {}, 0.02, 0.01);
+        });
+        expectTrue("timer overflow discards commands before world mutation", !overflowWorld.contains<Health>(entity));
+        timers.reset();
+        const ve::TimerHandle recovered = timers.schedule(1U, {4});
+        (void)scheduler.execute(overflowWorld, {}, 0.03, 0.01);
+        expectTrue("timer reset clears the capacity latch for subsequent scheduling",
+                   recovered.valid() && timers.active(recovered) && overflowWorld.contains<Health>(entity));
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveSimulationResources(1U);
+        auto& timers = scheduler.createTimerQueue<TimerPayload, 4U>();
+        TimerObserveContext observed{&timers};
+        scheduler.addSystem("timer-allocation-check", &observeTimers, &observed);
+        scheduler.compile();
+        gAllocationCount = 0U;
+        gTrackAllocations = true;
+        const bool scheduledWithoutAllocation = timers.schedule(3U, {31}).valid();
+        (void)timers.activeCount();
+        (void)timers.events();
+        (void)scheduler.execute(world, {}, 0.01, 0.01);
+        (void)timers.events();
+        gTrackAllocations = false;
+        expectTrue("timer schedule read and compiled execution perform no allocations",
+                   scheduledWithoutAllocation && gAllocationCount == 0U);
+    }
+
+    {
+        ve::WorldSystemScheduler scheduler;
+        scheduler.reserveSystems(1U);
+        scheduler.reserveSimulationResources(1U);
         auto& events = scheduler.createEventChannel<EventPayload, 2U>();
         EventReadContext context{&events};
         context.publish = true;

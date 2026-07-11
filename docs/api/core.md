@@ -72,6 +72,14 @@ Systems read only `events()` from the previous successful step and publish into 
 
 Callback or overflow failure discards commands, removes events published after the step checkpoint, and retains the current batch for retry. Command playback is intentionally different because playback itself may have committed a prefix before throwing: remaining commands are discarded, while current events are consumed and newly published events are promoted so retry cannot duplicate events against an already-partially-mutated world. `reset()` clears both batches outside execution and rejects use during an active scheduler transaction.
 
+#### Fixed-step simulation timers
+
+`createTimerQueue<T, Capacity>()` creates a scheduler-owned `SimulationTimerQueue` with typed inline payload storage. `schedule(delaySteps, payload[, repeatSteps])` returns a monotonic `TimerHandle`; zero delay normalizes to one successful step, and a nonzero repeat interval reschedules the same handle. `cancel(handle)` stages removal of active or not-yet-promoted timers, while stale, invalid, and already-canceled handles return false. `reset()` clears timer state and returns the queue tick to zero without reusing issued handles.
+
+Timers count successful scheduler executions rather than wall time or render frames. External and callback scheduling is staged, so a timer never expires in the step that schedules it. Due events are exposed as a deterministic FIFO `span<SimulationTimerEvent<T>>`, ordered by due tick and handle; the current due batch is immutable, so cancellation during its callback affects future repeats rather than erasing an event another system may already have observed.
+
+Timer schedules and cancellations share the scheduler's resource transaction. Callback or resource-overflow failure rolls mutations back and retries the same due batch; partial command-playback failure promotes them alongside typed events. Capacity, tick, due-time, and handle exhaustion latch overflow and abort before command playback. Queue operations and successful-step advancement allocate nothing after scheduler setup.
+
 `Application::run(world, scheduler, options)` requires a compiled scheduler before entering the platform loop. It retains the same accumulated input, fixed-step timing, transform-history prepare/capture, exception invalidation, and presentation interpolation used by callback-based world runs. Callback/context storage is non-owning and must remain alive through the run.
 
 ## `Camera`
