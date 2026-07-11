@@ -1,4 +1,5 @@
 #include "platform/Input.hpp"
+#include "platform/InputActions.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -32,6 +33,30 @@ template <typename F> void expectThrowsRuntimeError(const std::string_view conte
         std::cerr << "[FAILED] " << context << ": expected runtime_error\n";
         ++gFailureCount;
     } catch (const std::runtime_error &) {
+    } catch (...) {
+        std::cerr << "[FAILED] " << context << ": unexpected exception type\n";
+        ++gFailureCount;
+    }
+}
+
+template <typename F> void expectThrowsInvalidArgument(const std::string_view context, F &&callable) {
+    try {
+        callable();
+        std::cerr << "[FAILED] " << context << ": expected invalid_argument\n";
+        ++gFailureCount;
+    } catch (const std::invalid_argument &) {
+    } catch (...) {
+        std::cerr << "[FAILED] " << context << ": unexpected exception type\n";
+        ++gFailureCount;
+    }
+}
+
+template <typename F> void expectThrowsLengthError(const std::string_view context, F &&callable) {
+    try {
+        callable();
+        std::cerr << "[FAILED] " << context << ": expected length_error\n";
+        ++gFailureCount;
+    } catch (const std::length_error &) {
     } catch (...) {
         std::cerr << "[FAILED] " << context << ": unexpected exception type\n";
         ++gFailureCount;
@@ -558,6 +583,193 @@ int main() {
                    ve::length(pitchedDigitalCamera.position() - pitchedInitialPosition), fullDistance);
         expectNear("direct camera update retains normalized movement contract",
                    ve::length(directCamera.position() - directInitialPosition), fullDistance);
+    }
+
+    {
+        ve::InputTracker tracker;
+        tracker.keyEvent(ve::InputKey::Space, true);
+        tracker.mouseButtonEvent(ve::InputMouseButton::Left, true);
+        ve::GamepadSample sample{};
+        sample.connected = true;
+        sample.buttons = gamepadButtonMask(ve::GamepadButton::A);
+        tracker.gamepadSample(0U, sample);
+
+        ve::InputActionMap map;
+        const ve::InputActionId action{0U};
+        map.bind(action, ve::InputBinding::key(ve::InputKey::Space));
+        map.bind(action, ve::InputBinding::mouseButton(ve::InputMouseButton::Left));
+        map.bind(action, ve::InputBinding::gamepadButton(0U, ve::GamepadButton::A));
+        const ve::InputActionState state = map.evaluate(tracker.consume());
+        expectNear("equivalent digital bindings clamp their summed value", state.value(action), 1.0F);
+        expectTrue("key mouse and gamepad bindings OR held state", state.held(action));
+        expectTrue("key mouse and gamepad bindings OR press edges", state.pressed(action));
+
+        tracker.keyEvent(ve::InputKey::Space, false);
+        tracker.mouseButtonEvent(ve::InputMouseButton::Left, false);
+        sample.buttons = 0U;
+        tracker.gamepadSample(0U, sample);
+        const ve::InputActionState released = map.evaluate(tracker.consume());
+        expectTrue("multiple physical releases coalesce to one action release", released.released(action));
+        expectTrue("released action is no longer held", !released.held(action));
+    }
+
+    {
+        ve::InputTracker tracker;
+        ve::GamepadSample sample{};
+        sample.connected = true;
+        setAxis(sample, ve::GamepadAxis::LeftX, 0.5F);
+        setAxis(sample, ve::GamepadAxis::LeftY, -0.25F);
+        setAxis(sample, ve::GamepadAxis::RightTrigger, 0.75F);
+        tracker.gamepadSample(0U, sample, {0.0F, 0.0F});
+
+        ve::InputActionMap map;
+        const ve::InputActionId positive{0U};
+        const ve::InputActionId negative{1U};
+        const ve::InputActionId trigger{2U};
+        map.bind(positive, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftX));
+        map.bind(negative, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftY, 2.0F));
+        map.bind(trigger, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::RightTrigger));
+        const ve::InputState analogSnapshot = tracker.consume();
+        const ve::InputActionState state = map.evaluate(analogSnapshot);
+        expectNear("positive analog axis contributes its value", state.value(positive), 0.5F);
+        expectNear("negative analog axis retains sign and scale", state.value(negative), -0.5F);
+        expectNear("trigger analog axis contributes its value", state.value(trigger), 0.75F);
+        expectTrue("nonzero analog value marks action held", state.held(positive));
+        expectTrue("analog value does not synthesize a press edge", !state.pressed(positive));
+        expectTrue("analog value does not synthesize a release edge", !state.released(positive));
+
+        const ve::InputActionState repeated = map.evaluate(analogSnapshot);
+        expectNear("repeated evaluation has stable analog value", repeated.value(positive), 0.5F);
+        expectTrue("repeated evaluation has stable analog held state", repeated.held(positive) && !repeated.pressed(positive));
+    }
+
+    {
+        ve::InputTracker tracker;
+        ve::GamepadSample sample{};
+        sample.connected = true;
+        setAxis(sample, ve::GamepadAxis::LeftX, 0.2F);
+        tracker.gamepadSample(0U, sample, {0.0F, 0.0F});
+        const ve::InputState boundary = tracker.consume();
+        setAxis(sample, ve::GamepadAxis::LeftX, 0.6F);
+        tracker.gamepadSample(0U, sample, {0.0F, 0.0F});
+        const ve::InputState outside = tracker.consume();
+
+        ve::InputActionMap map;
+        const ve::InputActionId action{0U};
+        map.bind(action, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftX, -2.0F, 0.2F));
+        expectNear("axial deadzone boundary is neutral", map.evaluate(boundary).value(action), 0.0F);
+        expectNear("axial deadzone continuously rescales and applies inverted scale", map.evaluate(outside).value(action),
+                   -1.0F);
+    }
+
+    {
+        ve::InputTracker tracker;
+        tracker.keyEvent(ve::InputKey::W, true);
+        tracker.keyEvent(ve::InputKey::S, true);
+        const ve::InputState snapshot = tracker.consume();
+
+        ve::InputActionMap map;
+        const ve::InputActionId action{0U};
+        map.bind(action, ve::InputBinding::key(ve::InputKey::W));
+        map.bind(action, ve::InputBinding::key(ve::InputKey::S, -1.0F));
+        expectNear("opposing digital bindings cancel", map.evaluate(snapshot).value(action), 0.0F);
+        map.bind(action, ve::InputBinding::key(ve::InputKey::W));
+        expectNear("summed bindings clamp above one", map.evaluate(snapshot).value(action), 1.0F);
+
+        ve::InputActionMap disconnected;
+        disconnected.bind(action, ve::InputBinding::gamepadButton(1U, ve::GamepadButton::A));
+        const ve::InputActionState absentSlot = disconnected.evaluate(snapshot);
+        expectNear("disconnected gamepad slot contributes no value", absentSlot.value(action), 0.0F);
+        expectTrue("disconnected gamepad slot contributes no held state", !absentSlot.held(action));
+
+        map.clear(action);
+        const ve::InputActionState cleared = map.evaluate(snapshot);
+        expectNear("clear removes every action binding", cleared.value(action), 0.0F);
+        expectTrue("clear removes action edge state", !cleared.held(action) && !cleared.pressed(action));
+    }
+
+    {
+        ve::InputTracker tracker;
+        tracker.keyEvent(ve::InputKey::W, true);
+        const ve::InputState snapshot = tracker.consume();
+        ve::InputActionMap map;
+        const ve::InputActionId action{0U};
+        map.bind(action, ve::InputBinding::key(ve::InputKey::W));
+        const auto preservesBinding = [&] {
+            expectNear("rejected binding preserves earlier bindings", map.evaluate(snapshot).value(action), 1.0F);
+        };
+
+        expectThrowsInvalidArgument("invalid action ID is rejected",
+                                    [&] { map.bind(ve::InputActionId{ve::InputActionId::Count}, ve::InputBinding{}); });
+        preservesBinding();
+        expectThrowsInvalidArgument("invalid binding source is rejected", [&] {
+            map.bind(action, {static_cast<ve::InputBindingSource>(255U), 0U, 0U, 1.0F, 0.0F});
+        });
+        expectThrowsInvalidArgument("invalid key is rejected",
+                                    [&] { map.bind(action, ve::InputBinding::key(ve::InputKey::Count)); });
+        expectThrowsInvalidArgument("invalid mouse button is rejected",
+                                    [&] { map.bind(action, ve::InputBinding::mouseButton(ve::InputMouseButton::Count)); });
+        expectThrowsInvalidArgument("invalid gamepad button is rejected", [&] {
+            map.bind(action, ve::InputBinding::gamepadButton(0U, ve::GamepadButton::Count));
+        });
+        expectThrowsInvalidArgument("invalid gamepad axis is rejected",
+                                    [&] { map.bind(action, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::Count)); });
+        expectThrowsInvalidArgument("invalid gamepad slot is rejected", [&] {
+            map.bind(action, ve::InputBinding::gamepadButton(ve::GamepadSlotCount, ve::GamepadButton::A));
+        });
+        expectThrowsInvalidArgument("oversized gamepad slot cannot wrap", [&] {
+            map.bind(action, ve::InputBinding::gamepadButton(257U, ve::GamepadButton::A));
+        });
+        expectThrowsInvalidArgument("NaN scale is rejected", [&] {
+            map.bind(action, ve::InputBinding::key(ve::InputKey::A, std::numeric_limits<float>::quiet_NaN()));
+        });
+        expectThrowsInvalidArgument("infinite scale is rejected", [&] {
+            map.bind(action, ve::InputBinding::key(ve::InputKey::A, std::numeric_limits<float>::infinity()));
+        });
+        expectThrowsInvalidArgument("NaN deadzone is rejected", [&] {
+            map.bind(action, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftX, 1.0F,
+                                                            std::numeric_limits<float>::quiet_NaN()));
+        });
+        expectThrowsInvalidArgument("infinite deadzone is rejected", [&] {
+            map.bind(action, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftX, 1.0F,
+                                                            std::numeric_limits<float>::infinity()));
+        });
+        expectThrowsInvalidArgument("unit deadzone is rejected", [&] {
+            map.bind(action, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftX, 1.0F, 1.0F));
+        });
+        expectThrowsInvalidArgument("negative deadzone is rejected", [&] {
+            map.bind(action, ve::InputBinding::gamepadAxis(0U, ve::GamepadAxis::LeftX, 1.0F, -0.1F));
+        });
+        preservesBinding();
+
+        ve::InputActionMap full;
+        for (std::size_t count = 0U; count < ve::InputActionMap::MaxBindingsPerAction; ++count) {
+            full.bind(action, ve::InputBinding::key(ve::InputKey::W, 0.1F));
+        }
+        expectThrowsLengthError("ninth binding is rejected",
+                                [&] { full.bind(action, ve::InputBinding::key(ve::InputKey::W, 1.0F)); });
+        expectNear("capacity rejection preserves existing bindings", full.evaluate(snapshot).value(action), 0.8F);
+
+        const ve::InputActionState empty = map.evaluate(ve::InputState{});
+        const ve::InputActionId invalid{ve::InputActionId::Count};
+        expectNear("invalid action value query is neutral", empty.value(invalid), 0.0F);
+        expectTrue("invalid action state queries are safe",
+                   !empty.held(invalid) && !empty.pressed(invalid) && !empty.released(invalid));
+    }
+
+    {
+        ve::InputTracker frameInput;
+        ve::InputTracker simulationInput;
+        frameInput.keyEvent(ve::InputKey::Space, true);
+        simulationInput.accumulate(frameInput.consume());
+        ve::InputActionMap map;
+        const ve::InputActionId action{0U};
+        map.bind(action, ve::InputBinding::key(ve::InputKey::Space));
+        const ve::InputActionState firstStep = map.evaluate(simulationInput.consume());
+        const ve::InputActionState secondStep = map.evaluate(simulationInput.consume());
+        expectTrue("fixed-step accumulated press reaches action evaluation", firstStep.held(action) && firstStep.pressed(action));
+        expectTrue("fixed-step edge is consumed after one action evaluation snapshot",
+                   secondStep.held(action) && !secondStep.pressed(action));
     }
 
     {

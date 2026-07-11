@@ -44,6 +44,14 @@ The public snapshot is GLFW-free:
 
 `updateCamera(Camera& camera, const InputState& input, float dt)` applies the same snapshot gameplay receives through `Application::runWithInput(...)`; the compatibility overload consumes the tracker directly. `mapCameraInput(...)` combines keyboard/mouse with slot 0: left stick moves horizontally, right stick looks, and the triggers move down/up. Combined signed axes clamp to `[-1, 1]`. `applyCameraInput(...)` rejects non-finite axes, negative/non-finite delta time, and camera-step overflow before committing a camera change.
 
+## Semantic input actions
+
+`InputActionMap` separates gameplay intent from physical devices. A caller assigns compact `InputActionId` values and binds each action to as many as eight keyboard keys, mouse buttons, gamepad buttons, or gamepad axes. The map holds 64 actions and all binding storage inline; setup performs validation and may throw, while `evaluate(input)` is deterministic, `noexcept`, and allocation-free.
+
+Digital bindings contribute their configured scale while held and coalesce physical `held`, `pressed`, and `released` bits. Axis bindings support scale/inversion plus an additional continuous axial deadzone; they contribute held/value state but do not synthesize edges. Contributions are accumulated in binding order and clamped to `[-1, 1]`. `InputActionState` safely returns neutral values for invalid IDs.
+
+Action maps remain caller-owned policy rather than platform global state. Gameplay evaluates the same fixed-step `InputState` snapshot that `Application` passes into scheduler callbacks, so retained low-level edges preserve their existing simulation-step lifetime. The sandbox Pause action demonstrates equivalent `Space` and gamepad 1 `A` bindings without hard-coding either source inside the gameplay system.
+
 Current sandbox controls:
 
 - `Esc`: close.

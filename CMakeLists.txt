@@ -98,6 +98,7 @@ add_library(VolkEngine STATIC
     engine/core/Time.cpp
     engine/scene/ScenePersistence.cpp
     engine/platform/Input.cpp
+    engine/platform/InputActions.cpp
     engine/platform/Window.cpp
     engine/renderer/Geometry.cpp
     engine/renderer/GreedyMesher.cpp
@@ -335,7 +336,8 @@ add_test(NAME CameraCpu
 add_executable(VolkEngineInputCpuTest
     tests/InputCpuTests.cpp
     engine/core/Camera.cpp
-    engine/platform/Input.cpp)
+    engine/platform/Input.cpp
+    engine/platform/InputActions.cpp)
 target_include_directories(VolkEngineInputCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")

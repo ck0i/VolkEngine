@@ -4,6 +4,7 @@
 #include "core/Log.hpp"
 #include "renderer/SceneRenderer.hpp"
 #include "scene/ScenePersistence.hpp"
+#include "platform/InputActions.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -17,6 +18,8 @@
 
 namespace {
 constexpr std::size_t kMaxSandboxSceneItems = 4'194'304;
+constexpr ve::InputActionId kPauseAction{0U};
+
 
 struct SandboxArgs {
     ve::EngineConfig config{};
@@ -30,6 +33,10 @@ struct SandboxArgs {
 struct SpinController {
     double angleRadians = 0.0;
     bool paused = false;
+};
+
+struct SandboxSystemContext {
+    ve::InputActionMap inputActions;
 };
 
 template <typename Integer> Integer parseInteger(const std::string_view value, const std::string_view optionName) {
@@ -110,11 +117,15 @@ void populateWorldScene(ve::World &world) {
     renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
 }
 
-void updateWorldScene(void *, ve::World &world, ve::WorldSystemScheduler::CommandWriter &, const ve::InputState &input,
-                      const double, const double deltaSeconds) {
+void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler::CommandWriter &,
+                      const ve::InputState &input, const double, const double deltaSeconds) {
+    const auto &sandboxContext = *static_cast<const SandboxSystemContext *>(context);
+    const ve::InputActionState actions = sandboxContext.inputActions.evaluate(input);
+    const bool pausePressed = actions.pressed(kPauseAction);
+
     world.each<ve::WorldSceneTransform, SpinController>(
         [&](const ve::World::Entity, ve::WorldSceneTransform &transform, SpinController &spin) {
-            if (input.pressed(ve::InputKey::Space) || input.gamepad(0U).pressed(ve::GamepadButton::A)) {
+            if (pausePressed) {
                 spin.paused = !spin.paused;
             }
             if (!spin.paused) {
@@ -123,6 +134,7 @@ void updateWorldScene(void *, ve::World &world, ve::WorldSystemScheduler::Comman
             transform.current.rotation = ve::rotationY(static_cast<float>(spin.angleRadians));
         });
 }
+
 
 SandboxArgs parseArguments(int argc, char **argv) {
     SandboxArgs args{};
@@ -232,9 +244,12 @@ int main(int argc, char **argv) {
         } else {
             ve::loadWorldScene(world, args.loadScenePath);
         }
+        SandboxSystemContext sandboxContext{};
+        sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::key(ve::InputKey::Space));
+        sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::gamepadButton(0U, ve::GamepadButton::A));
         ve::WorldSystemScheduler scheduler;
         scheduler.reserveSystems(1);
-        scheduler.addSystem("spin", &updateWorldScene);
+        scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{"spin", &updateWorldScene, &sandboxContext});
         scheduler.compile();
         const int result = app.run(world, scheduler, args.run);
         if (result == 0 && !args.saveScenePath.empty()) {
