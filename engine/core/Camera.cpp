@@ -26,6 +26,13 @@ void Camera::setAspect(const float aspect) {
     aspect_ = aspect;
 }
 
+void Camera::setPosition(const Vec3 position) {
+    if (!finiteVec3(position)) {
+        throw std::runtime_error("Camera position must be finite");
+    }
+    position_ = position;
+}
+
 void Camera::update(const float forwardInput, const float rightInput, const float upInput, const float yawDelta,
                     const float pitchDelta, const float dt, const float movementMagnitude) {
     if (!finiteCameraInput(forwardInput) || !finiteCameraInput(rightInput) || !finiteCameraInput(upInput) ||

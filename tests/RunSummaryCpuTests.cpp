@@ -1,10 +1,50 @@
 #include "core/FileSystem.hpp"
 #include "core/RunSummary.hpp"
 
+#include <charconv>
 #include <cassert>
 #include <filesystem>
+#include <exception>
 #include <string>
+#include <string_view>
 
+
+namespace {
+
+std::uint64_t jsonUnsigned(const std::string &json,
+                           const std::string_view key) {
+  const std::string marker = "\"" + std::string(key) + "\":";
+  const std::size_t begin = json.find(marker);
+  assert(begin != std::string::npos);
+  const char *first = json.data() + begin + marker.size();
+  std::uint64_t value = 0U;
+  const auto [last, error] =
+      std::from_chars(first, json.data() + json.size(), value);
+  assert(error == std::errc{} && last != first);
+  return value;
+}
+
+std::string jsonString(const std::string &json, const std::string_view key) {
+  const std::string marker = "\"" + std::string(key) + "\":\"";
+  const std::size_t begin = json.find(marker);
+  assert(begin != std::string::npos);
+  const std::size_t valueBegin = begin + marker.size();
+  const std::size_t end = json.find('"', valueBegin);
+  assert(end != std::string::npos);
+  return json.substr(valueBegin, end - valueBegin);
+}
+
+template <typename F>
+bool throwsRuntime(F &&function) {
+  try {
+    function();
+    return false;
+  } catch (const std::exception &) {
+    return true;
+  }
+}
+
+} // namespace
 int main() {
     ve::RunSummary summary{};
     summary.config.applicationName = "quoted \"name\"";
@@ -75,10 +115,35 @@ int main() {
     assert(summary.distributions.cpuFrame.p95 > 95.0);
   assert(summary.distributions.cpuFrame.p99 > 99.0);
   summary.frameCount = 120;
+  summary.streaming.enabled = true;
+  summary.streaming.manifestHash = std::string(64U, 'a');
+  summary.streaming.contentHash = std::string(64U, 'b');
+  summary.streaming.budgetBytes = 65'536U;
+  summary.streaming.residentBytes = 12'345U;
+  summary.streaming.peakResidentBytes = 23'456U;
+  summary.streaming.ioBytes = 34'567U;
+  summary.streaming.publishedLoads = 19U;
+  summary.streaming.evictions = 7U;
+  summary.streaming.backpressureEvents = 3U;
+  summary.streaming.traversalFrames = 1'200U;
+  summary.streaming.coverageGapFrames = 0U;
+  summary.streaming.publications = 11U;
+  summary.streaming.originShifts = 5U;
+  summary.streaming.retainedFrontierFrames = 17U;
+  summary.streaming.residentResources = 14U;
+  summary.streaming.activeCells = 10U;
+  summary.streaming.desiredCells = 10U;
+  summary.streaming.maxVisibleInstances = 42U;
+  summary.streaming.maxSceneTriangles = 84U;
+  summary.streaming.frames = {
+      {60U, -7'000.0F, 0.0F, -7'168.0F, 0.0F, 12'345U, 14U, 2U,
+       1U, 10U, 10U, 1U, false},
+      {61U, -6'976.0F, 0.0F, -7'168.0F, 0.0F, 13'000U, 15U, 0U,
+       0U, 10U, 10U, 0U, false}};
   const std::string serialized = ve::serializeRunSummary(summary);
   assert(serialized.find("\"schema\":\"volkengine.run-summary\"") !=
          std::string::npos);
-  assert(serialized.find("\"schema_version\":5") != std::string::npos);
+  assert(jsonUnsigned(serialized, "schema_version") == 6U);
   assert(serialized.find("\"scenario\":\"submission-pressure-v1\"") !=
          std::string::npos);
   assert(serialized.find("\"warmup_frames\":20") != std::string::npos);
@@ -136,6 +201,15 @@ int main() {
          std::string::npos);
   assert(serialized.find("\"assets\":{\"records\":6,\"cache_hits\":6,\"cache_"
                          "misses\":0,\"rebuilt\":0}") != std::string::npos);
+  assert(jsonString(serialized, "manifest_hash") == std::string(64U, 'a'));
+  assert(jsonString(serialized, "content_hash") == std::string(64U, 'b'));
+  assert(jsonUnsigned(serialized, "budget_bytes") == 65'536U);
+  assert(jsonUnsigned(serialized, "resident_bytes") == 12'345U);
+  assert(jsonUnsigned(serialized, "coverage_gap_frames") == 0U);
+  assert(jsonUnsigned(serialized, "max_visible_instances") == 42U);
+  assert(jsonUnsigned(serialized, "max_scene_triangles") == 84U);
+  assert(jsonUnsigned(serialized, "frame") == 60U);
+  assert(serialized.find("\"frame\":61") != std::string::npos);
   assert(serialized.find("\"cpu_asset_cook\":{\"available\":true,\"value\":1."
                          "25,\"unit\":\"ms\"") != std::string::npos);
   assert(serialized.find("\"distributions\":{\"cpu_frame\":{\"unit\":\"ms\","
@@ -152,6 +226,11 @@ int main() {
              "\"gpu_visibility\":{\"enabled\":false,\"validated\":false,"
              "\"culling_unit\":\"none\",\"visible_units\":0,\"tested_units\":0,"
              "\"occluded_units\":0") != std::string::npos);
+  ve::RunSummary oversizedTrace = summary;
+  oversizedTrace.streaming.frames.resize(
+      ve::StreamingRunStats::kMaximumFrameSamples + 1U);
+  assert(throwsRuntime(
+      [&] { static_cast<void>(ve::serializeRunSummary(oversizedTrace)); }));
   const std::filesystem::path directory =
       std::filesystem::temp_directory_path() /
       (std::string{"volkengine-run-summary-test-"} +

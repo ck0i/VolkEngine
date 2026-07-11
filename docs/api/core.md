@@ -70,7 +70,16 @@ Creator/runtime integration uses three narrow application seams:
   stats, and swapchain dimensions after `ImGui::NewFrame`; otherwise it is
   retained but not invoked.
   Its context must outlive the run.
-- `jobStats()` returns the bounded scheduler aggregate used by profiling views.
+- `jobSystem()` exposes the owned scheduler for engine subsystems; `jobStats()`
+  and `renderStats()` return snapshots for diagnostics.
+- `setFrameUpdateCallback(callback, context)` invokes a non-owning callback once
+  per rendered frame after input/camera update and before fixed-step simulation.
+  Returning `true` declares that the callback transactionally replaced runtime
+  world content, so presentation history is reset before extraction.
+- `configureStreamingRun(manifestHash, contentHash, budgetBytes)` and
+  `updateStreamingRunStats(stats, sample)` populate bounded schema-v6 traversal
+  evidence. Aggregate updates must not supply sample storage; `Application`
+  owns and caps the trace at 4,096 frames.
 
 These methods expose no Vulkan handles and do not make `Application` own an
 editor document or shell.
@@ -82,6 +91,35 @@ editor document or shell.
 `submit()` returns a generational `JobHandle`. Dependencies become ready only after every parent succeeds; parent failure or cancellation propagates to dependents. `wait()` and `waitAll()` execute other ready work when called by a worker, so nested jobs remain live with one worker and do not consume a blocked thread. Running callbacks inspect `JobContext::cancellationRequested()` and may cooperatively `wait()` on children. Completed handles retain their terminal status and exception until explicit `release()`/`releaseAll()`; stale handles are rejected.
 
 Capacity exhaustion, duplicate/stale dependencies, recursive terminal release, and submission after shutdown fail explicitly. Shutdown supports drain or cancellation. `stats()` snapshots submitted/succeeded/failed/cancelled/active/running counts, queue high-water mark, steals, total worker time, and per-category General/Simulation/IO/Asset counters. `timeline()` returns bounded completion records with queue/start/finish timestamps and worker assignment.
+
+### `ResidencyManager`
+
+`ResidencyManager` is the bounded runtime dependency/residency scheduler for
+texture, geometry, world-cell, animation, and audio artifacts. Registration
+publishes immutable identity, class, path, byte estimate, stable priority, and
+dependencies. It rejects duplicate identities/dependencies, self-dependency,
+invalid paths, and configured resource-capacity violations. Recursive request
+validation reports unregistered dependencies and dependency cycles before
+either resource can dispatch.
+
+Each frame calls `beginFrame(frameIndex)`, then `request(key, priority, pin)` for
+the desired working set, then `endFrame()`. Requests expand dependencies, raise
+effective priority, and queue missing artifacts; `pin=true` protects the
+requested dependency closure for that frame. `endFrame()` generation-cancels
+queued/loading work that was not requested and then calls `update()`. Additional
+`update()` calls retire terminal jobs and dispatch ready work without resetting
+the desired set.
+
+Publication rejects stale generations, moves complete immutable byte payloads
+into resident entries, dispatches deterministic `{priority, identity}` order up
+to the configured concurrency limit, and evicts least-recently-used unpinned
+residents to satisfy the byte budget. Worker tasks read through the shared
+`JobSystem` in the IO category and never mutate manager state. `evict()` refuses
+loading or currently pinned resources; `retry()` explicitly resets a terminal
+failure. Missing resources/dependencies, cycles, IO, oversized artifacts,
+out-of-memory admission, backpressure, and cancellation remain distinct states
+and bounded counters. Destruction requests cancellation, waits every submitted
+handle, and releases it before task storage is destroyed.
 
 ### `WorldSystemScheduler`
 

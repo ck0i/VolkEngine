@@ -207,6 +207,33 @@ VESN v2 remains the explicit low-level `WorldScene*` snapshot contract described
 above; creator workflows use `VEAU` authoring source and `VECW` runtime output
 instead of treating VESN as a generic editor format.
 
+## Streamed world partitions
+
+`WorldPartitionManifest` is a canonical versioned hierarchy of stable cell
+identities, parent links, bounds, split distances, artifact paths, byte
+estimates, and runtime dependencies. Validation bounds cell/entity/byte totals,
+requires finite positive geometry, rejects duplicate IDs, missing parents,
+cycles, escaping artifact paths, sibling coverage gaps/overlap, and invalid
+parent-child containment. Canonical encoding sorts identities; decoding rebases
+validated relative artifact paths under the manifest directory.
+
+`WorldPartitionRuntime` selects a deterministic leaf frontier from global
+observer coordinates. Split thresholds use distance to cell bounds; a separate
+prefetch margin requests upcoming children before activation. The active
+frontier stays pinned and renderable while replacement artifacts load.
+Publication combines complete `VECW` cells into a temporary `CookedWorld`,
+rejects duplicate stable entities and unresolved cross-cell parents, rebases
+translations around a quantized local origin, and exposes a revisioned
+candidate. Only `commitPublication(revision)` changes active cells/origin;
+stale commit and failed combination leave the prior frontier unchanged.
+
+Rejected candidates retry explicitly. Retry evicts only candidate cells that
+are not shared by the active frontier, so a failed partial transition cannot
+discard retained coverage. Superseded cells are unpinned and evicted only after
+the caller publishes the complete combined world. Metrics report traversal,
+publication, origin-shift, retained-frontier, partial-failure, active/desired,
+pending, and coverage-gap state.
+
 ## `SceneGridRange`
 
 Describes a contiguous grid in a `SceneRenderList`:

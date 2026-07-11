@@ -144,6 +144,13 @@ jobs:
           python tools/compare_ppm.py out/depth-on.ppm out/depth-off.ppm --diff out/depth-diff.ppm
           python tools/compare_ppm.py out/depth-on.ppm out/direct.ppm --diff out/submission-diff.ppm
           ./out/build/linux-debug/VolkEngineSandbox --frames 120 --warmup-frames 30 --scenario visual-resize-v1 --resize-smoke --screenshot-frame 110 --screenshot out/resize-final.ppm --no-vsync --no-imgui --validation --require-validation
+      - name: World partition traversal gate
+        run: >-
+          ./out/build/linux-debug/VolkEnginePartitionBenchmark
+          --benchmark-gate --no-vsync --require-validation
+          --screenshot out/partition-traversal.ppm
+          --screenshot-frame 1000
+          --run-summary out/partition-traversal-summary.json
       - name: Controlled submission benchmark
         run: >-
           ./out/build/linux-debug/VolkEngineSandbox

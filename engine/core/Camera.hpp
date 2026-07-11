@@ -7,6 +7,7 @@ namespace ve {
 class Camera {
 public:
     void setAspect(float aspect);
+    void setPosition(Vec3 position);
     void update(float forward, float right, float up, float yawDelta, float pitchDelta, float dt,
                 float movementMagnitude = 1.0f);
     void rotate(float yawDegrees, float pitchDegrees);

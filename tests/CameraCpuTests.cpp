@@ -60,6 +60,18 @@ int main() {
     expectThrowsRuntimeError("infinite aspect is rejected", [&] { camera.setAspect(std::numeric_limits<float>::infinity()); });
     expectProjectionEqual("infinite aspect preserves projection", camera.projectionMatrix(), baselineProjection);
 
+    camera.setPosition({1.0f, 2.0f, 3.0f});
+    expectTrue("finite camera position is accepted",
+               camera.position().x == 1.0f && camera.position().y == 2.0f &&
+                   camera.position().z == 3.0f);
+    expectThrowsRuntimeError("non-finite camera position is rejected", [&] {
+        camera.setPosition(
+            {std::numeric_limits<float>::infinity(), 0.0f, 0.0f});
+    });
+    expectTrue("rejected camera position preserves state",
+               camera.position().x == 1.0f && camera.position().y == 2.0f &&
+                   camera.position().z == 3.0f);
+
     const ve::Mat4 baselineView = camera.viewMatrix();
     expectThrowsRuntimeError("NaN camera delta is rejected", [&] {
         camera.update(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, std::numeric_limits<float>::quiet_NaN());

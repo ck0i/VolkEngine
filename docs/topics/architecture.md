@@ -40,11 +40,24 @@ graph TD
     Impl --> Resources[Long-lived resources/registries]
     Impl --> Graph[FrameGraph variants + logical lifetimes]
     Graph --> Resources
+    App -->|owns scheduler used by| Residency[ResidencyManager]
+    Partition[WorldPartitionRuntime] -->|requests artifacts from| Residency
+    Partition -->|publishes complete| Cooked[Combined CookedWorld]
 ```
 
 - `Application` member order keeps the renderer alive through frame execution, destroys it before the window/GLFW runtime, joins any pending asset cook before destroying the `JobSystem`, and keeps the active asset bundle alive through renderer teardown.
 - `Application` constructs its bounded `JobSystem` before platform and renderer state, owns the stable active `ReferenceAssetBundle`, polls background `ReferenceAssetCookTask` completion, and publishes successful candidates only at a main-thread frame boundary. Renderer publication builds replacement mesh/cluster/texture resources and descriptor bindings before retiring the old set; any cook, upload, or publication failure keeps the previous bundle live.
 - `JobSystem` preallocates job slots, dependency edges, worker deques, and timeline storage. Workers own their queues but may steal FIFO work; callbacks/contexts remain caller-owned until explicit terminal-handle release. Cooperative worker waits execute other ready jobs, preserving progress for nested one-worker workloads.
+- `ResidencyManager` borrows the application-owned `JobSystem`, owns immutable
+  resource descriptions, generational request state, resident byte payloads,
+  and every submitted IO task/handle until terminal release. Its frame request
+  set is the sole pinning boundary; worker callbacks own no manager state.
+- `WorldPartitionRuntime` owns canonical cell hierarchy/index scratch, the
+  active pinned leaf frontier, one pending complete-world candidate, and a
+  rejected frontier. It borrows `ResidencyManager`; callers own publication into
+  the live `World`. Candidate build/rebase occurs in temporary `CookedWorld`
+  storage and a revisioned commit changes partition ownership only after the
+  application has instantiated the complete world.
 - `World` owns generational entities and component pools. `WorldSystemScheduler` owns compiled deterministic execution phases, reusable parallel-job storage, and one deferred command buffer; system callbacks and contexts remain caller-owned. Explicit read-only callbacks may share a phase through `JobSystem`, while every mutable callback and dependency boundary remains serial. Caller-owned standalone `WorldCommandBuffer` instances stage structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneParent`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns reusable render-list, local-pose history, and hierarchy-resolution storage. The generic ECS owns no child lists or hierarchy lifecycle hooks.
 - Typed `SimulationEventChannel` instances are scheduler-owned setup resources with fixed inline payload storage. Systems observe the previous successful step and publish the next FIFO batch; callback/overflow rollback and partial-command-playback promotion keep event lifetime aligned with the scheduler's actual mutation boundary.
 - Scheduler-owned `SimulationTimerQueue` resources add delayed and recurring typed payloads on integer successful-step ticks. Schedule/cancel mutations share the same rollback/promotion boundary as event channels, while monotonic handles and fixed storage avoid wall-time drift, stale-handle aliasing, and steady-state allocation.
@@ -83,11 +96,20 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 
 1. `Clock::tick()` samples wall elapsed/delta time; `Window::pollInput()` consumes one event-driven frame snapshot.
 2. `Window::updateCamera()` applies that snapshot at render rate with a bounded wall delta.
-3. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. For scheduler-backed worlds, `WorldSceneExtractor` prepares TRS history, compiled systems execute single-threaded in dependency order, the scheduler plays structural commands once, and the extractor captures the successful state. Pending input edges/motion reach only the first emitted step while held state persists; failures discard scheduler commands, invalidate presentation history, and propagate.
-4. The world run path builds a presentation snapshot with retained-debt alpha. It interpolates each entity's local translation/scale and shortest-path quaternion rotation one completed fixed step behind simulation, then iteratively resolves parent matrices before submission. New/recycled/teleported entities reset their local history; dead or stale parents detach and cyclic dependents are omitted. Both run paths then call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows the reusable list synchronously.
-5. `Visibility.cpp` computes visibility and work planning for LOD/grid batching and canonical material-class counts. `Lighting.cpp` validates the scene's directional/environment/local/probe records; the Vulkan lighting owner prepares bounded tile/atlas buffers and shadow cameras, then frame code fills mapped instance records.
-6. `Frame.cpp` executes the selected compiled graph. Graph callbacks emit synchronization barriers and record Forward+ assignment, visibility cull, shadow atlas, optional depth, HDR PBR/environment shading, depth-pyramid, tonemap/ImGui, and optional screenshot work; one graphics submission/presentation remains the outer frame ownership boundary.
-7. `RenderStats` and `RenderDeviceInfo` expose the actual GPU path, bounded pressure, feature capabilities, material coverage, and last completed timing state.
+3. An optional frame-update callback maps the global observer to a partition
+   frontier, advances `ResidencyManager` using the application `JobSystem`, and
+   instantiates the prepared combined `CookedWorld` into the live runtime
+   `World` through `Application`'s transactional resolver. Only after that
+   succeeds does it commit the matching cell revision, evict superseded cells,
+   and reset extraction history. An incomplete or failed candidate leaves the
+   old world/frontier pinned and renderable.
+4. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. For scheduler-backed worlds, `WorldSceneExtractor` prepares TRS history, compiled systems execute single-threaded in dependency order, the scheduler plays structural commands once, and the extractor captures the successful state. Pending input edges/motion reach only the first emitted step while held state persists; failures discard scheduler commands, invalidate presentation history, and propagate.
+5. The world run path builds a presentation snapshot with retained-debt alpha. It interpolates each entity's local translation/scale and shortest-path quaternion rotation one completed fixed step behind simulation, then iteratively resolves parent matrices before submission. New/recycled/teleported entities reset their local history; dead or stale parents detach and cyclic dependents are omitted. Both run paths then call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows the reusable list synchronously.
+6. `Visibility.cpp` computes visibility and work planning for LOD/grid batching and canonical material-class counts. `Lighting.cpp` validates the scene's directional/environment/local/probe records; the Vulkan lighting owner prepares bounded tile/atlas buffers and shadow cameras, then frame code fills mapped instance records.
+7. `Frame.cpp` executes the selected compiled graph. Graph callbacks emit synchronization barriers and record Forward+ assignment, visibility cull, shadow atlas, optional depth, HDR PBR/environment shading, depth-pyramid, tonemap/ImGui, and optional screenshot work; one graphics submission/presentation remains the outer frame ownership boundary.
+8. `RenderStats`, `RenderDeviceInfo`, bounded job counters, residency/partition
+   metrics, and schema-v6 frame traces expose the actual renderer and streaming
+   paths.
 
 Scene files are loaded before entering `Application::run` and saved after it returns. Persistence therefore performs no frame-loop work and never competes with scheduler queries, deferred structural playback, extraction, or renderer borrowing.
 
@@ -112,5 +134,8 @@ Its private `Impl` keeps Vulkan internals isolated from application code, which 
 - One renderer backend exists: Vulkan.
 - The renderer interface is intentionally small: `draw`, `stats`, and `deviceInfo` (plus explicit screenshot/idle hooks).
 - The frame graph executes passes and owns backend-neutral barrier, lifetime, and transient-slot contracts. Vulkan resource realization and command emission remain private backend responsibilities.
-- World-to-scene extraction is explicit and CPU-side; it is an ECS bridge, not yet a general streaming scene system.
+- World partition provides deterministic CPU-side asynchronous artifact
+  residency, hierarchical frontier selection, combined-world publication, and
+  origin rebasing. Publication currently rebuilds/extracts the complete active
+  frontier; it is not yet a GPU-page streaming scene representation.
 - Descriptor indexing enables a capability-gated bindless sampled-image table with stable texture indices; the Vulkan baseline retains a fixed descriptor fallback for unsupported devices.

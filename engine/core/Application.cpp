@@ -156,6 +156,69 @@ void Application::setRendererOverlay(
   renderer_.setOverlayCallback(callback, context);
 }
 
+void Application::setFrameUpdateCallback(
+    const FrameUpdateCallback callback, void *const context) noexcept {
+  frameUpdateCallback_ = callback;
+  frameUpdateContext_ = context;
+}
+
+void Application::configureStreamingRun(std::string manifestHash,
+                                        std::string contentHash,
+                                        const std::uint64_t budgetBytes) {
+  if (manifestHash.empty() || contentHash.empty() || budgetBytes == 0U) {
+    throw std::invalid_argument("Streaming run identity and budget are required");
+  }
+  streamingStats_ = {};
+  streamingStats_.enabled = true;
+  streamingStats_.manifestHash = std::move(manifestHash);
+  streamingStats_.contentHash = std::move(contentHash);
+  streamingStats_.budgetBytes = budgetBytes;
+  streamingStats_.frames.reserve(
+      StreamingRunStats::kMaximumFrameSamples);
+}
+
+void Application::updateStreamingRunStats(
+    const StreamingRunStats &stats, const StreamingFrameSample sample) {
+  if (!streamingStats_.enabled) {
+    throw std::logic_error("Streaming run telemetry is not configured");
+  }
+  if (!stats.frames.empty()) {
+    throw std::invalid_argument(
+        "Streaming aggregate update must not provide frame storage");
+  }
+  streamingStats_.residentBytes = stats.residentBytes;
+  streamingStats_.peakResidentBytes = stats.peakResidentBytes;
+  streamingStats_.ioBytes = stats.ioBytes;
+  streamingStats_.publishedLoads = stats.publishedLoads;
+  streamingStats_.evictions = stats.evictions;
+  streamingStats_.cancellations = stats.cancellations;
+  streamingStats_.backpressureEvents = stats.backpressureEvents;
+  streamingStats_.missingDependencyFailures =
+      stats.missingDependencyFailures;
+  streamingStats_.ioFailures = stats.ioFailures;
+  streamingStats_.outOfMemoryFailures = stats.outOfMemoryFailures;
+  streamingStats_.staleCompletions = stats.staleCompletions;
+  streamingStats_.mainThreadIoOperations = stats.mainThreadIoOperations;
+  streamingStats_.traversalFrames = stats.traversalFrames;
+  streamingStats_.coverageGapFrames = stats.coverageGapFrames;
+  streamingStats_.publications = stats.publications;
+  streamingStats_.originShifts = stats.originShifts;
+  streamingStats_.partialLoadFailures = stats.partialLoadFailures;
+  streamingStats_.retainedFrontierFrames = stats.retainedFrontierFrames;
+  streamingStats_.queuedResources = stats.queuedResources;
+  streamingStats_.loadingResources = stats.loadingResources;
+  streamingStats_.residentResources = stats.residentResources;
+  streamingStats_.activeCells = stats.activeCells;
+  streamingStats_.desiredCells = stats.desiredCells;
+  streamingStats_.maxVisibleInstances = stats.maxVisibleInstances;
+  streamingStats_.maxSceneTriangles = stats.maxSceneTriangles;
+  streamingStats_.pendingCells = stats.pendingCells;
+  if (streamingStats_.frames.size() <
+      StreamingRunStats::kMaximumFrameSamples) {
+    streamingStats_.frames.push_back(sample);
+  }
+}
+
 void Application::instantiateCookedWorld(
     World &destination, const CookedWorld &source) const {
   const CookedWorldAssetResolver resolver{
@@ -274,6 +337,11 @@ int Application::runInternal(World *world, const WorldUpdateCallback update,
         clampDeltaSeconds(timing.deltaSeconds, 0.05);
     window_.updateCamera(camera_, input,
                          static_cast<float>(cameraDeltaSeconds));
+    if (world != nullptr && frameUpdateCallback_ != nullptr &&
+        frameUpdateCallback_(frameUpdateContext_, *this, *world, camera_,
+                             timing.frameIndex)) {
+      worldSceneExtractor_.resetSimulationState(*world);
+    }
     simulationInputTracker_.accumulate(input);
     const FixedStepBatch simulationBatch =
         simulationClock_.advance(timing.deltaSeconds);
@@ -445,7 +513,8 @@ int Application::runInternal(World *world, const WorldUpdateCallback update,
   if (!options.summaryPath.empty()) {
     writeRunSummaryAtomic(options.summaryPath,
                           RunSummary{config_, options, finalDevice, finalStats,
-                                     distributions, jobStats, renderedFrames,
+                                     distributions, jobStats, streamingStats_,
+                                     renderedFrames,
                                      0});
     logger()->info("Saved run summary {}", options.summaryPath.string());
   }

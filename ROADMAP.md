@@ -51,12 +51,15 @@ Implemented:
 - Fixed-capacity dependency-aware work stealing with cooperative waits, cancellation/failure propagation, background asset IO/cooking, and bounded profiling.
 - Persistent UUID entity identity, validated scene hierarchy, fixed-step TRS interpolation, and deterministic CPU scene extraction.
 - Bounded transactional VESN v2 world snapshots, stable reflected component metadata, versioned authoring documents, and deterministic cooked-world instantiation.
+- Bounded unified runtime residency for texture, geometry, world-cell,
+  animation, and audio artifacts, plus deterministic hierarchical world
+  partition selection, retained-frontier publication, and local-origin rebasing.
 
 Current limits:
 
 - No general thread-safe world mutation model or headless game application lifecycle.
 - Reflection currently covers the built-in authoring components rather than arbitrary gameplay/ECS pools, and VESN remains an explicit low-level scene subset.
-- No prefab/override model, asset GUID database, dirty extraction, spatial streaming, gameplay serialization, or project-level editor metadata.
+- No prefab/override model, asset GUID database, dirty extraction, gameplay serialization, or project-level editor metadata; streamed partition publication still rebuilds a complete CPU `World`.
 - No C# host, Lua integration, production input mapping, runtime UI contract, physics, audio, animation stack, navigation, networking, or replay system.
 
 ### Renderer foundation
@@ -79,7 +82,7 @@ Current limits:
 - GPU submission currently uses a flat bounded-cluster list; it does not yet traverse a cluster hierarchy or provide fine-grained mesh/cluster LOD beyond the existing sphere mesh tiers.
 - The temporal Hi-Z implementation is correctness-proven on one integrated Vulkan driver, but representative cross-driver crossover gates are not yet established.
 - The frame graph does not schedule multiple queues or physically alias Vulkan memory yet; current depth/HDR logical transients intentionally use separate allocation classes and are realized at swapchain scope.
-- There is no virtual texture pipeline, asynchronous residency system, scalable world renderer, hardware ray tracing, or production global illumination path.
+- There is no virtual texture pipeline, GPU-page streaming scene representation, scalable terrain/world renderer, hardware ray tracing, or production global illumination path.
 
 ### Assets, tools, and delivery
 
@@ -91,19 +94,22 @@ Implemented:
 - Versioned texture artifacts validate and preserve decoded RGBA8, linear RGBA32F HDR, and non-supercompressed KTX2 BC1/BC3/BC7 payloads with explicit role, color-space, dimensions, and mip metadata.
 - OBJ/procedural geometry and direct stb_image-backed texture overrides remain available alongside the authored glTF path.
 - Stable generated/explicit/external reflection manifests, transactional authoring commands and migration, canonical authoring/cooked-world formats, and a separable hierarchy/inspector/viewport/profiling editor shell.
-- Twenty-five CPU test executables plus sandbox and editor help tests.
+- Unified asynchronous runtime artifact residency, canonical partition manifests
+  and cell artifacts, transactional coarse/fine frontier publication, bounded
+  per-frame streaming traces, and a live deterministic Vulkan traversal gate.
+- Twenty-seven CPU test executables plus sandbox, editor, and partition-benchmark help tests.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
 Current limits:
 
-- No FBX importer, animation sample-data artifact or runtime playback, platform packaging/cooking, asynchronous streaming, material database, BasisLZ/Zstd texture transcoder, or runtime HDR/BC texture upload path.
+- No FBX importer, animation sample-data artifact or runtime playback, platform packaging/cooking, material database, BasisLZ/Zstd texture transcoder, runtime HDR/BC texture upload, or GPU-native texture/geometry streaming publication path.
 - The interim editor has no asset browser, prefab/override workflow, isolated play mode, project creation, packaging, installed SDK, plugin manifest, or package registry.
 - A self-hosted live-Vulkan workflow is defined, but coverage still depends on controlled runner availability; cross-driver visual/performance policy and a maintained external-style sample project remain incomplete.
 
 ### Verified baseline
 
 Current local baseline (11 July 2026):
-- `ctest --preset linux-debug` passed all 27 registered tests; the editor-free `linux-runtime` preset passed all 25 of its registered tests and its generated build contains no `engine/editor` source or editor target.
+- `ctest --preset linux-debug` passed all 30 registered tests; the editor-free `linux-runtime` preset passed all 28 of its registered tests and its generated build contains no `engine/editor` source or editor target.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
@@ -116,7 +122,17 @@ Current local baseline (11 July 2026):
 - A separate 1,400-frame corrupt-source smoke rejected two invalid-image candidates, retained the active CPU/GPU bundle, continued rendering, emitted a schema-v5 summary, and exited cleanly. The final profile reported twenty-one succeeded and four failed jobs with no leaked active work.
 - A 90-frame `VolkEngineEditor --editor-smoke` run imported the reference glTF, created/reparented/edited an entity, exercised undo/redo, atomically saved and reopened a 584-byte authoring document, cooked and loaded a 404-byte runtime world, rendered the two authored primitives, captured the hierarchy/inspector/viewport/profiling shell at 1280×720, emitted a schema-v5 summary, reported zero failed jobs, and exited cleanly. Validation was requested but unavailable on the current machine, so this is functional creator-workflow evidence rather than new validation-layer evidence.
 
-This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, S5's bounded parallel execution plus transactional background asset-publication path, and S6's reflected authoring-to-cooked-runtime creator loop on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
+- The M1 `partition-traversal-v1` gate completed 1,320 Vulkan frames and 1,260
+  measured traversal samples across a deterministic 14 km out-and-back path.
+  It streamed a canonical 21-cell hierarchical world through shared IO jobs,
+  rendered authored geometry from active cells, shifted origin eleven times,
+  published fifteen complete frontiers, retained coverage for six transition
+  frames, evicted under a 46,116-byte budget, recorded zero main-thread IO,
+  coverage gaps, partial failures, or failed jobs, and emitted a schema-v6
+  summary plus an inspected 1280×720 screenshot. Validation was requested but
+  unavailable locally; the controlled GPU workflow now runs this same gate with
+  validation required.
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, S5's bounded parallel execution plus transactional background asset-publication path, S6's reflected authoring-to-cooked-runtime creator loop, and M1's bounded asynchronous residency/partition traversal contract on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -275,7 +291,7 @@ Implemented baseline:
 - `WorldSystemScheduler` preserves stable topological order, compiles explicit read-only systems into dependency-safe parallel phases, and places serial barriers around every mutable system. Phase failure joins submitted work, propagates the first exception, and rolls back deferred structural commands and scheduler-owned simulation resources.
 - `ReferenceAssetCookTask` runs the parent cook asynchronously. Unique texture inputs dispatch IO source-read jobs followed by dependent Asset decode/import jobs; the source bytes are hashed and decoded once, and one-worker nested execution is covered.
 - `Application` polls background reloads without waiting on normal frames. Changed candidates publish at a main-thread safe point through `VulkanRenderer::reloadReferenceAssets`; geometry, clusters, textures, descriptors, authored draws, and visibility caches cut over transactionally, while failure retains the old CPU/GPU bundle.
-- Run-summary schema v5, shutdown logs, and the live title expose worker/job/category counts, active/running work, queue high-water mark, steals, and worker time. The deterministic exact 1-worker/8-worker benchmark and full 25-test suite satisfy the local S5 gate.
+- Run-summary schema v6, shutdown logs, and the live title expose worker/job/category counts, active/running work, queue high-water mark, steals, and worker time. The deterministic exact 1-worker/8-worker benchmark and complete 30-test debug suite satisfy the local S5 gate.
 
 ## S6. Reflected authoring model and interim editor foundation — **Current**
 
@@ -320,9 +336,10 @@ These gates grow with the milestones rather than waiting until the end:
 
 The medium-term destination is a packaged playable vertical slice. Before that claim, VolkEngine must complete its cinematic natural-landscape benchmark and turn renderer, content, editor, runtime, and delivery systems into one workflow.
 
-## M1. Unified streaming and world partition — **Later**
+## M1. Unified streaming and world partition — **Current**
 
-Depends on S2, S3, and S5.
+The S2 asset identity/DDC, S3 GPU-driven submission, and S5 bounded job/runtime
+publication prerequisites now feed one deterministic runtime residency path.
 
 - Use one dependency/residency scheduler for textures, geometry, world cells, animation, and audio.
 - Add world partition cells, asynchronous dependency loading, residency budgets, eviction, origin management, and hierarchical LOD.
@@ -330,7 +347,39 @@ Depends on S2, S3, and S5.
 - Make loading priority, cancellation, backpressure, missing dependencies, and out-of-memory behavior explicit.
 - Keep source authoring documents separate from optimized streamed runtime cells.
 
-Exit gate: a deterministic traversal benchmark crosses a partitioned world without main-thread IO, unbounded residency, visible missing-cell gaps under the published budget, or unrecoverable partial loads.
+Implemented contract:
+
+- `ResidencyManager` uses the application-owned `JobSystem` for bounded,
+  dependency-expanded IO across texture, geometry, world-cell, animation, and
+  audio classes. Stable priority, frame-scoped pinning, generation-safe
+  cancellation, explicit failure states, LRU eviction, and per-class/aggregate
+  pressure are deterministic and capacity guarded.
+- Canonical `VEPW` manifests and per-cell `VECW` artifacts keep authoring source
+  separate from runtime layout. Hierarchy/coverage validation, deterministic
+  bounds-distance LOD, prefetch, complete-frontier assembly, cross-cell parent
+  validation, and quantized local origins are executable contracts.
+- Active cells remain pinned until a complete candidate instantiates into the
+  live world and its matching partition revision commits. Failed, rejected, or
+  stale candidates retain the old world; retries do not evict cells shared with
+  that active frontier.
+- `Application` exposes the shared scheduler, a once-per-render-frame
+  transactional publication callback, renderer/job snapshots, and capped
+  schema-v6 streaming evidence. The benchmark profiler displays live
+  residency, queue, cell, publication, origin, coverage, and main-thread-IO
+  state.
+
+Exit gate: **Met.** `VolkEnginePartitionBenchmark --benchmark-gate` traverses a
+14 km hierarchical world out and back with visible cooked cell geometry,
+texture/geometry dependencies, asynchronous shared-job IO, a deliberately
+constrained residency budget, eviction/backpressure, coarse-frontier retention,
+and repeated origin shifts. The gate fails on main-thread IO, budget overflow,
+coverage gaps, unrecoverable partial loads, missing dependencies, IO/OOM
+failure, absent traversal, or absent visible geometry. Focused contracts cover
+all five residency classes, dependency cycles, capacity/backpressure,
+cancellation, stale completion, destruction with live IO, budget eviction,
+pinned-frontier OOM, canonical manifests, hierarchy/coverage rejection,
+corrupt-cell repair, shared-frontier retry, transactional publication, origin
+rebasing, and zero-gap traversal.
 
 ## M2. Terrain, foliage, procedural generation, and atmosphere — **Later**
 

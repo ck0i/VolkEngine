@@ -134,6 +134,10 @@ void appendDistribution(std::ostringstream& output, const char* name,
 } // namespace
 
 std::string serializeRunSummary(const RunSummary& summary) {
+  if (summary.streaming.frames.size() >
+      StreamingRunStats::kMaximumFrameSamples) {
+    throw std::invalid_argument("Streaming frame sample capacity exceeded");
+  }
     std::ostringstream output;
     output << std::boolalpha << std::setprecision(9);
     output << "{\n  \"schema\":\"volkengine.run-summary\",\n  \"schema_version\":"
@@ -254,8 +258,70 @@ std::string serializeRunSummary(const RunSummary& summary) {
       << "  \"assets\":{\"records\":" << summary.stats.assetRecordCount
       << ",\"cache_hits\":" << summary.stats.assetCacheHits
       << ",\"cache_misses\":" << summary.stats.assetCacheMisses
-      << ",\"rebuilt\":" << summary.stats.assetRebuiltCount << "},\n"
-      << "  \"timings\":{";
+      << ",\"rebuilt\":" << summary.stats.assetRebuiltCount << "},\n";
+  output << "  \"streaming\":{\"enabled\":" << summary.streaming.enabled
+         << ",\"manifest_hash\":";
+  appendEscaped(output, summary.streaming.manifestHash);
+  output << ",\"content_hash\":";
+  appendEscaped(output, summary.streaming.contentHash);
+  output << ",\"budget_bytes\":" << summary.streaming.budgetBytes
+         << ",\"resident_bytes\":" << summary.streaming.residentBytes
+         << ",\"peak_resident_bytes\":"
+         << summary.streaming.peakResidentBytes
+         << ",\"io_bytes\":" << summary.streaming.ioBytes
+         << ",\"published_loads\":" << summary.streaming.publishedLoads
+         << ",\"evictions\":" << summary.streaming.evictions
+         << ",\"cancellations\":" << summary.streaming.cancellations
+         << ",\"backpressure_events\":"
+         << summary.streaming.backpressureEvents
+         << ",\"missing_dependency_failures\":"
+         << summary.streaming.missingDependencyFailures
+         << ",\"io_failures\":" << summary.streaming.ioFailures
+         << ",\"out_of_memory_failures\":"
+         << summary.streaming.outOfMemoryFailures
+         << ",\"stale_completions\":" << summary.streaming.staleCompletions
+         << ",\"main_thread_io_operations\":"
+         << summary.streaming.mainThreadIoOperations
+         << ",\"traversal_frames\":" << summary.streaming.traversalFrames
+         << ",\"coverage_gap_frames\":"
+         << summary.streaming.coverageGapFrames
+         << ",\"publications\":" << summary.streaming.publications
+         << ",\"origin_shifts\":" << summary.streaming.originShifts
+         << ",\"partial_load_failures\":"
+         << summary.streaming.partialLoadFailures
+         << ",\"retained_frontier_frames\":"
+         << summary.streaming.retainedFrontierFrames
+         << ",\"queued_resources\":" << summary.streaming.queuedResources
+         << ",\"loading_resources\":" << summary.streaming.loadingResources
+         << ",\"resident_resources\":" << summary.streaming.residentResources
+         << ",\"active_cells\":" << summary.streaming.activeCells
+         << ",\"desired_cells\":" << summary.streaming.desiredCells
+         << ",\"pending_cells\":" << summary.streaming.pendingCells
+         << ",\"max_visible_instances\":"
+         << summary.streaming.maxVisibleInstances
+         << ",\"max_scene_triangles\":"
+         << summary.streaming.maxSceneTriangles
+         << ",\"frames\":[";
+  for (std::size_t index = 0U; index < summary.streaming.frames.size();
+       ++index) {
+    if (index != 0U)
+      output << ',';
+    const StreamingFrameSample &sample = summary.streaming.frames[index];
+    output << "{\"frame\":" << sample.frame
+           << ",\"observer_x\":" << sample.observerX
+           << ",\"observer_z\":" << sample.observerZ
+           << ",\"origin_x\":" << sample.originX
+           << ",\"origin_z\":" << sample.originZ
+           << ",\"resident_bytes\":" << sample.residentBytes
+           << ",\"resident_resources\":" << sample.residentResources
+           << ",\"queued_resources\":" << sample.queuedResources
+           << ",\"loading_resources\":" << sample.loadingResources
+           << ",\"active_cells\":" << sample.activeCells
+           << ",\"desired_cells\":" << sample.desiredCells
+           << ",\"pending_cells\":" << sample.pendingCells
+           << ",\"coverage_gap\":" << sample.coverageGap << '}';
+  }
+  output << "]},\n  \"timings\":{";
   appendMetric(output, "cpu_frame", summary.stats.cpuFrameMs, "ms", true,
                "not recorded");
   output << ',';

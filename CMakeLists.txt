@@ -248,6 +248,8 @@ add_library(VolkEngine STATIC
     engine/scene/CookedWorld.cpp
     engine/scene/SceneReflection.cpp
     engine/scene/ScenePersistence.cpp
+    engine/streaming/ResidencyManager.cpp
+    engine/streaming/WorldPartition.cpp
     engine/platform/Input.cpp
     engine/platform/InputActions.cpp
     engine/platform/Window.cpp
@@ -369,6 +371,17 @@ add_executable(VolkEngineSandbox
     samples/sandbox/main.cpp)
 
 target_link_libraries(VolkEngineSandbox PRIVATE VolkEngine)
+add_executable(VolkEnginePartitionBenchmark
+    samples/partition/main.cpp)
+target_link_libraries(VolkEnginePartitionBenchmark
+    PRIVATE
+        VolkEngine)
+if(VOLKENGINE_ENABLE_IMGUI)
+    target_link_libraries(VolkEnginePartitionBenchmark
+        PRIVATE
+            VolkEngineImGui)
+endif()
+volkengine_target_warnings(VolkEnginePartitionBenchmark)
 add_custom_target(VolkEngineRuntimeShaders
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${VOLKENGINE_SHADER_OUTPUT_DIR}"
@@ -385,6 +398,9 @@ add_dependencies(VolkEngineRuntimeShaders VolkEngineShaders)
 add_dependencies(VolkEngineRuntimeShaders VolkEngineAssets)
 add_dependencies(VolkEngineSandbox VolkEngineRuntimeShaders)
 add_dependencies(VolkEngineSandbox VolkEngineRuntimeAssets)
+add_dependencies(VolkEnginePartitionBenchmark
+    VolkEngineRuntimeShaders
+    VolkEngineRuntimeAssets)
 if(TARGET VolkEngineEditor)
     add_dependencies(VolkEngineEditor
         VolkEngineRuntimeShaders
@@ -395,6 +411,10 @@ volkengine_target_warnings(VolkEngineSandbox)
 enable_testing()
 add_test(NAME SandboxHelp
     COMMAND VolkEngineSandbox --help --width 0 --unknown)
+add_test(NAME PartitionBenchmarkHelp
+    COMMAND VolkEnginePartitionBenchmark --help)
+set_tests_properties(PartitionBenchmarkHelp PROPERTIES
+    PASS_REGULAR_EXPRESSION "^Usage: VolkEnginePartitionBenchmark")
 if(TARGET VolkEngineEditor)
     add_test(NAME EditorHelp
         COMMAND VolkEngineEditor --help)
@@ -718,6 +738,24 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 add_test(NAME WorldCpu
     COMMAND VolkEngineWorldCpuTest)
+
+add_executable(VolkEngineResidencyManagerCpuTest
+    tests/ResidencyManagerCpuTests.cpp)
+target_link_libraries(VolkEngineResidencyManagerCpuTest
+    PRIVATE
+        VolkEngine)
+volkengine_target_warnings(VolkEngineResidencyManagerCpuTest)
+add_test(NAME ResidencyManagerCpu
+    COMMAND VolkEngineResidencyManagerCpuTest)
+
+add_executable(VolkEngineWorldPartitionCpuTest
+    tests/WorldPartitionCpuTests.cpp)
+target_link_libraries(VolkEngineWorldPartitionCpuTest
+    PRIVATE
+        VolkEngine)
+volkengine_target_warnings(VolkEngineWorldPartitionCpuTest)
+add_test(NAME WorldPartitionCpu
+    COMMAND VolkEngineWorldPartitionCpuTest)
 
 if(VOLKENGINE_ENABLE_EDITOR)
     add_executable(VolkEngineAuthoringCpuTest
