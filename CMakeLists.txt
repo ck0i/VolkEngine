@@ -444,6 +444,9 @@ add_executable(VolkEnginePlatformLifecycleCpuTest
 target_include_directories(VolkEnginePlatformLifecycleCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_link_libraries(VolkEnginePlatformLifecycleCpuTest
+    PRIVATE
+        Vulkan::Vulkan)
 volkengine_target_warnings(VolkEnginePlatformLifecycleCpuTest)
 add_test(NAME PlatformLifecycleCpu
     COMMAND VolkEnginePlatformLifecycleCpuTest)

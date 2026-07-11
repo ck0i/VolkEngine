@@ -391,6 +391,7 @@ function(volkengine_resolve_spdlog)
         URL_HASH "SHA256=b74274c32c8be5dba70b7006c1d41b7d3e5ff0dff8390c8b6390c1189424e094"
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
     FetchContent_MakeAvailable(spdlog)
+    set_property(TARGET spdlog PROPERTY SYSTEM TRUE)
     set(VOLKENGINE_SPDLOG_TARGET spdlog::spdlog PARENT_SCOPE)
     message(STATUS "Using fetched spdlog ${VOLKENGINE_SPDLOG_VERSION}")
 endfunction()
