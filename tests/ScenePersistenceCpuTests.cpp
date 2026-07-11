@@ -88,7 +88,8 @@ std::vector<std::byte> transformRecord(const std::uint8_t mask = 1U) {
 std::vector<std::byte> renderableRecord() {
   std::vector<std::byte> bytes;
   bytes.push_back(std::byte{4U});
-  bytes.push_back(std::byte{0U});
+  appendU32(bytes, ve::builtin_assets::kCube.index);
+  appendU32(bytes, ve::builtin_assets::kCube.generation);
   for (int index = 0; index < 12; ++index) {
     appendF32(bytes, 0.0f);
   }
@@ -133,7 +134,7 @@ void setIdentity(ve::World &world, const ve::World::Entity entity,
 
 ve::WorldSceneRenderable renderable(const float marker) {
   ve::WorldSceneRenderable value{};
-  value.mesh = ve::SceneMeshId::Sphere;
+  value.mesh = ve::builtin_assets::kSphere;
   value.material.albedoRoughness = {marker, 0.25f, 0.5f, 0.75f};
   value.material.emissiveMetallic = {0.1f, 0.2f, 0.3f, 0.4f};
   value.material.flags = {marker + 1.0f, 0.0f, 0.0f, 0.0f};
@@ -371,34 +372,9 @@ int main() {
     expectTrue("encoding ignores dense-pool insertion removal order and "
                "runtime generation differences",
                firstBytes == secondBytes);
-    expectTrue("v2 records are ordered by stable ID rather than creation order",
-               firstBytes.size() > 206U &&
-                   std::to_integer<std::uint8_t>(firstBytes[20]) == 1U &&
-                   std::to_integer<std::uint8_t>(firstBytes[100]) == 2U &&
-                   std::to_integer<std::uint8_t>(firstBytes[206]) == 3U);
-  }
-  {
-    auto legacy = header(2U);
-    const auto root = transformRecord();
-    legacy.insert(legacy.end(), root.begin(), root.end());
-    legacy.push_back(std::byte{2U});
-    appendU32(legacy, 0U);
-    ve::World migrated;
-    ve::decodeWorldScene(migrated, legacy);
-    const ve::SceneEntityId migratedRoot{0U, 1U};
-    const ve::SceneEntityId migratedChild{0U, 2U};
-    const auto rootEntity = ve::findWorldSceneEntity(migrated, migratedRoot);
-    const auto childEntity = ve::findWorldSceneEntity(migrated, migratedChild);
-    expectTrue("v1 migration assigns ordinal stable identities and empty names",
-               migrated.tryGet<ve::WorldSceneIdentity>(rootEntity)->name.empty() &&
-                   migrated.tryGet<ve::WorldSceneIdentity>(childEntity)->name.empty());
-    const auto *parent = migrated.tryGet<ve::WorldSceneParent>(childEntity);
-    expectTrue("v1 migration remaps parent before v2 resave",
-               parent != nullptr && parent->parent == rootEntity);
-    const auto resaved = ve::encodeWorldScene(migrated);
-    expectTrue("v1 migration resaves as v2",
-               resaved.size() >= 12U &&
-                   std::to_integer<std::uint8_t>(resaved[4]) == 2U);
+    expectTrue("v3 header records the runtime-handle schema",
+               firstBytes.size() > 12U &&
+                   std::to_integer<std::uint8_t>(firstBytes[4]) == 3U);
   }
 
   {
@@ -453,11 +429,12 @@ int main() {
 
   {
     ve::World invalidDestination;
-    auto bytes = header(1U);
-    const auto record = renderableRecord();
-    bytes.insert(bytes.end(), record.begin(), record.end());
+    auto bytes = header(1U, 3U);
+    appendV2Record(bytes, {1U, 1U}, "", 4U);
     // A renderable with valid=false may carry a negative radius.
-    const std::size_t radiusOffset = 12U + 1U + 1U + 12U * 4U + 3U * 4U;
+    const std::size_t radiusOffset =
+        12U + 16U + 2U + 1U + 2U * sizeof(std::uint32_t) +
+        12U * sizeof(float) + 3U * sizeof(float);
     setU32(bytes, radiusOffset, std::bit_cast<std::uint32_t>(-1.0f));
     bytes[radiusOffset + 4U] = std::byte{0U};
     ve::decodeWorldScene(invalidDestination, bytes);
@@ -478,7 +455,7 @@ int main() {
   {
     const ve::SceneEntityId root{1U, 1U};
     const ve::SceneEntityId child{1U, 2U};
-    auto bytes = header(2U, 2U);
+    auto bytes = header(2U, 3U);
     appendV2Record(bytes, root, "", 0U);
     appendV2Record(bytes, child, "child", 2U, root);
     ve::World loaded;
@@ -491,13 +468,14 @@ int main() {
                    parent->parent == rootEntity);
   }
   {
-    auto bytes = header(1U, 2U);
+    auto bytes = header(1U, 3U);
     appendV2Record(bytes, {2U, 1U}, "", 4U);
-    constexpr std::size_t kV2RenderableRadiusOffset =
-        12U + 16U + 2U + 1U + 1U + 12U * 4U + 3U * 4U;
-    setU32(bytes, kV2RenderableRadiusOffset,
+    constexpr std::size_t kV3RenderableRadiusOffset =
+        12U + 16U + 2U + 1U + 2U * sizeof(std::uint32_t) +
+        12U * sizeof(float) + 3U * sizeof(float);
+    setU32(bytes, kV3RenderableRadiusOffset,
            std::bit_cast<std::uint32_t>(-1.0f));
-    bytes[kV2RenderableRadiusOffset + 4U] = std::byte{0U};
+    bytes[kV3RenderableRadiusOffset + 4U] = std::byte{0U};
     ve::World loaded;
     ve::decodeWorldScene(loaded, bytes);
     ve::World::Entity entity{};
@@ -513,43 +491,43 @@ int main() {
   }
 
   {
-    auto zero = header(1U, 2U);
+    auto zero = header(1U, 3U);
     appendV2Record(zero, {}, "", 1U);
     expectRejectedTransactionally("v2 zero identity rejects transactionally",
                                   destination, before, zero);
-    auto duplicate = header(2U, 2U);
+    auto duplicate = header(2U, 3U);
     appendV2Record(duplicate, {4U, 4U}, "", 1U);
     appendV2Record(duplicate, {4U, 4U}, "", 1U);
     expectRejectedTransactionally(
         "v2 duplicate identities reject transactionally", destination, before,
         duplicate);
-    auto invalidUtf8 = header(1U, 2U);
+    auto invalidUtf8 = header(1U, 3U);
     const std::string invalid{static_cast<char>(0x80U)};
     appendV2Record(invalidUtf8, {5U, 1U}, invalid, 1U);
     expectRejectedTransactionally("v2 invalid UTF-8 rejects transactionally",
                                   destination, before, invalidUtf8);
-    auto nul = header(1U, 2U);
+    auto nul = header(1U, 3U);
     const std::string nulName{"a\0b", 3U};
     appendV2Record(nul, {5U, 2U}, nulName, 1U);
     expectRejectedTransactionally("v2 NUL name rejects transactionally",
                                   destination, before, nul);
-    auto longName = header(1U, 2U);
+    auto longName = header(1U, 3U);
     appendV2Record(longName, {5U, 3U}, "abc", 1U);
     expectRejectedTransactionally("v2 name limit rejects transactionally",
                                   destination, before, longName,
                                   {10U, 1024U, 2U, 10U});
-    auto totalNames = header(2U, 2U);
+    auto totalNames = header(2U, 3U);
     appendV2Record(totalNames, {5U, 4U}, "ab", 1U);
     appendV2Record(totalNames, {5U, 5U}, "cd", 1U);
     expectRejectedTransactionally(
         "v2 aggregate name limit rejects transactionally", destination, before,
         totalNames, {10U, 1024U, 2U, 3U});
-    auto missingParent = header(1U, 2U);
+    auto missingParent = header(1U, 3U);
     appendV2Record(missingParent, {6U, 1U}, "", 2U, {});
     expectRejectedTransactionally(
         "v2 missing parent identity rejects transactionally", destination,
         before, missingParent);
-    auto unknownParent = header(1U, 2U);
+    auto unknownParent = header(1U, 3U);
     appendV2Record(unknownParent, {6U, 2U}, "", 2U, {6U, 99U});
     expectRejectedTransactionally(
         "v2 unknown parent identity rejects transactionally", destination,

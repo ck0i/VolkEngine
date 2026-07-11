@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assets/RuntimeAssets.hpp"
 #include "core/Math.hpp"
 #include "core/World.hpp"
 #include "renderer/Geometry.hpp"
@@ -14,12 +15,6 @@
 
 namespace ve {
 
-enum class SceneMeshId : std::uint8_t {
-    Cube,
-    Sphere,
-    GroundPlane,
-    ImportedModel
-};
 
 struct alignas(16) RenderMaterial {
     Vec4 albedoRoughness;
@@ -30,7 +25,7 @@ struct alignas(16) RenderMaterial {
 struct SceneRenderItem {
     Vec3 boundsCenter{};
     float boundsRadius = 0.0f;
-    SceneMeshId mesh = SceneMeshId::Cube;
+    MeshAssetHandle mesh = builtin_assets::kCube;
     Mat4 model{};
     RenderMaterial material{};
 };
@@ -58,7 +53,7 @@ struct SceneGridTile {
     float boundsRadius = 0.0f;
     float maxItemBoundsRadius = 0.0f;
     std::size_t itemCount = 0;
-    SceneMeshId commonMesh = SceneMeshId::Cube;
+    MeshAssetHandle commonMesh = builtin_assets::kCube;
     bool homogeneousMesh = false;
 };
 
@@ -155,7 +150,7 @@ void setWorldSceneParent(World& world, World::Entity child, World::Entity parent
 [[nodiscard]] bool clearWorldSceneParent(World& world, World::Entity child);
 
 struct WorldSceneRenderable {
-    SceneMeshId mesh = SceneMeshId::Cube;
+    MeshAssetHandle mesh = builtin_assets::kCube;
     RenderMaterial material{};
     MeshBounds localBounds{};
     bool visible = true;
@@ -217,12 +212,12 @@ private:
 
 class DemoSceneRenderer {
 public:
-    static constexpr std::uint64_t kFixedItemCount = 7;
+    static constexpr std::uint64_t kFixedItemCount = 6;
 
     [[nodiscard]] static std::size_t requiredItemCount(std::uint32_t materialGridRows, std::uint32_t materialGridColumns);
     static void validateMaterialGridDimensions(std::uint32_t materialGridRows, std::uint32_t materialGridColumns);
 
-    void setImportedModelBounds(const MeshBounds& bounds) noexcept;
+    void setAuthoredSceneItems(std::vector<SceneRenderItem> items);
 
     [[nodiscard]] const SceneRenderList& build(double elapsedSeconds,
                                                std::uint32_t materialGridRows = 4,
@@ -234,14 +229,6 @@ private:
     static constexpr std::size_t kAnimatedItemCount = 5;
     static constexpr std::uint32_t kDefaultMaterialGridTileRows = 16;
     static constexpr std::uint32_t kDefaultMaterialGridTileColumns = 16;
-    static constexpr Vec3 kImportedModelTranslation{0.0f, 1.0f, -3.35f};
-    static constexpr float kImportedModelRotationY = -0.35f;
-    static constexpr float kImportedModelScale = 0.78f;
-    static constexpr MeshBounds kFallbackImportedModelBounds{{}, 1.0f, true};
-
-    [[nodiscard]] static Mat4 importedModelMatrix();
-    [[nodiscard]] static Vec3 transformPoint(const Mat4& matrix, Vec3 point) noexcept;
-    [[nodiscard]] SceneRenderItem importedModelItem() const;
 
     void invalidateStaticSceneLayout() noexcept;
     void ensureStaticSceneLayout(std::uint32_t materialGridRows,
@@ -251,7 +238,7 @@ private:
                                  std::size_t requiredItems);
     void writeAnimatedItems(double elapsedSeconds);
 
-    MeshBounds importedModelLocalBounds_ = kFallbackImportedModelBounds;
+    std::vector<SceneRenderItem> authoredSceneItems_;
     SceneRenderList renderList_;
     std::uint32_t cachedMaterialGridRows_ = 0;
     std::uint32_t cachedMaterialGridColumns_ = 0;

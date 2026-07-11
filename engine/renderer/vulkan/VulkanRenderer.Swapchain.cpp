@@ -4,20 +4,20 @@ namespace ve {
 
 VulkanRenderer::Impl::SwapchainSupport VulkanRenderer::Impl::querySwapchainSupport(VkPhysicalDevice device) const {
     SwapchainSupport support{};
-    checkVk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface_, &support.capabilities), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    checkVk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, swapchainOwner_.surface, &support.capabilities), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
     std::uint32_t formatCount = 0;
-    checkVk(vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface_, &formatCount, nullptr), "vkGetPhysicalDeviceSurfaceFormatsKHR count");
+    checkVk(vkGetPhysicalDeviceSurfaceFormatsKHR(device, swapchainOwner_.surface, &formatCount, nullptr), "vkGetPhysicalDeviceSurfaceFormatsKHR count");
     support.formats.resize(formatCount);
     if (formatCount > 0U) {
-        checkVk(vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface_, &formatCount, support.formats.data()), "vkGetPhysicalDeviceSurfaceFormatsKHR data");
+        checkVk(vkGetPhysicalDeviceSurfaceFormatsKHR(device, swapchainOwner_.surface, &formatCount, support.formats.data()), "vkGetPhysicalDeviceSurfaceFormatsKHR data");
     }
 
     std::uint32_t presentModeCount = 0;
-    checkVk(vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface_, &presentModeCount, nullptr), "vkGetPhysicalDeviceSurfacePresentModesKHR count");
+    checkVk(vkGetPhysicalDeviceSurfacePresentModesKHR(device, swapchainOwner_.surface, &presentModeCount, nullptr), "vkGetPhysicalDeviceSurfacePresentModesKHR count");
     support.presentModes.resize(presentModeCount);
     if (presentModeCount > 0U) {
-        checkVk(vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface_, &presentModeCount, support.presentModes.data()), "vkGetPhysicalDeviceSurfacePresentModesKHR data");
+        checkVk(vkGetPhysicalDeviceSurfacePresentModesKHR(device, swapchainOwner_.surface, &presentModeCount, support.presentModes.data()), "vkGetPhysicalDeviceSurfacePresentModesKHR data");
     }
     return support;
 }
@@ -66,27 +66,28 @@ VkExtent2D VulkanRenderer::Impl::chooseExtent(const VkSurfaceCapabilitiesKHR& ca
 }
 
 void VulkanRenderer::Impl::createSwapchain() {
-    const SwapchainSupport support = querySwapchainSupport(physicalDevice_);
+    const SwapchainSupport support = querySwapchainSupport(deviceOwner_.physicalDevice);
     const VkSurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(support.formats);
-    presentMode_ = choosePresentMode(support.presentModes);
+    swapchainOwner_.presentMode = choosePresentMode(support.presentModes);
     const VkExtent2D extent = chooseExtent(support.capabilities);
 
     VkSwapchainCreateInfoKHR createInfo{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-    createInfo.surface = surface_;
+    createInfo.surface = swapchainOwner_.surface;
     createInfo.minImageCount = clampImageCount(support.capabilities);
-    swapchainMinImageCount_ = createInfo.minImageCount;
+    swapchainOwner_.minimumImageCount = createInfo.minImageCount;
     createInfo.imageFormat = surfaceFormat.format;
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    swapchainTransferSrcSupported_ = (support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U;
-    if (swapchainTransferSrcSupported_) {
+    readback_.setSwapchainTransferSourceSupported(
+        (support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U);
+    if (readback_.swapchainTransferSourceSupported()) {
         createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
 
-    const std::array<std::uint32_t, 2> queueFamilyIndices{queueFamilies_.graphics.value(), queueFamilies_.present.value()};
-    if (queueFamilies_.graphics != queueFamilies_.present) {
+    const std::array<std::uint32_t, 2> queueFamilyIndices{deviceOwner_.queueFamilies.graphics.value(), deviceOwner_.queueFamilies.present.value()};
+    if (deviceOwner_.queueFamilies.graphics != deviceOwner_.queueFamilies.present) {
         createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         createInfo.queueFamilyIndexCount = static_cast<std::uint32_t>(queueFamilyIndices.size());
         createInfo.pQueueFamilyIndices = queueFamilyIndices.data();
@@ -96,42 +97,42 @@ void VulkanRenderer::Impl::createSwapchain() {
 
     createInfo.preTransform = support.capabilities.currentTransform;
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    createInfo.presentMode = presentMode_;
+    createInfo.presentMode = swapchainOwner_.presentMode;
     createInfo.clipped = VK_TRUE;
     createInfo.oldSwapchain = VK_NULL_HANDLE;
 
-    checkVk(vkCreateSwapchainKHR(device_, &createInfo, nullptr, &swapchain_), "vkCreateSwapchainKHR");
+    checkVk(vkCreateSwapchainKHR(deviceOwner_.device, &createInfo, nullptr, &swapchainOwner_.handle), "vkCreateSwapchainKHR");
 
-    setObjectName(VK_OBJECT_TYPE_SWAPCHAIN_KHR, handleToUint64(swapchain_), "Main Swapchain");
+    setObjectName(VK_OBJECT_TYPE_SWAPCHAIN_KHR, handleToUint64(swapchainOwner_.handle), "Main Swapchain");
     std::uint32_t imageCount = 0;
-    checkVk(vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, nullptr), "vkGetSwapchainImagesKHR count");
-    swapchainImages_.resize(imageCount);
-    checkVk(vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, swapchainImages_.data()), "vkGetSwapchainImagesKHR data");
-    swapchainFormat_ = surfaceFormat.format;
-    swapchainExtent_ = extent;
-    swapchainStates_.assign(imageCount, {});
+    checkVk(vkGetSwapchainImagesKHR(deviceOwner_.device, swapchainOwner_.handle, &imageCount, nullptr), "vkGetSwapchainImagesKHR count");
+    swapchainOwner_.images.resize(imageCount);
+    checkVk(vkGetSwapchainImagesKHR(deviceOwner_.device, swapchainOwner_.handle, &imageCount, swapchainOwner_.images.data()), "vkGetSwapchainImagesKHR data");
+    swapchainOwner_.format = surfaceFormat.format;
+    swapchainOwner_.extent = extent;
+    swapchainOwner_.imageStates.assign(imageCount, {});
 
 
-    swapchainRenderFinishedSemaphores_.resize(imageCount, VK_NULL_HANDLE);
+    swapchainOwner_.renderFinishedSemaphores.resize(imageCount, VK_NULL_HANDLE);
     VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    for (std::size_t i = 0; i < swapchainRenderFinishedSemaphores_.size(); ++i) {
-        checkVk(vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &swapchainRenderFinishedSemaphores_[i]), "vkCreateSemaphore swapchain renderFinished");
-        setObjectName(VK_OBJECT_TYPE_SEMAPHORE, handleToUint64(swapchainRenderFinishedSemaphores_[i]),
+    for (std::size_t i = 0; i < swapchainOwner_.renderFinishedSemaphores.size(); ++i) {
+        checkVk(vkCreateSemaphore(deviceOwner_.device, &semaphoreInfo, nullptr, &swapchainOwner_.renderFinishedSemaphores[i]), "vkCreateSemaphore swapchain renderFinished");
+        setObjectName(VK_OBJECT_TYPE_SEMAPHORE, handleToUint64(swapchainOwner_.renderFinishedSemaphores[i]),
                       "Swapchain Image " + std::to_string(i) + " Render Finished Semaphore");
     }
-    logger()->info("Created swapchain {}x{} with {} images ({})", extent.width, extent.height, imageCount, presentModeName(presentMode_));
+    logger()->info("Created swapchain {}x{} with {} images ({})", extent.width, extent.height, imageCount, presentModeName(swapchainOwner_.presentMode));
 }
 
 void VulkanRenderer::Impl::createImageViews() {
-    swapchainImageViews_.resize(swapchainImages_.size());
-    swapchainResourceIds_.resize(swapchainImages_.size(), GpuResourceRegistry::kInvalidId);
-    for (std::size_t i = 0; i < swapchainImages_.size(); ++i) {
-        swapchainImageViews_[i] = createImageView(swapchainImages_[i], swapchainFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
+    swapchainOwner_.imageViews.resize(swapchainOwner_.images.size());
+    swapchainOwner_.resourceIds.resize(swapchainOwner_.images.size(), GpuResourceRegistry::kInvalidId);
+    for (std::size_t i = 0; i < swapchainOwner_.images.size(); ++i) {
+        swapchainOwner_.imageViews[i] = createImageView(swapchainOwner_.images[i], swapchainOwner_.format, VK_IMAGE_ASPECT_COLOR_BIT);
         const std::string index = std::to_string(i);
-        setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(swapchainImages_[i]), "Swapchain Image " + index);
-        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(swapchainImageViews_[i]), "Swapchain Image View " + index);
-        const std::uint64_t swapchainBytes = imageByteEstimate(swapchainExtent_, swapchainFormat_);
-        swapchainResourceIds_[i] = resourceRegistry_.registerResource(GpuResourceKind::Image, "Swapchain Image", swapchainBytes, true);
+        setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(swapchainOwner_.images[i]), "Swapchain Image " + index);
+        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(swapchainOwner_.imageViews[i]), "Swapchain Image View " + index);
+        const std::uint64_t swapchainBytes = imageByteEstimate(swapchainOwner_.extent, swapchainOwner_.format);
+        swapchainOwner_.resourceIds[i] = resourceOwner_.registry.registerResource(GpuResourceKind::Image, "Swapchain Image", swapchainBytes, true);
     }
 }
 
@@ -139,7 +140,7 @@ VkFormat VulkanRenderer::Impl::findDepthFormat() const {
     constexpr std::array<VkFormat, 3> candidates{VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
     for (VkFormat format : candidates) {
         VkFormatProperties properties{};
-        vkGetPhysicalDeviceFormatProperties(physicalDevice_, format, &properties);
+        vkGetPhysicalDeviceFormatProperties(deviceOwner_.physicalDevice, format, &properties);
         if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0U) {
             return format;
         }
@@ -147,46 +148,64 @@ VkFormat VulkanRenderer::Impl::findDepthFormat() const {
     throw std::runtime_error("No supported depth format found");
 }
 
-void VulkanRenderer::Impl::createDepthResources() {
-    depth_ = createImage(swapchainExtent_, findDepthFormat(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
-    setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(depth_.image), "Depth Image");
-    vmaSetAllocationName(allocator_, depth_.allocation, "Depth Image Allocation");
-    setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(depth_.view), "Depth Image View");
-    const std::uint64_t depthBytes = imageByteEstimate(depth_.extent, depth_.format);
-    depth_.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Image, "Depth Image", depthBytes);
-}
+void VulkanRenderer::Impl::realizeFrameGraphResources() {
+    ImageResource replacementDepth;
+    ImageResource replacementHdr;
+    try {
+        replacementDepth = createImage(
+            swapchainOwner_.extent, findDepthFormat(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            VK_IMAGE_ASPECT_DEPTH_BIT);
+        setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(replacementDepth.image), "Depth Image");
+        vmaSetAllocationName(deviceOwner_.allocator, replacementDepth.allocation, "Depth Image Allocation");
+        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(replacementDepth.view), "Depth Image View");
+        replacementDepth.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Image, "Depth Image",
+            imageByteEstimate(replacementDepth.extent, replacementDepth.format));
 
-void VulkanRenderer::Impl::createHdrResources() {
-    hdr_ = createImage(swapchainExtent_, VK_FORMAT_R16G16B16A16_SFLOAT,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                       VK_IMAGE_ASPECT_COLOR_BIT);
-    setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(hdr_.image), "HDR Color Image");
-    vmaSetAllocationName(allocator_, hdr_.allocation, "HDR Color Image Allocation");
-    setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(hdr_.view), "HDR Color Image View");
-    const std::uint64_t hdrBytes = imageByteEstimate(hdr_.extent, hdr_.format);
-    hdr_.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Image, "HDR Color Image", hdrBytes);
+        replacementHdr = createImage(
+            swapchainOwner_.extent, VK_FORMAT_R16G16B16A16_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT);
+        setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(replacementHdr.image), "HDR Color Image");
+        vmaSetAllocationName(deviceOwner_.allocator, replacementHdr.allocation, "HDR Color Image Allocation");
+        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(replacementHdr.view), "HDR Color Image View");
+        replacementHdr.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Image, "HDR Color Image",
+            imageByteEstimate(replacementHdr.extent, replacementHdr.format));
+    } catch (...) {
+        destroyImage(replacementHdr);
+        destroyImage(replacementDepth);
+        throw;
+    }
+
+    ImageResource oldDepth = takeImage(resourceOwner_.depth);
+    ImageResource oldHdr = takeImage(resourceOwner_.hdr);
+    resourceOwner_.depth = takeImage(replacementDepth);
+    resourceOwner_.hdr = takeImage(replacementHdr);
+    destroyImage(oldHdr);
+    destroyImage(oldDepth);
 }
 
 void VulkanRenderer::Impl::cleanupSwapchain() {
-    destroyImage(hdr_);
-    destroyImage(depth_);
-    for (VkImageView view : swapchainImageViews_) {
-        vkDestroyImageView(device_, view, nullptr);
+    destroyImage(resourceOwner_.hdr);
+    destroyImage(resourceOwner_.depth);
+    for (VkImageView view : swapchainOwner_.imageViews) {
+        vkDestroyImageView(deviceOwner_.device, view, nullptr);
     }
-    for (const std::uint32_t resourceId : swapchainResourceIds_) {
-        resourceRegistry_.unregisterResource(resourceId);
+    for (const std::uint32_t resourceId : swapchainOwner_.resourceIds) {
+        resourceOwner_.registry.unregisterResource(resourceId);
     }
-    swapchainResourceIds_.clear();
-    swapchainImageViews_.clear();
-    for (VkSemaphore semaphore : swapchainRenderFinishedSemaphores_) {
-        vkDestroySemaphore(device_, semaphore, nullptr);
+    swapchainOwner_.resourceIds.clear();
+    swapchainOwner_.imageViews.clear();
+    for (VkSemaphore semaphore : swapchainOwner_.renderFinishedSemaphores) {
+        vkDestroySemaphore(deviceOwner_.device, semaphore, nullptr);
     }
-    swapchainRenderFinishedSemaphores_.clear();
-    swapchainImages_.clear();
-    swapchainStates_.clear();
-    if (swapchain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(device_, swapchain_, nullptr);
-        swapchain_ = VK_NULL_HANDLE;
+    swapchainOwner_.renderFinishedSemaphores.clear();
+    swapchainOwner_.images.clear();
+    swapchainOwner_.imageStates.clear();
+    if (swapchainOwner_.handle != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(deviceOwner_.device, swapchainOwner_.handle, nullptr);
+        swapchainOwner_.handle = VK_NULL_HANDLE;
     }
 }
 
@@ -200,32 +219,38 @@ void VulkanRenderer::Impl::recreateSwapchain() {
         return;
     }
 
-    const VkFormat previousSwapchainFormat = swapchainFormat_;
-    const VkFormat previousHdrFormat = hdr_.format;
-    const VkFormat previousDepthFormat = depth_.format;
-    const bool hadImGui = imguiInitialized_;
+    const VkFormat previousSwapchainFormat = swapchainOwner_.format;
+    const VkFormat previousHdrFormat = resourceOwner_.hdr.format;
+    const VkFormat previousDepthFormat = resourceOwner_.depth.format;
+    const bool hadImGui = imguiOwner_.initialized;
 
-    checkVk(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle recreate swapchain");
+    for (FrameResources& frame : frameOwner_.frames) {
+        if (frame.inFlight != VK_NULL_HANDLE) {
+            checkVk(vkWaitForFences(deviceOwner_.device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX),
+                    "vkWaitForFences swapchain recreation");
+        }
+    }
+    checkVk(vkQueueWaitIdle(deviceOwner_.presentQueue), "vkQueueWaitIdle swapchain recreation");
     if (hadImGui) {
         shutdownImGui();
     }
     cleanupSwapchain();
     createSwapchain();
     createImageViews();
-    createDepthResources();
-    createHdrResources();
+    createFrameGraph(true);
+    realizeFrameGraphResources();
     if (hadImGui) {
         createImGui();
     }
 
-    const bool pipelineFormatsChanged = previousSwapchainFormat != swapchainFormat_ || previousHdrFormat != hdr_.format || previousDepthFormat != depth_.format;
-    if (pipelineFormatsChanged || depthPrepassPipeline_ == VK_NULL_HANDLE || scenePipeline_ == VK_NULL_HANDLE || sceneNoPrepassPipeline_ == VK_NULL_HANDLE || tonemapPipeline_ == VK_NULL_HANDLE) {
+    const bool pipelineFormatsChanged = previousSwapchainFormat != swapchainOwner_.format || previousHdrFormat != resourceOwner_.hdr.format || previousDepthFormat != resourceOwner_.depth.format;
+    if (pipelineFormatsChanged || pipelineOwner_.depthPrepass == VK_NULL_HANDLE || pipelineOwner_.scene == VK_NULL_HANDLE || pipelineOwner_.sceneNoPrepass == VK_NULL_HANDLE || pipelineOwner_.tonemap == VK_NULL_HANDLE) {
         PipelineSet oldPipelines = detachActivePipelineSet();
         destroyPipelineSet(oldPipelines);
         createPipelines();
     }
     createTonemapDescriptorSet();
-    const GpuResourceRegistry::Stats resourceStats = resourceRegistry_.stats();
+    const GpuResourceRegistry::Stats resourceStats = resourceOwner_.registry.stats();
     logger()->info("Recreated swapchain; tracked GPU resources: {} live ({} buffers, {} images, {} imported), {:.2f} MiB estimated (buffers {:.2f}, owned images {:.2f}, imported images {:.2f})",
                    resourceStats.liveResources, resourceStats.buffers, resourceStats.images,
                    resourceStats.importedImages, bytesToMiB(resourceStats.bytes), bytesToMiB(resourceStats.bufferBytes),

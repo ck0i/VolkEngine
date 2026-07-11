@@ -47,6 +47,29 @@
       }
     },
     {
+      "name": "linux-sanitize",
+      "displayName": "Linux ASan and UBSan",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-sanitize",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MAKE_PROGRAM": {
+          "type": "FILEPATH",
+          "value": "${sourceDir}/out/bootstrap/ninja/ninja"
+        },
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "VOLKENGINE_ENABLE_VALIDATION": "OFF",
+        "VOLKENGINE_ENABLE_IMGUI": "OFF",
+        "VOLKENGINE_ENABLE_SANITIZERS": "ON",
+        "VOLKENGINE_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
       "name": "windows-debug",
       "displayName": "Windows Debug",
       "generator": "Ninja",
@@ -107,6 +130,37 @@
       }
     },
     {
+      "name": "linux-sanitize",
+      "configurePreset": "linux-sanitize",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "targets": [
+        "VolkEngineConfigCpuTest",
+        "VolkEngineRunSummaryCpuTest",
+        "VolkEngineAssetPipelineCpuTest",
+        "VolkEngineVulkanFrameGraphSyncCpuTest",
+        "VolkEngineSceneRendererTest",
+        "VolkEngineWorldSceneCpuTest",
+        "VolkEngineScenePersistenceCpuTest",
+        "VolkEngineWorldSchedulerCpuTest",
+        "VolkEngineFrameGraphCpuTest",
+        "VolkEngineImageLoaderCpuTest",
+        "VolkEngineGeometryCpuTest",
+        "VolkEngineGreedyMesherCpuTest",
+        "VolkEngineGpuResourceRegistryCpuTest",
+        "VolkEngineMathCpuTest",
+        "VolkEngineVulkanFrustumCpuTest",
+        "VolkEngineCameraCpuTest",
+        "VolkEngineInputCpuTest",
+        "VolkEnginePlatformLifecycleCpuTest",
+        "VolkEngineTimeCpuTest",
+        "VolkEngineWorldCpuTest"
+      ]
+    },
+    {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
       "condition": {
@@ -148,6 +202,30 @@
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Linux"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-sanitize",
+      "configurePreset": "linux-sanitize",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "filter": {
+        "exclude": {
+          "name": "SandboxHelp"
+        }
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:strict_string_checks=1:check_initialization_order=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
       },
       "output": {
         "outputOnFailure": true

@@ -1,6 +1,7 @@
 #include "renderer/FrameGraph.hpp"
 #include "renderer/FrameGraphTopology.hpp"
 
+#include <array>
 #include <cstddef>
 #include <exception>
 #include <iostream>
@@ -47,6 +48,75 @@ void expectThrowsRuntimeError(std::string_view context, F&& callable) {
     }
 }
 
+enum class ExecutionEventKind : std::uint8_t {
+    Create,
+    Transition,
+    Pass,
+    Retire
+};
+
+struct ExecutionEvent {
+    ExecutionEventKind kind{};
+    ve::FrameGraph::Index index = ve::FrameGraph::kInvalidIndex;
+};
+
+struct ExecutionFixture {
+    std::vector<ExecutionEvent> events;
+    std::vector<std::size_t> declaredResourceCounts;
+    ve::FrameGraph::ExecutionFailure failStage = ve::FrameGraph::ExecutionFailure::None;
+    std::uint32_t failuresRemaining = 0;
+    std::uint32_t cleanupRetireFailuresRemaining = 0;
+
+    [[nodiscard]] bool shouldFail(const ve::FrameGraph::ExecutionFailure stage) noexcept {
+        if (stage == failStage && failuresRemaining > 0U) {
+            --failuresRemaining;
+            return true;
+        }
+        if (stage == ve::FrameGraph::ExecutionFailure::Retire && failStage != stage &&
+            cleanupRetireFailuresRemaining > 0U) {
+            --cleanupRetireFailuresRemaining;
+            return true;
+        }
+        return false;
+    }
+};
+
+bool createExecutionResource(void* context, const ve::FrameGraph::ResourceHandle resource,
+                             const ve::FrameGraph::ResourceDesc&,
+                             const ve::FrameGraph::TransientAllocation&) noexcept {
+    auto& fixture = *static_cast<ExecutionFixture*>(context);
+    fixture.events.push_back({ExecutionEventKind::Create, resource.index});
+    return !fixture.shouldFail(ve::FrameGraph::ExecutionFailure::Create);
+}
+
+bool transitionExecutionResource(void* context, const ve::FrameGraph::BarrierIntent& intent) noexcept {
+    auto& fixture = *static_cast<ExecutionFixture*>(context);
+    fixture.events.push_back({ExecutionEventKind::Transition, intent.resource.index});
+    return !fixture.shouldFail(ve::FrameGraph::ExecutionFailure::Transition);
+}
+
+bool executeGraphPass(void* context, const ve::FrameGraph::PassHandle pass,
+                      const ve::FrameGraph::PassDesc&,
+                      const ve::FrameGraph::PassResources& resources) noexcept {
+    auto& fixture = *static_cast<ExecutionFixture*>(context);
+    fixture.events.push_back({ExecutionEventKind::Pass, pass.index});
+    fixture.declaredResourceCounts.push_back(resources.edges().size());
+    return !fixture.shouldFail(ve::FrameGraph::ExecutionFailure::Pass);
+}
+
+bool retireExecutionResource(void* context, const ve::FrameGraph::ResourceHandle resource,
+                             const ve::FrameGraph::ResourceDesc&,
+                             const ve::FrameGraph::TransientAllocation&) noexcept {
+    auto& fixture = *static_cast<ExecutionFixture*>(context);
+    fixture.events.push_back({ExecutionEventKind::Retire, resource.index});
+    return !fixture.shouldFail(ve::FrameGraph::ExecutionFailure::Retire);
+}
+
+ve::FrameGraph::ExecutionCallbacks executionCallbacks(ExecutionFixture& fixture) {
+    return {&fixture, &createExecutionResource, &transitionExecutionResource,
+            &executeGraphPass, &retireExecutionResource};
+}
+
 } // namespace
 
 int main() {
@@ -61,6 +131,22 @@ int main() {
     expectEqual("force-off exposes only depth-off topology", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::ForceOff, false), true);
     expectEqual("auto exposes both depth topologies", ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::Auto, true) &&
                                                         ve::FrameGraphVariantPolicy::depthVariantAvailable(ve::DepthPrepassMode::Auto, false), true);
+    {
+        const FrameGraph::ResourceHandle declared{0U};
+        const FrameGraph::ResourceHandle undeclared{1U};
+        const std::array edges{
+            FrameGraph::Edge{FrameGraph::PassHandle{0U}, declared, FrameGraphAccess::Read,
+                             FrameGraphUsage::SampledImage}};
+        const FrameGraph::PassResources resources{edges};
+        expectEqual("pass resource view contains declared resource", resources.contains(declared), true);
+        expectEqual("pass resource view rejects undeclared resource", resources.contains(undeclared), false);
+        expectNoThrow("pass resource view resolves declared resource", [&] {
+            static_cast<void>(resources.edge(declared));
+        });
+        expectThrowsRuntimeError("pass resource view fails undeclared access", [&] {
+            static_cast<void>(resources.edge(undeclared));
+        });
+    }
     {
         FrameGraph graph;
         const auto image = graph.addResource({"Usage Validation Image", ve::FrameGraphResourceKind::Image, true});
@@ -84,8 +170,8 @@ int main() {
 
     {
         FrameGraph graph;
-        const auto depth = graph.addResource({"Depth Image", ve::FrameGraphResourceKind::Image, false});
-        const auto hdr = graph.addResource({"HDR Color Image", ve::FrameGraphResourceKind::Image, false});
+        const auto depth = graph.addResource({"Depth Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
+        const auto hdr = graph.addResource({"HDR Color Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
         const auto swapchain = graph.addResource({"Swapchain Image", ve::FrameGraphResourceKind::Image, true});
 
         const auto depthPass = graph.addPass({"Depth Prepass"});
@@ -93,11 +179,11 @@ int main() {
         const auto tonemapPass = graph.addPass({"Tonemap + ImGui Pass"});
         const auto screenshotPass = graph.addPass({"Screenshot Readback Pass"});
 
-        graph.write(depthPass, depth, FrameGraphUsage::DepthAttachment);
-        graph.read(hdrPass, depth, FrameGraphUsage::DepthAttachment);
-        graph.write(hdrPass, hdr, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(depthPass, depth, FrameGraphUsage::DepthAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
+        graph.readAttachment(hdrPass, depth, FrameGraphUsage::DepthAttachment, ve::FrameGraphAttachmentLoad::Load, ve::FrameGraphAttachmentStore::Discard);
+        graph.writeAttachment(hdrPass, hdr, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.read(tonemapPass, hdr, FrameGraphUsage::SampledImage);
-        graph.write(tonemapPass, swapchain, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(tonemapPass, swapchain, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.read(screenshotPass, swapchain, FrameGraphUsage::TransferSource);
         graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
 
@@ -189,18 +275,18 @@ int main() {
 
     {
         FrameGraph graph;
-        const auto depth = graph.addResource({"Depth Image", ve::FrameGraphResourceKind::Image, false});
-        const auto hdr = graph.addResource({"HDR Color Image", ve::FrameGraphResourceKind::Image, false});
+        const auto depth = graph.addResource({"Depth Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
+        const auto hdr = graph.addResource({"HDR Color Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
         const auto swapchain = graph.addResource({"Swapchain Image", ve::FrameGraphResourceKind::Image, true});
 
         const auto hdrPass = graph.addPass({"HDR Scene Pass"});
         const auto tonemapPass = graph.addPass({"Tonemap + ImGui Pass"});
         const auto screenshotPass = graph.addPass({"Screenshot Readback Pass"});
 
-        graph.write(hdrPass, depth, FrameGraphUsage::DepthAttachment);
-        graph.write(hdrPass, hdr, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(hdrPass, depth, FrameGraphUsage::DepthAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
+        graph.writeAttachment(hdrPass, hdr, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.read(tonemapPass, hdr, FrameGraphUsage::SampledImage);
-        graph.write(tonemapPass, swapchain, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(tonemapPass, swapchain, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.read(screenshotPass, swapchain, FrameGraphUsage::TransferSource);
         graph.setFinalUsage(swapchain, FrameGraphUsage::Present);
 
@@ -230,8 +316,8 @@ int main() {
         const auto firstWrite = graph.addPass({"First Write"});
         const auto secondWrite = graph.addPass({"Second Write"});
         graph.read(readPass, image, FrameGraphUsage::SampledImage);
-        graph.write(firstWrite, image, FrameGraphUsage::ColorAttachment);
-        graph.write(secondWrite, image, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(firstWrite, image, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
+        graph.writeAttachment(secondWrite, image, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.compile();
         expectEqual("hazard plan retains read-before-write WAR order", graph.executionOrder()[0].index, readPass.index);
         expectEqual("hazard plan retains first WAW writer", graph.executionOrder()[1].index, firstWrite.index);
@@ -247,11 +333,11 @@ int main() {
     }
     {
         FrameGraph graph;
-        const auto image = graph.addResource({"Interleaved Image", ve::FrameGraphResourceKind::Image, false});
+        const auto image = graph.addResource({"Interleaved Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
         const auto writer = graph.addPass({"Writer"});
         const auto reader = graph.addPass({"Reader"});
         graph.read(reader, image, FrameGraphUsage::SampledImage);
-        graph.write(writer, image, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(writer, image, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         expectNoThrow("interleaved edge declarations preserve pass ordering", [&] {
             graph.compile();
         });
@@ -261,7 +347,7 @@ int main() {
 
     {
         FrameGraph graph;
-        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false});
+        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
         const auto invalidPass = graph.addPass({"Read before write"});
         graph.read(invalidPass, localImage, FrameGraphUsage::SampledImage);
 
@@ -280,9 +366,9 @@ int main() {
 
     {
         FrameGraph graph;
-        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false});
+        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
         const auto writePass = graph.addPass({"Write pass"});
-        graph.write(writePass, localImage, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(writePass, localImage, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.compile();
 
         expectThrowsRuntimeError("finalUsage throws when usage not set", [&] {
@@ -293,14 +379,14 @@ int main() {
     {
         FrameGraph graph;
         const auto importedImage = graph.addResource({"Imported Image", ve::FrameGraphResourceKind::Image, true});
-        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false});
+        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
 
         const auto samplePass = graph.addPass({"Sample External"});
         const auto writePass = graph.addPass({"Write Local"});
         const auto presentPass = graph.addPass({"Read Local"});
 
         graph.read(samplePass, importedImage, FrameGraphUsage::SampledImage);
-        graph.write(writePass, localImage, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(writePass, localImage, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         graph.read(presentPass, localImage, FrameGraphUsage::SampledImage);
 
         expectNoThrow("compile for hasEdge behavior fixture", [&] {
@@ -321,12 +407,12 @@ int main() {
     }
     {
         FrameGraph graph;
-        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false});
+        const auto localImage = graph.addResource({"Local Image", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U});
         const auto writePass = graph.addPass({"Duplicate Write"});
-        graph.write(writePass, localImage, FrameGraphUsage::ColorAttachment);
+        graph.writeAttachment(writePass, localImage, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
 
         expectThrowsRuntimeError("write() rejects duplicate exact edge", [&] {
-            graph.write(writePass, localImage, FrameGraphUsage::ColorAttachment);
+            graph.writeAttachment(writePass, localImage, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         });
     }
 
@@ -348,7 +434,7 @@ int main() {
         graph.read(pass, importedImage, FrameGraphUsage::SampledImage);
 
         expectThrowsRuntimeError("same-pass read/write resource conflict is rejected", [&] {
-            graph.write(pass, importedImage, FrameGraphUsage::ColorAttachment);
+            graph.writeAttachment(pass, importedImage, FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
         });
         expectThrowsRuntimeError("same-pass read usage conflict is rejected", [&] {
             graph.read(pass, importedImage, FrameGraphUsage::TransferSource);
@@ -366,9 +452,9 @@ int main() {
 
         expectNoThrow("adding resources and passes beyond old fixed caps succeeds", [&] {
             for (std::size_t index = 0; index < kLargeGraphCount; ++index) {
-                resources.push_back(graph.addResource({"Scalable Resource", ve::FrameGraphResourceKind::Image, false}));
+                resources.push_back(graph.addResource({"Scalable Resource", ve::FrameGraphResourceKind::Image, false, 1U, 1U, 1U}));
                 passes.push_back(graph.addPass({"Scalable Pass"}));
-                graph.write(passes.back(), resources.back(), FrameGraphUsage::ColorAttachment);
+                graph.writeAttachment(passes.back(), resources.back(), FrameGraphUsage::ColorAttachment, ve::FrameGraphAttachmentLoad::Clear, ve::FrameGraphAttachmentStore::Store);
                 if (index > 0) {
                     graph.read(passes.back(), resources[index - 1U], FrameGraphUsage::SampledImage);
                 }
@@ -384,6 +470,132 @@ int main() {
             graph.compile();
         });
         expectEqual("large graph read edge survives", graph.hasEdge(passes.back(), resources[kLargeGraphCount - 2U], FrameGraphAccess::Read, FrameGraphUsage::SampledImage), true);
+    }
+
+    {
+        FrameGraph graph;
+        const auto image = graph.addResource({"Attachment", ve::FrameGraphResourceKind::Image, true});
+        const auto buffer = graph.addResource({"Uniforms", ve::FrameGraphResourceKind::Buffer, true});
+        const auto attachmentPass = graph.addPass({"Attachment pass"});
+        const auto bufferPass = graph.addPass({"Buffer pass"});
+        expectThrowsRuntimeError("attachment use requires explicit behavior", [&] {
+            graph.write(attachmentPass, image, FrameGraphUsage::ColorAttachment);
+        });
+        graph.writeAttachment(attachmentPass, image, FrameGraphUsage::ColorAttachment,
+                              ve::FrameGraphAttachmentLoad::Discard, ve::FrameGraphAttachmentStore::Store);
+        graph.read(bufferPass, buffer, FrameGraphUsage::UniformBuffer);
+        expectEqual("attachment edge records explicit load behavior",
+                    static_cast<int>(graph.edge(attachmentPass, image).load),
+                    static_cast<int>(ve::FrameGraphAttachmentLoad::Discard));
+        expectEqual("attachment edge records explicit store behavior",
+                    static_cast<int>(graph.edge(attachmentPass, image).store),
+                    static_cast<int>(ve::FrameGraphAttachmentStore::Store));
+        expectThrowsRuntimeError("buffer rejects image usage", [&] {
+            const auto pass = graph.addPass({"Bad buffer pass"});
+            graph.read(pass, buffer, FrameGraphUsage::SampledImage);
+        });
+        expectThrowsRuntimeError("image rejects buffer usage", [&] {
+            const auto pass = graph.addPass({"Bad image pass"});
+            graph.read(pass, image, FrameGraphUsage::UniformBuffer);
+        });
+    }
+
+    {
+        FrameGraph graph;
+        const auto first = graph.addResource(
+            {"First transient", ve::FrameGraphResourceKind::Buffer, false, 64U, 16U, 7U});
+        const auto second = graph.addResource(
+            {"Second transient", ve::FrameGraphResourceKind::Buffer, false, 32U, 16U, 7U});
+        const auto firstPass = graph.addPass({"First transient pass"});
+        const auto secondPass = graph.addPass({"Second transient pass"});
+        graph.write(firstPass, first, FrameGraphUsage::StorageBuffer);
+        graph.write(secondPass, second, FrameGraphUsage::StorageBuffer);
+        graph.compile();
+        const FrameGraph::TransientStats stats = graph.transientStats();
+        expectEqual("non-overlapping compatible resources share one allocation", stats.allocationCount, 1U);
+        expectEqual("transient requested bytes sum logical resources", stats.requestedBytes, 96ULL);
+        expectEqual("transient allocation bytes use largest alias member", stats.allocatedBytes, 64ULL);
+        expectEqual("transient alias bytes report saved capacity", stats.aliasedBytes, 32ULL);
+        expectEqual("aliased resources share a slot", graph.transientAllocation(first).slot,
+                    graph.transientAllocation(second).slot);
+        expectEqual("aliased allocation is observable", graph.transientAllocation(second).aliased, true);
+    }
+
+    {
+        FrameGraph graph;
+        const auto first = graph.addResource(
+            {"Overlapping first", ve::FrameGraphResourceKind::Buffer, false, 64U, 16U, 9U});
+        const auto second = graph.addResource(
+            {"Overlapping second", ve::FrameGraphResourceKind::Buffer, false, 64U, 16U, 9U});
+        const auto writeFirst = graph.addPass({"Write first"});
+        const auto overlap = graph.addPass({"Overlap"});
+        graph.write(writeFirst, first, FrameGraphUsage::StorageBuffer);
+        graph.read(overlap, first, FrameGraphUsage::StorageBuffer);
+        graph.write(overlap, second, FrameGraphUsage::StorageBuffer);
+        graph.compile();
+        expectEqual("resources used by the same pass never alias", graph.transientStats().allocationCount, 2U);
+    }
+
+    {
+        FrameGraph graph;
+        const auto first = graph.addResource(
+            {"Execution first", ve::FrameGraphResourceKind::Buffer, false, 64U, 16U, 1U});
+        const auto second = graph.addResource(
+            {"Execution second", ve::FrameGraphResourceKind::Buffer, false, 64U, 16U, 2U});
+        const auto output = graph.addResource({"Execution output", ve::FrameGraphResourceKind::Image, true});
+        const auto firstPass = graph.addPass({"Execution first pass"});
+        const auto secondPass = graph.addPass({"Execution second pass"});
+        const auto finalPass = graph.addPass({"Execution final pass"});
+        graph.write(firstPass, first, FrameGraphUsage::StorageBuffer);
+        graph.read(secondPass, first, FrameGraphUsage::StorageBuffer);
+        graph.write(secondPass, second, FrameGraphUsage::StorageBuffer);
+        graph.read(finalPass, second, FrameGraphUsage::StorageBuffer);
+        graph.writeAttachment(finalPass, output, FrameGraphUsage::ColorAttachment,
+                              ve::FrameGraphAttachmentLoad::Discard, ve::FrameGraphAttachmentStore::Store);
+        graph.setFinalUsage(output, FrameGraphUsage::Present);
+        graph.compile();
+
+        FrameGraph::ExecutionState state;
+        ExecutionFixture fixture;
+        fixture.events.reserve(32);
+        const FrameGraph::ExecutionCallbacks callbacks = executionCallbacks(fixture);
+        FrameGraph::ExecutionResult result = graph.execute(callbacks, state);
+        expectEqual("successful execution reports success", result.success(), true);
+        expectEqual("execution dispatches every pass", result.passesExecuted, 3U);
+        expectEqual("execution applies pass and final transitions", result.barriersApplied, 6U);
+        expectEqual("execution creates every owned resource", result.resourcesCreated, 2U);
+        expectEqual("execution retires every owned resource", result.resourcesRetired, 2U);
+        expectEqual("successful execution leaves no active resources",
+                    state.activeResources[first.index] == 0U && state.activeResources[second.index] == 0U, true);
+        expectEqual("pass callback receives only declared resources",
+                    fixture.declaredResourceCounts == std::vector<std::size_t>{1U, 2U, 2U}, true);
+
+        const std::array failureStages{
+            FrameGraph::ExecutionFailure::Create,
+            FrameGraph::ExecutionFailure::Transition,
+            FrameGraph::ExecutionFailure::Pass,
+            FrameGraph::ExecutionFailure::Retire};
+        for (const FrameGraph::ExecutionFailure failureStage : failureStages) {
+            fixture.events.clear();
+            fixture.declaredResourceCounts.clear();
+            fixture.failStage = failureStage;
+            fixture.failuresRemaining = 1U;
+            result = graph.execute(callbacks, state);
+            expectEqual("execution returns the injected failure stage",
+                        static_cast<int>(result.failure), static_cast<int>(failureStage));
+            expectEqual("failed execution deterministically unwinds active resources",
+                        state.activeResources[first.index] == 0U && state.activeResources[second.index] == 0U, true);
+        }
+
+        fixture.events.clear();
+        fixture.declaredResourceCounts.clear();
+        fixture.failStage = FrameGraph::ExecutionFailure::Pass;
+        fixture.failuresRemaining = 1U;
+        fixture.cleanupRetireFailuresRemaining = 1U;
+        result = graph.execute(callbacks, state);
+        expectEqual("cleanup failure preserves original pass failure",
+                    static_cast<int>(result.failure), static_cast<int>(FrameGraph::ExecutionFailure::Pass));
+        fixture.cleanupRetireFailuresRemaining = 0U;
     }
 
     if (gFailureCount == 0) {

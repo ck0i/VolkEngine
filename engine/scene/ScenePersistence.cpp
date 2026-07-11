@@ -18,7 +18,7 @@ namespace ve {
 namespace {
 
 constexpr std::uint32_t kVersion1 = 1U;
-constexpr std::uint32_t kVersion2 = 2U;
+constexpr std::uint32_t kVersionCurrent = 3U;
 constexpr std::uint8_t kTransformMask = 1U << 0U;
 constexpr std::uint8_t kParentMask = 1U << 1U;
 constexpr std::uint8_t kRenderableMask = 1U << 2U;
@@ -26,8 +26,9 @@ constexpr std::uint8_t kKnownMask = kTransformMask | kParentMask | kRenderableMa
 constexpr std::size_t kHeaderSize = 12U;
 constexpr std::size_t kV2RecordPrefixSize = 16U + 2U;
 
-[[nodiscard]] bool validMesh(const SceneMeshId mesh) noexcept {
-    return static_cast<std::uint8_t>(mesh) <= static_cast<std::uint8_t>(SceneMeshId::ImportedModel);
+[[nodiscard]] bool validMesh(const MeshAssetHandle mesh) noexcept {
+    return mesh == builtin_assets::kCube || mesh == builtin_assets::kSphere ||
+           mesh == builtin_assets::kGroundPlane || mesh == builtin_assets::kReferenceMesh;
 }
 
 [[nodiscard]] bool finite(const Vec4 value) noexcept {
@@ -206,7 +207,8 @@ void writeVec4(Writer &writer, const Vec4 value) {
     if ((mask & kParentMask) != 0U)
         size += stableParent ? 16U : 4U;
     if ((mask & kRenderableMask) != 0U)
-        size += 1U + 12U * sizeof(float) + 3U * sizeof(float) + sizeof(float) + 1U + 1U;
+        size += 2U * sizeof(std::uint32_t) + 12U * sizeof(float) +
+                3U * sizeof(float) + sizeof(float) + 1U + 1U;
     return size;
 }
 
@@ -225,7 +227,8 @@ void writePayload(Writer &writer, const Record &record) {
         writer.u64(record.parent.low);
     }
     if ((record.mask & kRenderableMask) != 0U) {
-        writer.u8(static_cast<std::uint8_t>(record.renderable.mesh));
+        writer.u32(record.renderable.mesh.index);
+        writer.u32(record.renderable.mesh.generation);
         writeVec4(writer, record.renderable.material.albedoRoughness);
         writeVec4(writer, record.renderable.material.emissiveMetallic);
         writeVec4(writer, record.renderable.material.flags);
@@ -253,10 +256,9 @@ void readPayload(Reader &reader, Record &record, const bool stableParent) {
             formatError("Invalid scene parent identity");
     }
     if ((record.mask & kRenderableMask) != 0U) {
-        const std::uint8_t mesh = reader.u8();
-        if (mesh > static_cast<std::uint8_t>(SceneMeshId::ImportedModel))
-            formatError("Invalid scene mesh identifier");
-        record.renderable.mesh = static_cast<SceneMeshId>(mesh);
+        record.renderable.mesh = MeshAssetHandle{reader.u32(), reader.u32()};
+        if (!validMesh(record.renderable.mesh))
+            formatError("Invalid or stale scene mesh handle");
         record.renderable.material.albedoRoughness = readVec4(reader);
         record.renderable.material.emissiveMetallic = readVec4(reader);
         record.renderable.material.flags = readVec4(reader);
@@ -453,7 +455,7 @@ std::vector<std::byte> encodeWorldScene(const World &world, const ScenePersisten
     writer.u8(static_cast<std::uint8_t>('E'));
     writer.u8(static_cast<std::uint8_t>('S'));
     writer.u8(static_cast<std::uint8_t>('N'));
-    writer.u32(kVersion2);
+    writer.u32(kVersionCurrent);
     writer.u32(static_cast<std::uint32_t>(records.size()));
     for (const Record &record : records) {
         writer.u64(record.id.high);
@@ -475,7 +477,7 @@ void decodeWorldScene(World &destination, const std::span<const std::byte> bytes
         reader.u8() != static_cast<std::uint8_t>('S') || reader.u8() != static_cast<std::uint8_t>('N'))
         formatError("Invalid scene persistence magic");
     const std::uint32_t version = reader.u32();
-    if (version != kVersion1 && version != kVersion2)
+    if (version != kVersionCurrent)
         formatError("Unsupported scene persistence version");
     const std::uint32_t count = reader.u32();
     if (count > limits.maxEntities)
@@ -483,7 +485,7 @@ void decodeWorldScene(World &destination, const std::span<const std::byte> bytes
     if (version == kVersion1 && count > reader.remaining()) {
         formatError("Scene entity count exceeds available record data");
     }
-    if (version == kVersion2 && count > reader.remaining() / (kV2RecordPrefixSize + 1U)) {
+    if (version == kVersionCurrent && count > reader.remaining() / (kV2RecordPrefixSize + 1U)) {
         formatError("Scene entity count exceeds available record data");
     }
     std::vector<Record> records;
@@ -491,7 +493,7 @@ void decodeWorldScene(World &destination, const std::span<const std::byte> bytes
     std::size_t totalNames = 0U;
     for (std::uint32_t index = 0U; index < count; ++index) {
         Record record{};
-        if (version == kVersion2) {
+        if (version == kVersionCurrent) {
             record.id = {reader.u64(), reader.u64()};
             if (!record.id.valid())
                 formatError("Invalid scene entity identity");

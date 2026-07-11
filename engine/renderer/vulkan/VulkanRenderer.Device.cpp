@@ -3,9 +3,13 @@
 namespace ve {
 
 void VulkanRenderer::Impl::createInstance() {
-    validationEnabled_ = config_.validation && validationLayerAvailable();
-    deviceInfo_.validationEnabled = validationEnabled_;
-    if (config_.validation && !validationEnabled_) {
+    deviceOwner_.validationEnabled = config_.validation && validationLayerAvailable();
+    deviceOwner_.info.validationEnabled = deviceOwner_.validationEnabled;
+    if (config_.validation && !deviceOwner_.validationEnabled) {
+        if (config_.requireValidation) {
+            throw std::runtime_error(
+                "Vulkan validation is required, but VK_LAYER_KHRONOS_validation is unavailable");
+        }
         logger()->warn("Validation requested but VK_LAYER_KHRONOS_validation is not available");
     }
 
@@ -17,24 +21,44 @@ void VulkanRenderer::Impl::createInstance() {
     appInfo.apiVersion = VK_API_VERSION_1_3;
 
     auto extensions = requiredInstanceExtensions();
-    debugUtilsEnabled_ = instanceExtensionAvailable(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    deviceInfo_.debugMarkers = debugUtilsEnabled_;
-    if (debugUtilsEnabled_) {
+    deviceOwner_.debugUtilsEnabled = instanceExtensionAvailable(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (config_.requireValidation && !deviceOwner_.debugUtilsEnabled) {
+        throw std::runtime_error(
+            "Vulkan validation is required, but VK_EXT_debug_utils is unavailable");
+    }
+    const bool validationFeaturesEnabled =
+        deviceOwner_.validationEnabled && instanceExtensionAvailable(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+    if (config_.requireValidation && !validationFeaturesEnabled) {
+        throw std::runtime_error(
+            "Vulkan validation is required, but VK_EXT_validation_features is unavailable");
+    }
+    deviceOwner_.info.debugMarkers = deviceOwner_.debugUtilsEnabled;
+    if (deviceOwner_.debugUtilsEnabled) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+    if (validationFeaturesEnabled) {
+        extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
     }
 
     VkInstanceCreateInfo createInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     createInfo.pApplicationInfo = &appInfo;
     createInfo.enabledExtensionCount = static_cast<std::uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
-    VkDebugUtilsMessengerCreateInfoEXT debugInfo = debugMessengerCreateInfo();
-    if (validationEnabled_) {
+    VkDebugUtilsMessengerCreateInfoEXT debugInfo = debugMessengerCreateInfo(&deviceOwner_.validationMessages);
+    constexpr std::array<VkValidationFeatureEnableEXT, 1> enabledValidationFeatures{
+        VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
+    VkValidationFeaturesEXT validationFeatures{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
+    validationFeatures.enabledValidationFeatureCount =
+        static_cast<std::uint32_t>(enabledValidationFeatures.size());
+    validationFeatures.pEnabledValidationFeatures = enabledValidationFeatures.data();
+    if (deviceOwner_.validationEnabled) {
         createInfo.enabledLayerCount = static_cast<std::uint32_t>(kValidationLayers.size());
         createInfo.ppEnabledLayerNames = kValidationLayers.data();
+        debugInfo.pNext = validationFeaturesEnabled ? &validationFeatures : nullptr;
         createInfo.pNext = &debugInfo;
     }
 
-    checkVk(vkCreateInstance(&createInfo, nullptr, &instance_), "vkCreateInstance");
+    checkVk(vkCreateInstance(&createInfo, nullptr, &deviceOwner_.instance), "vkCreateInstance");
 }
 
 bool VulkanRenderer::Impl::validationLayerAvailable() const {
@@ -72,28 +96,28 @@ bool VulkanRenderer::Impl::instanceExtensionAvailable(const char* extensionName)
 }
 
 void VulkanRenderer::Impl::createDebugMessenger() {
-    if (!validationEnabled_ || !debugUtilsEnabled_) { return; }
-    const auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance_, "vkCreateDebugUtilsMessengerEXT"));
+    if (!deviceOwner_.validationEnabled || !deviceOwner_.debugUtilsEnabled) { return; }
+    const auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(deviceOwner_.instance, "vkCreateDebugUtilsMessengerEXT"));
     if (!create) {
         throw std::runtime_error("vkCreateDebugUtilsMessengerEXT is unavailable");
     }
-    VkDebugUtilsMessengerCreateInfoEXT createInfo = debugMessengerCreateInfo();
-    checkVk(create(instance_, &createInfo, nullptr, &debugMessenger_), "vkCreateDebugUtilsMessengerEXT");
+    VkDebugUtilsMessengerCreateInfoEXT createInfo = debugMessengerCreateInfo(&deviceOwner_.validationMessages);
+    checkVk(create(deviceOwner_.instance, &createInfo, nullptr, &deviceOwner_.debugMessenger), "vkCreateDebugUtilsMessengerEXT");
 }
 
 void VulkanRenderer::Impl::loadDebugUtils() {
-    if (!debugUtilsEnabled_) { return; }
-    vkSetDebugUtilsObjectNameEXT_ = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(device_, "vkSetDebugUtilsObjectNameEXT"));
-    vkCmdBeginDebugUtilsLabelEXT_ = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(vkGetDeviceProcAddr(device_, "vkCmdBeginDebugUtilsLabelEXT"));
-    vkCmdEndDebugUtilsLabelEXT_ = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(vkGetDeviceProcAddr(device_, "vkCmdEndDebugUtilsLabelEXT"));
-    setObjectName(VK_OBJECT_TYPE_DEVICE, handleToUint64(device_), "VolkEngine Logical Device");
-    setObjectName(VK_OBJECT_TYPE_QUEUE, handleToUint64(graphicsQueue_), "Graphics Queue");
-    setObjectName(VK_OBJECT_TYPE_QUEUE, handleToUint64(presentQueue_), "Present Queue");
-    setObjectName(VK_OBJECT_TYPE_QUEUE, handleToUint64(transferQueue_), "Transfer Queue");
+    if (!deviceOwner_.debugUtilsEnabled) { return; }
+    deviceOwner_.setDebugObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(deviceOwner_.device, "vkSetDebugUtilsObjectNameEXT"));
+    deviceOwner_.beginDebugLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(vkGetDeviceProcAddr(deviceOwner_.device, "vkCmdBeginDebugUtilsLabelEXT"));
+    deviceOwner_.endDebugLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(vkGetDeviceProcAddr(deviceOwner_.device, "vkCmdEndDebugUtilsLabelEXT"));
+    setObjectName(VK_OBJECT_TYPE_DEVICE, handleToUint64(deviceOwner_.device), "VolkEngine Logical Device");
+    setObjectName(VK_OBJECT_TYPE_QUEUE, handleToUint64(deviceOwner_.graphicsQueue), "Graphics Queue");
+    setObjectName(VK_OBJECT_TYPE_QUEUE, handleToUint64(deviceOwner_.presentQueue), "Present Queue");
+    setObjectName(VK_OBJECT_TYPE_QUEUE, handleToUint64(deviceOwner_.transferQueue), "Transfer Queue");
 }
 
 void VulkanRenderer::Impl::setObjectName(const VkObjectType objectType, const std::uint64_t objectHandle, const std::string_view name) const {
-    if (!vkSetDebugUtilsObjectNameEXT_ || objectHandle == 0U || name.empty()) {
+    if (!deviceOwner_.setDebugObjectName || objectHandle == 0U || name.empty()) {
         return;
     }
     const std::string ownedName{name};
@@ -101,25 +125,25 @@ void VulkanRenderer::Impl::setObjectName(const VkObjectType objectType, const st
     nameInfo.objectType = objectType;
     nameInfo.objectHandle = objectHandle;
     nameInfo.pObjectName = ownedName.c_str();
-    const VkResult result = vkSetDebugUtilsObjectNameEXT_(device_, &nameInfo);
+    const VkResult result = deviceOwner_.setDebugObjectName(deviceOwner_.device, &nameInfo);
     if (result != VK_SUCCESS) {
         logger()->warn("vkSetDebugUtilsObjectNameEXT failed for {} with {}", ownedName, static_cast<int>(result));
     }
 }
 
 void VulkanRenderer::Impl::beginDebugLabel(const VkCommandBuffer commandBuffer, const char* name, const std::array<float, 4>& color) const {
-    if (!vkCmdBeginDebugUtilsLabelEXT_ || name == nullptr || name[0] == '\0') {
+    if (!deviceOwner_.beginDebugLabel || name == nullptr || name[0] == '\0') {
         return;
     }
     VkDebugUtilsLabelEXT label{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
     label.pLabelName = name;
     std::ranges::copy(color, label.color);
-    vkCmdBeginDebugUtilsLabelEXT_(commandBuffer, &label);
+    deviceOwner_.beginDebugLabel(commandBuffer, &label);
 }
 
 void VulkanRenderer::Impl::endDebugLabel(const VkCommandBuffer commandBuffer) const {
-    if (vkCmdEndDebugUtilsLabelEXT_) {
-        vkCmdEndDebugUtilsLabelEXT_(commandBuffer);
+    if (deviceOwner_.endDebugLabel) {
+        deviceOwner_.endDebugLabel(commandBuffer);
     }
 }
 
@@ -128,7 +152,8 @@ VulkanRenderer::Impl::DebugLabelScope::DebugLabelScope(const VulkanRenderer::Imp
                                                  const char* name,
                                                  const std::array<float, 4>& color) noexcept
     : renderer_(&renderer), commandBuffer_(commandBuffer),
-      active_(renderer.vkCmdBeginDebugUtilsLabelEXT_ != nullptr && name != nullptr && name[0] != '\0') {
+      active_(renderer.deviceOwner_.beginDebugLabel != nullptr &&
+              name != nullptr && name[0] != '\0') {
     if (active_) {
         renderer_->beginDebugLabel(commandBuffer_, name, color);
     }
@@ -141,17 +166,17 @@ VulkanRenderer::Impl::DebugLabelScope::~DebugLabelScope() noexcept {
 }
 
 void VulkanRenderer::Impl::createSurface() {
-    window_.createSurface(instance_, &surface_);
+    window_.createSurface(deviceOwner_.instance, &swapchainOwner_.surface);
 }
 
 void VulkanRenderer::Impl::pickPhysicalDevice() {
     std::uint32_t deviceCount = 0;
-    checkVk(vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr), "vkEnumeratePhysicalDevices count");
+    checkVk(vkEnumeratePhysicalDevices(deviceOwner_.instance, &deviceCount, nullptr), "vkEnumeratePhysicalDevices count");
     if (deviceCount == 0) {
         throw std::runtime_error("No Vulkan-capable physical devices found");
     }
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    checkVk(vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices data");
+    checkVk(vkEnumeratePhysicalDevices(deviceOwner_.instance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices data");
 
     VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
     int bestScore = std::numeric_limits<int>::min();
@@ -191,38 +216,41 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
         throw std::runtime_error(message);
     }
 
-    physicalDevice_ = bestDevice;
-    queueFamilies_ = findQueueFamilies(physicalDevice_);
-    vkGetPhysicalDeviceProperties(physicalDevice_, &physicalDeviceProperties_);
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &physicalDeviceMemoryProperties_);
+    deviceOwner_.physicalDevice = bestDevice;
+    deviceOwner_.queueFamilies = findQueueFamilies(deviceOwner_.physicalDevice);
+    vkGetPhysicalDeviceProperties(deviceOwner_.physicalDevice, &deviceOwner_.physicalDeviceProperties);
+    vkGetPhysicalDeviceMemoryProperties(deviceOwner_.physicalDevice, &deviceOwner_.physicalDeviceMemoryProperties);
     VkPhysicalDeviceVulkan13Features features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceVulkan12Features features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     features12.pNext = &features13;
     VkPhysicalDeviceFeatures2 features2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     features2.pNext = &features12;
-    vkGetPhysicalDeviceFeatures2(physicalDevice_, &features2);
-    deviceInfo_.backend = RenderBackend::Vulkan;
-    deviceInfo_.adapterName = physicalDeviceProperties_.deviceName;
-    deviceInfo_.apiVersionMajor = VK_VERSION_MAJOR(physicalDeviceProperties_.apiVersion);
-    deviceInfo_.apiVersionMinor = VK_VERSION_MINOR(physicalDeviceProperties_.apiVersion);
-    deviceInfo_.apiVersionPatch = VK_VERSION_PATCH(physicalDeviceProperties_.apiVersion);
-    deviceInfo_.maxImageDimension2D = physicalDeviceProperties_.limits.maxImageDimension2D;
-    deviceInfo_.discreteGpu = physicalDeviceProperties_.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-    deviceInfo_.dynamicRendering = features13.dynamicRendering == VK_TRUE;
-    deviceInfo_.synchronization2 = features13.synchronization2 == VK_TRUE;
-    deviceInfo_.descriptorIndexing = features12.descriptorIndexing == VK_TRUE;
-    deviceInfo_.bindlessSampledImagesSupported = supportsBindlessSampledImages(features12);
-    deviceInfo_.multiDrawIndirect = features2.features.multiDrawIndirect == VK_TRUE;
-    deviceInfo_.drawIndirectFirstInstance = features2.features.drawIndirectFirstInstance == VK_TRUE;
-    deviceInfo_.samplerAnisotropy = features2.features.samplerAnisotropy == VK_TRUE;
-    deviceInfo_.maxSamplerAnisotropy = deviceInfo_.samplerAnisotropy ? physicalDeviceProperties_.limits.maxSamplerAnisotropy : 1.0f;
-    deviceInfo_.maxDrawIndirectCount = physicalDeviceProperties_.limits.maxDrawIndirectCount;
+    vkGetPhysicalDeviceFeatures2(deviceOwner_.physicalDevice, &features2);
+    deviceOwner_.info.backend = RenderBackend::Vulkan;
+    deviceOwner_.info.adapterName = deviceOwner_.physicalDeviceProperties.deviceName;
+    deviceOwner_.info.apiVersionMajor = VK_VERSION_MAJOR(deviceOwner_.physicalDeviceProperties.apiVersion);
+    deviceOwner_.info.apiVersionMinor = VK_VERSION_MINOR(deviceOwner_.physicalDeviceProperties.apiVersion);
+    deviceOwner_.info.apiVersionPatch = VK_VERSION_PATCH(deviceOwner_.physicalDeviceProperties.apiVersion);
+    deviceOwner_.info.driverVersion = deviceOwner_.physicalDeviceProperties.driverVersion;
+    deviceOwner_.info.vendorId = deviceOwner_.physicalDeviceProperties.vendorID;
+    deviceOwner_.info.deviceId = deviceOwner_.physicalDeviceProperties.deviceID;
+    deviceOwner_.info.maxImageDimension2D = deviceOwner_.physicalDeviceProperties.limits.maxImageDimension2D;
+    deviceOwner_.info.discreteGpu = deviceOwner_.physicalDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+    deviceOwner_.info.dynamicRendering = features13.dynamicRendering == VK_TRUE;
+    deviceOwner_.info.synchronization2 = features13.synchronization2 == VK_TRUE;
+    deviceOwner_.info.descriptorIndexing = features12.descriptorIndexing == VK_TRUE;
+    deviceOwner_.info.bindlessSampledImagesSupported = supportsBindlessSampledImages(features12);
+    deviceOwner_.info.multiDrawIndirect = features2.features.multiDrawIndirect == VK_TRUE;
+    deviceOwner_.info.drawIndirectFirstInstance = features2.features.drawIndirectFirstInstance == VK_TRUE;
+    deviceOwner_.info.samplerAnisotropy = features2.features.samplerAnisotropy == VK_TRUE;
+    deviceOwner_.info.maxSamplerAnisotropy = deviceOwner_.info.samplerAnisotropy ? deviceOwner_.physicalDeviceProperties.limits.maxSamplerAnisotropy : 1.0f;
+    deviceOwner_.info.maxDrawIndirectCount = deviceOwner_.physicalDeviceProperties.limits.maxDrawIndirectCount;
     logger()->info("Selected GPU: {} ({}, Vulkan {}.{}.{})",
-                   physicalDeviceProperties_.deviceName,
-                   gpuClassName(deviceInfo_.discreteGpu),
-                   VK_VERSION_MAJOR(physicalDeviceProperties_.apiVersion),
-                   VK_VERSION_MINOR(physicalDeviceProperties_.apiVersion),
-                   VK_VERSION_PATCH(physicalDeviceProperties_.apiVersion));
+                   deviceOwner_.physicalDeviceProperties.deviceName,
+                   gpuClassName(deviceOwner_.info.discreteGpu),
+                   VK_VERSION_MAJOR(deviceOwner_.physicalDeviceProperties.apiVersion),
+                   VK_VERSION_MINOR(deviceOwner_.physicalDeviceProperties.apiVersion),
+                   VK_VERSION_PATCH(deviceOwner_.physicalDeviceProperties.apiVersion));
 }
 
 bool VulkanRenderer::Impl::deviceExtensionAvailable(VkPhysicalDevice device, const char* extensionName) const {
@@ -302,7 +330,7 @@ VulkanRenderer::Impl::QueueFamilies VulkanRenderer::Impl::findQueueFamilies(VkPh
         const bool supportsTransfer = (family.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0U;
 
         VkBool32 presentSupport = VK_FALSE;
-        checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &presentSupport), "vkGetPhysicalDeviceSurfaceSupportKHR");
+        checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, swapchainOwner_.surface, &presentSupport), "vkGetPhysicalDeviceSurfaceSupportKHR");
         const bool supportsPresent = presentSupport == VK_TRUE;
 
         if (supportsGraphics && !firstGraphics.has_value()) {
@@ -338,7 +366,7 @@ VulkanRenderer::Impl::QueueFamilies VulkanRenderer::Impl::findQueueFamilies(VkPh
 }
 
 void VulkanRenderer::Impl::createLogicalDevice() {
-    std::set<std::uint32_t> uniqueFamilies{queueFamilies_.graphics.value(), queueFamilies_.present.value(), queueFamilies_.transfer.value()};
+    std::set<std::uint32_t> uniqueFamilies{deviceOwner_.queueFamilies.graphics.value(), deviceOwner_.queueFamilies.present.value(), deviceOwner_.queueFamilies.transfer.value()};
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
     const float queuePriority = 1.0f;
     for (std::uint32_t family : uniqueFamilies) {
@@ -359,7 +387,7 @@ void VulkanRenderer::Impl::createLogicalDevice() {
     VkPhysicalDeviceVulkan12Features supportedFeatures12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceFeatures2 supportedFeatures2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     supportedFeatures2.pNext = &supportedFeatures12;
-    vkGetPhysicalDeviceFeatures2(physicalDevice_, &supportedFeatures2);
+    vkGetPhysicalDeviceFeatures2(deviceOwner_.physicalDevice, &supportedFeatures2);
     const bool descriptorIndexingEnabled = supportedFeatures12.descriptorIndexing == VK_TRUE;
     const bool bindlessSampledImagesEnabled = supportsBindlessSampledImages(supportedFeatures12);
     if (descriptorIndexingEnabled) {
@@ -372,23 +400,24 @@ void VulkanRenderer::Impl::createLogicalDevice() {
         features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
     }
     VkPhysicalDeviceFeatures deviceFeatures{};
-    const float deviceMaxSamplerAnisotropy = std::max(1.0f, physicalDeviceProperties_.limits.maxSamplerAnisotropy);
-    samplerAnisotropyEnabled_ = supportedFeatures2.features.samplerAnisotropy == VK_TRUE && deviceMaxSamplerAnisotropy > 1.0f;
-    maxSamplerAnisotropy_ = samplerAnisotropyEnabled_ ? std::min(deviceMaxSamplerAnisotropy, 16.0f) : 1.0f;
-    if (samplerAnisotropyEnabled_) {
+    const float deviceMaxSamplerAnisotropy = std::max(1.0f, deviceOwner_.physicalDeviceProperties.limits.maxSamplerAnisotropy);
+    resourceOwner_.samplerAnisotropyEnabled = supportedFeatures2.features.samplerAnisotropy == VK_TRUE && deviceMaxSamplerAnisotropy > 1.0f;
+    resourceOwner_.maxSamplerAnisotropy = resourceOwner_.samplerAnisotropyEnabled ? std::min(deviceMaxSamplerAnisotropy, 16.0f) : 1.0f;
+    if (resourceOwner_.samplerAnisotropyEnabled) {
         deviceFeatures.samplerAnisotropy = VK_TRUE;
     }
-    multiDrawIndirectEnabled_ = supportedFeatures2.features.multiDrawIndirect == VK_TRUE;
-    drawIndirectFirstInstanceEnabled_ = supportedFeatures2.features.drawIndirectFirstInstance == VK_TRUE;
-    if (multiDrawIndirectEnabled_) {
+    deviceOwner_.multiDrawIndirectEnabled = supportedFeatures2.features.multiDrawIndirect == VK_TRUE;
+    deviceOwner_.drawIndirectFirstInstanceEnabled = supportedFeatures2.features.drawIndirectFirstInstance == VK_TRUE;
+    if (deviceOwner_.multiDrawIndirectEnabled) {
         deviceFeatures.multiDrawIndirect = VK_TRUE;
     }
-    if (drawIndirectFirstInstanceEnabled_) {
+    if (deviceOwner_.drawIndirectFirstInstanceEnabled) {
         deviceFeatures.drawIndirectFirstInstance = VK_TRUE;
     }
     indirectSceneDrawsEnabled_ = config_.indirectSceneDraws &&
-                                  multiDrawIndirectEnabled_ && drawIndirectFirstInstanceEnabled_ &&
-                                  physicalDeviceProperties_.limits.maxDrawIndirectCount >= kSceneMeshBatchOrder.size();
+                                  deviceOwner_.multiDrawIndirectEnabled && deviceOwner_.drawIndirectFirstInstanceEnabled &&
+                                  deviceOwner_.physicalDeviceProperties.limits.maxDrawIndirectCount >=
+                                      kBaseSceneMeshBatchOrder.size() + resourceOwner_.referenceAssets->scene.meshes.size();
     if (config_.indirectSceneDraws && !indirectSceneDrawsEnabled_) {
         std::string reason;
         const auto appendReason = [&reason](const std::string_view text) {
@@ -397,31 +426,33 @@ void VulkanRenderer::Impl::createLogicalDevice() {
             }
             reason += text;
         };
-        if (!multiDrawIndirectEnabled_) {
+        if (!deviceOwner_.multiDrawIndirectEnabled) {
             appendReason("multiDrawIndirect unsupported");
         }
-        if (!drawIndirectFirstInstanceEnabled_) {
+        if (!deviceOwner_.drawIndirectFirstInstanceEnabled) {
             appendReason("drawIndirectFirstInstance unsupported");
         }
-        if (physicalDeviceProperties_.limits.maxDrawIndirectCount < kSceneMeshBatchOrder.size()) {
-            appendReason("maxDrawIndirectCount " + std::to_string(physicalDeviceProperties_.limits.maxDrawIndirectCount)
-                         + " < required " + std::to_string(kSceneMeshBatchOrder.size()));
+        const std::size_t requiredDrawCount =
+            kBaseSceneMeshBatchOrder.size() + resourceOwner_.referenceAssets->scene.meshes.size();
+        if (deviceOwner_.physicalDeviceProperties.limits.maxDrawIndirectCount < requiredDrawCount) {
+            appendReason("maxDrawIndirectCount " + std::to_string(deviceOwner_.physicalDeviceProperties.limits.maxDrawIndirectCount)
+                         + " < required " + std::to_string(requiredDrawCount));
         }
         logger()->warn("Indirect scene draws requested but disabled: {}; using direct indexed-instanced fallback", reason);
     }
-    deviceInfo_.multiDrawIndirect = multiDrawIndirectEnabled_;
-    deviceInfo_.drawIndirectFirstInstance = drawIndirectFirstInstanceEnabled_;
-    deviceInfo_.indirectSceneDraws = indirectSceneDrawsEnabled_;
-    deviceInfo_.samplerAnisotropy = samplerAnisotropyEnabled_;
-    deviceInfo_.maxSamplerAnisotropy = maxSamplerAnisotropy_;
+    deviceOwner_.info.multiDrawIndirect = deviceOwner_.multiDrawIndirectEnabled;
+    deviceOwner_.info.drawIndirectFirstInstance = deviceOwner_.drawIndirectFirstInstanceEnabled;
+    deviceOwner_.info.indirectSceneDraws = indirectSceneDrawsEnabled_;
+    deviceOwner_.info.samplerAnisotropy = resourceOwner_.samplerAnisotropyEnabled;
+    deviceOwner_.info.maxSamplerAnisotropy = resourceOwner_.maxSamplerAnisotropy;
 
-    deviceInfo_.descriptorIndexing = descriptorIndexingEnabled;
-    deviceInfo_.bindlessSampledImagesSupported = bindlessSampledImagesEnabled;
+    deviceOwner_.info.descriptorIndexing = descriptorIndexingEnabled;
+    deviceOwner_.info.bindlessSampledImagesSupported = bindlessSampledImagesEnabled;
     std::vector<const char*> enabledExtensions(kDeviceExtensions.begin(), kDeviceExtensions.end());
-    if (deviceExtensionAvailable(physicalDevice_, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
+    if (deviceExtensionAvailable(deviceOwner_.physicalDevice, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
         enabledExtensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
-        memoryBudgetEnabled_ = true;
-        deviceInfo_.memoryBudget = true;
+        deviceOwner_.memoryBudgetEnabled = true;
+        deviceOwner_.info.memoryBudget = true;
     }
 
     VkDeviceCreateInfo createInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
@@ -432,38 +463,38 @@ void VulkanRenderer::Impl::createLogicalDevice() {
     createInfo.ppEnabledExtensionNames = enabledExtensions.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
 
-    checkVk(vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_), "vkCreateDevice");
-    vkGetDeviceQueue(device_, queueFamilies_.graphics.value(), 0, &graphicsQueue_);
-    vkGetDeviceQueue(device_, queueFamilies_.present.value(), 0, &presentQueue_);
-    vkGetDeviceQueue(device_, queueFamilies_.transfer.value(), 0, &transferQueue_);
-    deviceInfo_.transferUploadSync = transferQueue_ != graphicsQueue_ ? TransferUploadSyncMode::QueueSemaphore : TransferUploadSyncMode::SameQueueBarrier;
+    checkVk(vkCreateDevice(deviceOwner_.physicalDevice, &createInfo, nullptr, &deviceOwner_.device), "vkCreateDevice");
+    vkGetDeviceQueue(deviceOwner_.device, deviceOwner_.queueFamilies.graphics.value(), 0, &deviceOwner_.graphicsQueue);
+    vkGetDeviceQueue(deviceOwner_.device, deviceOwner_.queueFamilies.present.value(), 0, &deviceOwner_.presentQueue);
+    vkGetDeviceQueue(deviceOwner_.device, deviceOwner_.queueFamilies.transfer.value(), 0, &deviceOwner_.transferQueue);
+    deviceOwner_.info.transferUploadSync = deviceOwner_.transferQueue != deviceOwner_.graphicsQueue ? TransferUploadSyncMode::QueueSemaphore : TransferUploadSyncMode::SameQueueBarrier;
 }
 
 void VulkanRenderer::Impl::createAllocator() {
     VmaAllocatorCreateInfo allocatorInfo{};
-    allocatorInfo.physicalDevice = physicalDevice_;
-    allocatorInfo.device = device_;
-    allocatorInfo.instance = instance_;
+    allocatorInfo.physicalDevice = deviceOwner_.physicalDevice;
+    allocatorInfo.device = deviceOwner_.device;
+    allocatorInfo.instance = deviceOwner_.instance;
     allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
-    if (memoryBudgetEnabled_) {
+    if (deviceOwner_.memoryBudgetEnabled) {
         allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
     }
 
-    checkVk(vmaCreateAllocator(&allocatorInfo, &allocator_), "vmaCreateAllocator");
+    checkVk(vmaCreateAllocator(&allocatorInfo, &deviceOwner_.allocator), "vmaCreateAllocator");
 }
 
 void VulkanRenderer::Impl::createCommandPools() {
     VkCommandPoolCreateInfo graphicsInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     graphicsInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    graphicsInfo.queueFamilyIndex = queueFamilies_.graphics.value();
-    checkVk(vkCreateCommandPool(device_, &graphicsInfo, nullptr, &graphicsCommandPool_), "vkCreateCommandPool graphics");
-    setObjectName(VK_OBJECT_TYPE_COMMAND_POOL, handleToUint64(graphicsCommandPool_), "Graphics Command Pool");
+    graphicsInfo.queueFamilyIndex = deviceOwner_.queueFamilies.graphics.value();
+    checkVk(vkCreateCommandPool(deviceOwner_.device, &graphicsInfo, nullptr, &frameOwner_.graphicsCommandPool), "vkCreateCommandPool graphics");
+    setObjectName(VK_OBJECT_TYPE_COMMAND_POOL, handleToUint64(frameOwner_.graphicsCommandPool), "Graphics Command Pool");
 
     VkCommandPoolCreateInfo transferInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     transferInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    transferInfo.queueFamilyIndex = queueFamilies_.transfer.value();
-    checkVk(vkCreateCommandPool(device_, &transferInfo, nullptr, &transferCommandPool_), "vkCreateCommandPool transfer");
-    setObjectName(VK_OBJECT_TYPE_COMMAND_POOL, handleToUint64(transferCommandPool_), "Transfer Command Pool");
+    transferInfo.queueFamilyIndex = deviceOwner_.queueFamilies.transfer.value();
+    checkVk(vkCreateCommandPool(deviceOwner_.device, &transferInfo, nullptr, &frameOwner_.transferCommandPool), "vkCreateCommandPool transfer");
+    setObjectName(VK_OBJECT_TYPE_COMMAND_POOL, handleToUint64(frameOwner_.transferCommandPool), "Transfer Command Pool");
 }
 
 } // namespace ve

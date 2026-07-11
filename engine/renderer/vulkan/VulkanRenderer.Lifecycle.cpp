@@ -4,8 +4,10 @@
 
 namespace ve {
 
-VulkanRenderer::Impl::Impl(Window& window, EngineConfig config)
+VulkanRenderer::Impl::Impl(Window& window, EngineConfig config,
+                           const ReferenceAssetBundle& referenceAssets)
     : window_(window), config_(std::move(config)) {
+    resourceOwner_.referenceAssets = &referenceAssets;
     if (!isValidExposure(config_.exposure)) {
         throw std::runtime_error("Renderer exposure must be positive and finite");
     }
@@ -18,35 +20,34 @@ VulkanRenderer::Impl::Impl(Window& window, EngineConfig config)
     createAllocator();
     loadDebugUtils();
     createCommandPools();
-    pendingUploads_.reserve(8);
-    retiredPipelineSets_.reserve(2);
+    frameOwner_.pendingUploads.reserve(8);
+    pipelineOwner_.retiredSets.reserve(2);
     createSwapchain();
     createImageViews();
-    createDepthResources();
-    createHdrResources();
+    createFrameGraph(false);
+    realizeFrameGraphResources();
     createTextureResources();
     createSampler();
     createDescriptorLayouts();
     createPipelineCache();
     createPipelines();
-    createFrameResources();
     createMeshes();
+    createFrameResources();
     createTonemapDescriptorSet();
     createTimestampQueries();
-    createFrameGraph();
     if (config_.debugOverlay) {
         createImGui();
     }
     logger()->info("Renderer enabled: dynamicRendering {} sync2 {} timestamps {} validation {} debugMarkers {} memoryBudget {} indirectSceneDraws {} imguiOverlay {} transferUploadSync {}; supported: descriptorIndexing {} bindlessSampledImages {} multiDrawIndirect {} drawIndirectFirstInstance {} samplerAnisotropy {} maxAnisotropy {:.1f} maxDrawIndirectCount {}",
-                   capabilityName(deviceInfo_.dynamicRendering), capabilityName(deviceInfo_.synchronization2),
-                   capabilityName(deviceInfo_.timestampQueries), capabilityName(deviceInfo_.validationEnabled),
-                   capabilityName(deviceInfo_.debugMarkers), capabilityName(deviceInfo_.memoryBudget),
-                   capabilityName(deviceInfo_.indirectSceneDraws), capabilityName(imguiInitialized_),
-                   transferUploadSyncName(deviceInfo_.transferUploadSync), capabilityName(deviceInfo_.descriptorIndexing),
-                   capabilityName(deviceInfo_.bindlessSampledImagesSupported), capabilityName(deviceInfo_.multiDrawIndirect),
-                   capabilityName(deviceInfo_.drawIndirectFirstInstance), capabilityName(deviceInfo_.samplerAnisotropy),
-                   deviceInfo_.maxSamplerAnisotropy, deviceInfo_.maxDrawIndirectCount);
-    const GpuResourceRegistry::Stats resourceStats = resourceRegistry_.stats();
+                   capabilityName(deviceOwner_.info.dynamicRendering), capabilityName(deviceOwner_.info.synchronization2),
+                   capabilityName(deviceOwner_.info.timestampQueries), capabilityName(deviceOwner_.info.validationEnabled),
+                   capabilityName(deviceOwner_.info.debugMarkers), capabilityName(deviceOwner_.info.memoryBudget),
+                   capabilityName(deviceOwner_.info.indirectSceneDraws), capabilityName(imguiOwner_.initialized),
+                   transferUploadSyncName(deviceOwner_.info.transferUploadSync), capabilityName(deviceOwner_.info.descriptorIndexing),
+                   capabilityName(deviceOwner_.info.bindlessSampledImagesSupported), capabilityName(deviceOwner_.info.multiDrawIndirect),
+                   capabilityName(deviceOwner_.info.drawIndirectFirstInstance), capabilityName(deviceOwner_.info.samplerAnisotropy),
+                   deviceOwner_.info.maxSamplerAnisotropy, deviceOwner_.info.maxDrawIndirectCount);
+    const GpuResourceRegistry::Stats resourceStats = resourceOwner_.registry.stats();
     logger()->info("Tracked GPU resources: {} live ({} buffers, {} images, {} imported), {:.2f} MiB estimated (buffers {:.2f}, owned images {:.2f}, imported images {:.2f})",
                    resourceStats.liveResources, resourceStats.buffers, resourceStats.images,
                    resourceStats.importedImages, bytesToMiB(resourceStats.bytes), bytesToMiB(resourceStats.bufferBytes),
@@ -62,57 +63,58 @@ VulkanRenderer::Impl::~Impl() {
 }
 
 void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noexcept {
-    if (device_ != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(device_);
+    if (deviceOwner_.device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(deviceOwner_.device);
     }
 
     shutdownImGui();
 
-    for (PendingUploadBatch& upload : pendingUploads_) {
+    for (PendingUploadBatch& upload : frameOwner_.pendingUploads) {
         destroyPendingUpload(upload);
     }
-    pendingUploads_.clear();
+    frameOwner_.pendingUploads.clear();
 
-    if (timestampQueryPool_ != VK_NULL_HANDLE) {
-        vkDestroyQueryPool(device_, timestampQueryPool_, nullptr);
-        timestampQueryPool_ = VK_NULL_HANDLE;
+    if (frameOwner_.timestampQueryPool != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(deviceOwner_.device, frameOwner_.timestampQueryPool, nullptr);
+        frameOwner_.timestampQueryPool = VK_NULL_HANDLE;
     }
 
-    destroyBuffer(screenshotReadback_);
-    destroyBuffer(sceneIndexBuffer_);
-    destroyBuffer(sceneVertexBuffer_);
-    destroyImage(groundAlbedoTexture_);
-    destroyImage(groundNormalTexture_);
-    destroyImage(groundOrmTexture_);
+    destroyBuffer(readback_.buffer());
+    destroyBuffer(resourceOwner_.sceneIndexBuffer);
+    destroyBuffer(resourceOwner_.sceneVertexBuffer);
+    for (ImageResource& texture : resourceOwner_.materialTextures) {
+        destroyImage(texture);
+    }
+    resourceOwner_.materialTextures.clear();
 
-    for (FrameResources& frame : frames_) {
+    for (FrameResources& frame : frameOwner_.frames) {
         destroyFrameUploadWaitSemaphores(frame);
         destroyBuffer(frame.sceneUniforms);
         destroyBuffer(frame.instanceData);
         if (frame.imageAvailable != VK_NULL_HANDLE) {
-            vkDestroySemaphore(device_, frame.imageAvailable, nullptr);
+            vkDestroySemaphore(deviceOwner_.device, frame.imageAvailable, nullptr);
             frame.imageAvailable = VK_NULL_HANDLE;
         }
         if (frame.inFlight != VK_NULL_HANDLE) {
-            vkDestroyFence(device_, frame.inFlight, nullptr);
+            vkDestroyFence(deviceOwner_.device, frame.inFlight, nullptr);
             frame.inFlight = VK_NULL_HANDLE;
         }
         destroyBuffer(frame.indirectCommands);
         if (frame.commandPool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(device_, frame.commandPool, nullptr);
+            vkDestroyCommandPool(deviceOwner_.device, frame.commandPool, nullptr);
             frame.commandPool = VK_NULL_HANDLE;
         }
     }
 
     cleanupSwapchain();
-    for (RetiredPipelineSet& retired : retiredPipelineSets_) {
+    for (RetiredPipelineSet& retired : pipelineOwner_.retiredSets) {
         destroyPipelineSet(retired.pipelines);
     }
-    retiredPipelineSets_.clear();
+    pipelineOwner_.retiredSets.clear();
 
     PipelineSet activePipelines = detachActivePipelineSet();
     destroyPipelineSet(activePipelines);
-    if (pipelineCache_ != VK_NULL_HANDLE) {
+    if (pipelineOwner_.cache != VK_NULL_HANDLE) {
         if (persistPipelineCache) {
             try {
                 savePipelineCache();
@@ -128,76 +130,83 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
                 }
             }
         }
-        vkDestroyPipelineCache(device_, pipelineCache_, nullptr);
-        pipelineCache_ = VK_NULL_HANDLE;
+        vkDestroyPipelineCache(deviceOwner_.device, pipelineOwner_.cache, nullptr);
+        pipelineOwner_.cache = VK_NULL_HANDLE;
     }
-    if (descriptorPool_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
-        descriptorPool_ = VK_NULL_HANDLE;
+    if (resourceOwner_.descriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(deviceOwner_.device, resourceOwner_.descriptorPool, nullptr);
+        resourceOwner_.descriptorPool = VK_NULL_HANDLE;
     }
-    if (tonemapSetLayout_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device_, tonemapSetLayout_, nullptr);
-        tonemapSetLayout_ = VK_NULL_HANDLE;
+    if (resourceOwner_.tonemapSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(deviceOwner_.device, resourceOwner_.tonemapSetLayout, nullptr);
+        resourceOwner_.tonemapSetLayout = VK_NULL_HANDLE;
     }
-    if (sceneSetLayout_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device_, sceneSetLayout_, nullptr);
-        sceneSetLayout_ = VK_NULL_HANDLE;
+    if (resourceOwner_.sceneSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(deviceOwner_.device, resourceOwner_.sceneSetLayout, nullptr);
+        resourceOwner_.sceneSetLayout = VK_NULL_HANDLE;
     }
-    if (linearSampler_ != VK_NULL_HANDLE) {
-        vkDestroySampler(device_, linearSampler_, nullptr);
-        linearSampler_ = VK_NULL_HANDLE;
+    if (resourceOwner_.linearSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device, resourceOwner_.linearSampler, nullptr);
+        resourceOwner_.linearSampler = VK_NULL_HANDLE;
     }
-    if (textureSampler_ != VK_NULL_HANDLE) {
-        vkDestroySampler(device_, textureSampler_, nullptr);
-        textureSampler_ = VK_NULL_HANDLE;
+    if (resourceOwner_.textureSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device, resourceOwner_.textureSampler, nullptr);
+        resourceOwner_.textureSampler = VK_NULL_HANDLE;
     }
-    if (normalTextureSampler_ != VK_NULL_HANDLE) {
-        vkDestroySampler(device_, normalTextureSampler_, nullptr);
-        normalTextureSampler_ = VK_NULL_HANDLE;
+    if (resourceOwner_.normalTextureSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device, resourceOwner_.normalTextureSampler, nullptr);
+        resourceOwner_.normalTextureSampler = VK_NULL_HANDLE;
     }
-    if (ormTextureSampler_ != VK_NULL_HANDLE) {
-        vkDestroySampler(device_, ormTextureSampler_, nullptr);
-        ormTextureSampler_ = VK_NULL_HANDLE;
+    if (resourceOwner_.ormTextureSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device, resourceOwner_.ormTextureSampler, nullptr);
+        resourceOwner_.ormTextureSampler = VK_NULL_HANDLE;
     }
-    if (graphicsCommandPool_ != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(device_, graphicsCommandPool_, nullptr);
-        graphicsCommandPool_ = VK_NULL_HANDLE;
+    if (frameOwner_.graphicsCommandPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(deviceOwner_.device, frameOwner_.graphicsCommandPool, nullptr);
+        frameOwner_.graphicsCommandPool = VK_NULL_HANDLE;
     }
-    if (transferCommandPool_ != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(device_, transferCommandPool_, nullptr);
-        transferCommandPool_ = VK_NULL_HANDLE;
+    if (frameOwner_.transferCommandPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(deviceOwner_.device, frameOwner_.transferCommandPool, nullptr);
+        frameOwner_.transferCommandPool = VK_NULL_HANDLE;
     }
-    if (allocator_ != VK_NULL_HANDLE) {
-        vmaDestroyAllocator(allocator_);
-        allocator_ = VK_NULL_HANDLE;
+    if (deviceOwner_.allocator != VK_NULL_HANDLE) {
+        vmaDestroyAllocator(deviceOwner_.allocator);
+        deviceOwner_.allocator = VK_NULL_HANDLE;
     }
-    if (device_ != VK_NULL_HANDLE) {
-        vkDestroyDevice(device_, nullptr);
-        device_ = VK_NULL_HANDLE;
+    if (deviceOwner_.device != VK_NULL_HANDLE) {
+        vkDestroyDevice(deviceOwner_.device, nullptr);
+        deviceOwner_.device = VK_NULL_HANDLE;
     }
-    if (surface_ != VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
-        surface_ = VK_NULL_HANDLE;
+    if (swapchainOwner_.surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(deviceOwner_.instance, swapchainOwner_.surface, nullptr);
+        swapchainOwner_.surface = VK_NULL_HANDLE;
     }
-    if (debugMessenger_ != VK_NULL_HANDLE) {
-        const auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
+    if (deviceOwner_.debugMessenger != VK_NULL_HANDLE) {
+        const auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(deviceOwner_.instance, "vkDestroyDebugUtilsMessengerEXT"));
         if (destroy) {
-            destroy(instance_, debugMessenger_, nullptr);
+            destroy(deviceOwner_.instance, deviceOwner_.debugMessenger, nullptr);
         }
-        debugMessenger_ = VK_NULL_HANDLE;
+        deviceOwner_.debugMessenger = VK_NULL_HANDLE;
     }
-    if (instance_ != VK_NULL_HANDLE) {
-        vkDestroyInstance(instance_, nullptr);
-        instance_ = VK_NULL_HANDLE;
+    if (deviceOwner_.instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(deviceOwner_.instance, nullptr);
+        deviceOwner_.instance = VK_NULL_HANDLE;
     }
 }
 
 void VulkanRenderer::Impl::waitIdle() {
-    if (device_ != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(device_);
-        if (timestampsEnabled_) {
-            const std::uint32_t lastFrameIndex = static_cast<std::uint32_t>((frameIndex_ + kMaxFramesInFlight - 1U) % kMaxFramesInFlight);
+    if (deviceOwner_.device != VK_NULL_HANDLE) {
+        checkVk(vkDeviceWaitIdle(deviceOwner_.device), "vkDeviceWaitIdle");
+        if (frameOwner_.timestampsEnabled) {
+            const std::uint32_t lastFrameIndex = static_cast<std::uint32_t>((frameOwner_.currentFrame + kMaxFramesInFlight - 1U) % kMaxFramesInFlight);
             readBackGpuTimestamp(lastFrameIndex);
+        }
+        const std::uint64_t validationErrorCount =
+            deviceOwner_.validationMessages.errorCount.load(std::memory_order_relaxed);
+        if (config_.requireValidation && validationErrorCount > 0U) {
+            throw std::runtime_error(
+                "Strict Vulkan validation observed " + std::to_string(validationErrorCount) +
+                " error message(s); inspect the Vulkan validation log above");
         }
     }
 }

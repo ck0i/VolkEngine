@@ -4,11 +4,11 @@ namespace ve {
 
 void VulkanRenderer::Impl::createImGui() {
 #if VOLKENGINE_ENABLE_IMGUI
-    if (imguiInitialized_) {
+    if (imguiOwner_.initialized) {
         return;
     }
     if (!config_.debugOverlay) {
-        imguiInitialized_ = false;
+        imguiOwner_.initialized = false;
         return;
     }
 
@@ -43,22 +43,22 @@ void VulkanRenderer::Impl::createImGui() {
 
         ImGui_ImplVulkan_InitInfo initInfo{};
         initInfo.ApiVersion = VK_API_VERSION_1_3;
-        initInfo.Instance = instance_;
-        initInfo.PhysicalDevice = physicalDevice_;
-        initInfo.Device = device_;
-        initInfo.QueueFamily = queueFamilies_.graphics.value();
-        initInfo.Queue = graphicsQueue_;
+        initInfo.Instance = deviceOwner_.instance;
+        initInfo.PhysicalDevice = deviceOwner_.physicalDevice;
+        initInfo.Device = deviceOwner_.device;
+        initInfo.QueueFamily = deviceOwner_.queueFamilies.graphics.value();
+        initInfo.Queue = deviceOwner_.graphicsQueue;
         initInfo.DescriptorPoolSize = 32;
-        initInfo.MinImageCount = swapchainMinImageCount_;
-        initInfo.ImageCount = static_cast<std::uint32_t>(swapchainImages_.size());
-        initInfo.PipelineCache = pipelineCache_;
+        initInfo.MinImageCount = swapchainOwner_.minimumImageCount;
+        initInfo.ImageCount = static_cast<std::uint32_t>(swapchainOwner_.images.size());
+        initInfo.PipelineCache = pipelineOwner_.cache;
         initInfo.UseDynamicRendering = true;
         initInfo.PipelineInfoMain.RenderPass = VK_NULL_HANDLE;
         initInfo.PipelineInfoMain.Subpass = 0;
         initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
         initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainFormat_;
+        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainOwner_.format;
         initInfo.CheckVkResultFn = [](VkResult result) { checkVk(result, "Dear ImGui Vulkan backend"); };
         initInfo.MinAllocationSize = 1024U * 1024U;
 
@@ -67,12 +67,12 @@ void VulkanRenderer::Impl::createImGui() {
             throw std::runtime_error("Failed to initialize Dear ImGui Vulkan backend");
         }
 
-        imguiInitialized_ = true;
-        imguiDiagnosticsValid_ = false;
-        imguiDiagnosticsRefreshSeconds_ = 0.0;
-        imguiMinImageCount_ = initInfo.MinImageCount;
-        imguiImageCount_ = initInfo.ImageCount;
-        imguiSwapchainFormat_ = swapchainFormat_;
+        imguiOwner_.initialized = true;
+        imguiOwner_.diagnosticsValid = false;
+        imguiOwner_.diagnosticsRefreshSeconds = 0.0;
+        imguiOwner_.minimumImageCount = initInfo.MinImageCount;
+        imguiOwner_.imageCount = initInfo.ImageCount;
+        imguiOwner_.swapchainFormat = swapchainOwner_.format;
         contextCreated = false;
         glfwBackendInitialized = false;
         vulkanBackendInitAttempted = false;
@@ -83,30 +83,30 @@ void VulkanRenderer::Impl::createImGui() {
     }
 
 #else
-    imguiInitialized_ = false;
+    imguiOwner_.initialized = false;
 #endif
 }
 
 void VulkanRenderer::Impl::shutdownImGui() {
 #if VOLKENGINE_ENABLE_IMGUI
-    if (!imguiInitialized_) {
+    if (!imguiOwner_.initialized) {
         return;
     }
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    imguiInitialized_ = false;
-    imguiMinImageCount_ = 0;
-    imguiImageCount_ = 0;
-    imguiSwapchainFormat_ = VK_FORMAT_UNDEFINED;
-    imguiDiagnosticsValid_ = false;
-    imguiDiagnosticsRefreshSeconds_ = 0.0;
+    imguiOwner_.initialized = false;
+    imguiOwner_.minimumImageCount = 0;
+    imguiOwner_.imageCount = 0;
+    imguiOwner_.swapchainFormat = VK_FORMAT_UNDEFINED;
+    imguiOwner_.diagnosticsValid = false;
+    imguiOwner_.diagnosticsRefreshSeconds = 0.0;
 #endif
 }
 
 void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
 #if VOLKENGINE_ENABLE_IMGUI
-    if (!config_.debugOverlay || !imguiInitialized_) {
+    if (!config_.debugOverlay || !imguiOwner_.initialized) {
         return;
     }
 
@@ -122,29 +122,29 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
                                        ImGuiWindowFlags_NoInputs;
     ImGui::SetNextWindowPos({12.0f, 12.0f}, ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.72f);
-    imguiDiagnosticsRefreshSeconds_ -= frameDeltaMs * 0.001;
-    if (!imguiDiagnosticsValid_ || imguiDiagnosticsRefreshSeconds_ <= 0.0) {
-        imguiResourceStats_ = resourceRegistry_.stats();
-        imguiMemoryUsageBytes_ = 0;
-        imguiMemoryBudgetBytes_ = 0;
-        if (memoryBudgetEnabled_) {
+    imguiOwner_.diagnosticsRefreshSeconds -= frameDeltaMs * 0.001;
+    if (!imguiOwner_.diagnosticsValid || imguiOwner_.diagnosticsRefreshSeconds <= 0.0) {
+        imguiOwner_.resourceStats = resourceOwner_.registry.stats();
+        imguiOwner_.memoryUsageBytes = 0;
+        imguiOwner_.memoryBudgetBytes = 0;
+        if (deviceOwner_.memoryBudgetEnabled) {
             std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> budgets{};
-            vmaGetHeapBudgets(allocator_, budgets.data());
-            for (std::uint32_t heapIndex = 0; heapIndex < physicalDeviceMemoryProperties_.memoryHeapCount; ++heapIndex) {
-                imguiMemoryUsageBytes_ += budgets[heapIndex].usage;
-                imguiMemoryBudgetBytes_ += budgets[heapIndex].budget;
+            vmaGetHeapBudgets(deviceOwner_.allocator, budgets.data());
+            for (std::uint32_t heapIndex = 0; heapIndex < deviceOwner_.physicalDeviceMemoryProperties.memoryHeapCount; ++heapIndex) {
+                imguiOwner_.memoryUsageBytes += budgets[heapIndex].usage;
+                imguiOwner_.memoryBudgetBytes += budgets[heapIndex].budget;
             }
         }
-        imguiDiagnosticsRefreshSeconds_ = kImGuiDiagnosticsRefreshIntervalSeconds;
-        imguiDiagnosticsValid_ = true;
+        imguiOwner_.diagnosticsRefreshSeconds = kImGuiDiagnosticsRefreshIntervalSeconds;
+        imguiOwner_.diagnosticsValid = true;
     }
-    const GpuResourceRegistry::Stats& resourceStats = imguiResourceStats_;
+    const GpuResourceRegistry::Stats& resourceStats = imguiOwner_.resourceStats;
     if (ImGui::Begin("VolkEngine renderer stats", nullptr, flags)) {
         ImGui::TextUnformatted("VolkEngine Vulkan renderer");
-        ImGui::Text("GPU: %s (%s)", deviceInfo_.adapterName.c_str(), gpuClassName(deviceInfo_.discreteGpu));
+        ImGui::Text("GPU: %s (%s)", deviceOwner_.info.adapterName.c_str(), gpuClassName(deviceOwner_.info.discreteGpu));
         ImGui::Text("Vulkan: %u.%u.%u  max2D: %u",
-                    deviceInfo_.apiVersionMajor, deviceInfo_.apiVersionMinor,
-                    deviceInfo_.apiVersionPatch, deviceInfo_.maxImageDimension2D);
+                    deviceOwner_.info.apiVersionMajor, deviceOwner_.info.apiVersionMinor,
+                    deviceOwner_.info.apiVersionPatch, deviceOwner_.info.maxImageDimension2D);
         ImGui::Separator();
         ImGui::Text("Frame delta: %.3f ms", frameDeltaMs);
         ImGui::Text("CPU render-submit: %.3f ms", stats_.cpuFrameMs);
@@ -169,25 +169,33 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
                     stats_.sceneItemCount, stats_.visibleItemCount, stats_.meshBatchCount, stats_.scenePassCount,
                     stats_.indirectSceneDraws ? "multi-draw indirect" : "direct batched");
         ImGui::Text("Upload sync: %s  max indirect draws: %u",
-                    transferUploadSyncName(deviceInfo_.transferUploadSync), deviceInfo_.maxDrawIndirectCount);
+                    transferUploadSyncName(deviceOwner_.info.transferUploadSync), deviceOwner_.info.maxDrawIndirectCount);
         ImGui::Text("Instance storage: %u capacity (%.2f MiB)",
                     stats_.sceneInstanceCapacity, stats_.sceneInstanceBufferMiB);
         ImGui::Text("Swapchain: %ux%u  images: %u/%u  present: %s",
-                    swapchainExtent_.width, swapchainExtent_.height, imguiImageCount_, imguiMinImageCount_, presentModeName(presentMode_).data());
-        ImGui::Text("Validation: %s", validationEnabled_ ? "enabled" : (config_.validation ? "requested unavailable" : "off"));
-        if (memoryBudgetEnabled_) {
+                    swapchainOwner_.extent.width, swapchainOwner_.extent.height, imguiOwner_.imageCount, imguiOwner_.minimumImageCount, presentModeName(swapchainOwner_.presentMode).data());
+        ImGui::Text("Validation: %s", deviceOwner_.validationEnabled ? "enabled" : (config_.validation ? "requested unavailable" : "off"));
+        if (deviceOwner_.memoryBudgetEnabled) {
             ImGui::Text("VMA memory budget: %.1f / %.1f MiB",
-                        bytesToMiB(imguiMemoryUsageBytes_),
-                        bytesToMiB(imguiMemoryBudgetBytes_));
+                        bytesToMiB(imguiOwner_.memoryUsageBytes),
+                        bytesToMiB(imguiOwner_.memoryBudgetBytes));
         } else {
             ImGui::TextUnformatted("VMA memory budget: unavailable");
         }
         ImGui::Text("Descriptor indexing: %s  bindless sampled-image support: %s",
-                    deviceInfo_.descriptorIndexing ? "supported" : "unavailable",
-                    deviceInfo_.bindlessSampledImagesSupported ? "supported" : "unavailable");
+                    deviceOwner_.info.descriptorIndexing ? "supported" : "unavailable",
+                    deviceOwner_.info.bindlessSampledImagesSupported ? "supported" : "unavailable");
         ImGui::Text("Texture sampling: anisotropy %s (%.1fx)",
-                    deviceInfo_.samplerAnisotropy ? "enabled" : "off",
-                    deviceInfo_.maxSamplerAnisotropy);
+                    deviceOwner_.info.samplerAnisotropy ? "enabled" : "off",
+                    deviceOwner_.info.maxSamplerAnisotropy);
+        ImGui::Text("Frame graph: %u passes, %u logical resources, %u barriers, %u physical allocations",
+                    stats_.graphPassCount, stats_.graphResourceCount, stats_.graphBarrierCount,
+                    stats_.graphPhysicalAllocationCount);
+        ImGui::Text("Frame graph memory: %.2f / %.2f MiB requested/allocated; compile %.3f ms, generation %llu (%s)",
+                    bytesToMiB(stats_.graphTransientRequestedBytes),
+                    bytesToMiB(stats_.graphTransientAllocatedBytes), stats_.cpuGraphCompileMs,
+                    static_cast<unsigned long long>(stats_.graphRecompileCount),
+                    stats_.graphLastCompileWasResize ? "resize" : "startup");
         ImGui::Text("GPU resources: %u live (%u buffers, %u images, %u imported), %.2f MiB",
                     resourceStats.liveResources, resourceStats.buffers, resourceStats.images,
                     resourceStats.importedImages, bytesToMiB(resourceStats.bytes));
@@ -204,7 +212,7 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
 
 void VulkanRenderer::Impl::renderImGui(const VkCommandBuffer commandBuffer) const {
 #if VOLKENGINE_ENABLE_IMGUI
-    if (!config_.debugOverlay || !imguiInitialized_) {
+    if (!config_.debugOverlay || !imguiOwner_.initialized) {
         return;
     }
     ImDrawData* drawData = ImGui::GetDrawData();

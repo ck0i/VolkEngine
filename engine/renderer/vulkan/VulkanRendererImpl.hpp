@@ -1,6 +1,9 @@
 #pragma once
 
+#include "assets/ReferenceAssetPipeline.hpp"
 #include "renderer/vulkan/VulkanRenderer.hpp"
+#include "renderer/vulkan/VulkanReadbackState.hpp"
+#include "renderer/vulkan/VulkanFrameGraphSync.hpp"
 #include "renderer/Geometry.hpp"
 #include "renderer/FrameGraph.hpp"
 #include "renderer/FrameGraphTopology.hpp"
@@ -22,6 +25,8 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <atomic>
+#include <exception>
 #include <limits>
 #include <filesystem>
 #include <mutex>
@@ -153,40 +158,31 @@ enum class SceneMeshBatchId : std::uint8_t {
     SphereHigh,
     SphereMedium,
     SphereLow,
-    GroundPlane,
-    ImportedModel
+    GroundPlane
 };
 
-inline constexpr std::array<SceneMeshBatchId, 6> kSceneMeshBatchOrder{
+inline constexpr std::array<SceneMeshBatchId, 5> kBaseSceneMeshBatchOrder{
     SceneMeshBatchId::Cube,
     SceneMeshBatchId::SphereHigh,
     SceneMeshBatchId::SphereMedium,
     SceneMeshBatchId::SphereLow,
     SceneMeshBatchId::GroundPlane,
-    SceneMeshBatchId::ImportedModel,
 };
 
 inline std::size_t sceneMeshBatchIndex(const SceneMeshBatchId batch) {
-    for (std::size_t index = 0; index < kSceneMeshBatchOrder.size(); ++index) {
-        if (kSceneMeshBatchOrder[index] == batch) {
+    for (std::size_t index = 0; index < kBaseSceneMeshBatchOrder.size(); ++index) {
+        if (kBaseSceneMeshBatchOrder[index] == batch) {
             return index;
         }
     }
     throw std::runtime_error("Unknown scene mesh batch id");
 }
 
-inline std::size_t sceneMeshBatchIndex(const SceneMeshId mesh) {
-    switch (mesh) {
-    case SceneMeshId::Cube:
-        return sceneMeshBatchIndex(SceneMeshBatchId::Cube);
-    case SceneMeshId::Sphere:
-        return sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh);
-    case SceneMeshId::GroundPlane:
-        return sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane);
-    case SceneMeshId::ImportedModel:
-        return sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel);
-    }
-    throw std::runtime_error("Unknown scene mesh id");
+inline std::size_t baseSceneMeshBatchIndex(const MeshAssetHandle mesh) {
+    if (mesh == builtin_assets::kCube) return sceneMeshBatchIndex(SceneMeshBatchId::Cube);
+    if (mesh == builtin_assets::kSphere) return sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh);
+    if (mesh == builtin_assets::kGroundPlane) return sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane);
+    throw std::runtime_error("Mesh is not a built-in scene mesh");
 }
 
 template <typename RetiredSet>
@@ -293,17 +289,32 @@ inline const char* depthPrepassModeName(const DepthPrepassMode mode) {
     return "unknown";
 }
 
+struct ValidationMessageState {
+    std::atomic<std::uint64_t> errorCount{0};
+    std::atomic<std::uint64_t> warningCount{0};
+};
+
+
 
 inline VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-                                             VkDebugUtilsMessageTypeFlagsEXT,
-                                             const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
-                                             void*) {
+                                                    VkDebugUtilsMessageTypeFlagsEXT,
+                                                    const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+                                                    void* userData) noexcept {
+    auto* state = static_cast<ValidationMessageState*>(userData);
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        logger()->error("Vulkan validation: {}", callbackData->pMessage);
+        if (state != nullptr) {
+            state->errorCount.fetch_add(1U, std::memory_order_relaxed);
+        }
+        try {
+            logger()->error("Vulkan validation: {}", callbackData != nullptr ? callbackData->pMessage : "missing callback data");
+        } catch (...) {}
     } else if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-        logger()->warn("Vulkan validation: {}", callbackData->pMessage);
-    } else {
-        logger()->debug("Vulkan validation: {}", callbackData->pMessage);
+        if (state != nullptr) {
+            state->warningCount.fetch_add(1U, std::memory_order_relaxed);
+        }
+        try {
+            logger()->warn("Vulkan validation: {}", callbackData != nullptr ? callbackData->pMessage : "missing callback data");
+        } catch (...) {}
     }
     return VK_FALSE;
 }
@@ -409,7 +420,7 @@ inline std::uint64_t imageByteEstimate(VkExtent2D extent, const VkFormat format,
 }
 
 
-inline VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo() {
+inline VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo(ValidationMessageState* state) noexcept {
     VkDebugUtilsMessengerCreateInfoEXT createInfo{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
     createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -417,6 +428,7 @@ inline VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo() {
                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = debugCallback;
+    createInfo.pUserData = state;
     return createInfo;
 }
 
@@ -466,7 +478,7 @@ using namespace vulkan_renderer_detail;
 
 class VulkanRenderer::Impl final {
 public:
-    Impl(Window& window, EngineConfig config);
+    Impl(Window& window, EngineConfig config, const ReferenceAssetBundle& referenceAssets);
     ~Impl();
 
     Impl(const Impl&) = delete;
@@ -474,16 +486,15 @@ public:
 
     void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
               double elapsedSeconds, double frameDeltaMs);
-    [[nodiscard]] MeshBounds meshBounds(SceneMeshId mesh) const;
+    [[nodiscard]] MeshBounds meshBounds(MeshAssetHandle mesh) const;
     [[nodiscard]] RenderStats stats() const { return stats_; }
-    [[nodiscard]] const RenderDeviceInfo& deviceInfo() const { return deviceInfo_; }
+    [[nodiscard]] const RenderDeviceInfo& deviceInfo() const { return deviceOwner_.info; }
     void requestScreenshot(std::filesystem::path path);
     void armAcquireRecoverySmoke() noexcept { acquireRecoverySmokeArmed_ = true; }
     void waitIdle();
 
 private:
     static constexpr std::size_t kMaxFramesInFlight = 2;
-    static constexpr std::size_t kSceneMeshBatchCount = kSceneMeshBatchOrder.size();
     static constexpr std::uint32_t kTimestampFrameStart = 0;
     static constexpr std::uint32_t kTimestampDepthEnd = 1;
     static constexpr std::uint32_t kTimestampHdrEnd = 2;
@@ -514,6 +525,7 @@ private:
         VkDeviceSize size = 0;
         void* mapped = nullptr;
         std::uint32_t resourceId = GpuResourceRegistry::kInvalidId;
+        VulkanBufferSyncState syncState{};
     };
     [[nodiscard]] static Buffer takeBuffer(Buffer& buffer) noexcept {
         Buffer taken = buffer;
@@ -521,16 +533,13 @@ private:
         return taken;
     }
 
-    struct ImageSyncState {
-        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE;
-        VkAccessFlags2 access = VK_ACCESS_2_NONE;
-    };
+    using ImageSyncState = VulkanImageSyncState;
 
     struct FrameImageSyncSnapshot {
         ImageSyncState depth{};
         ImageSyncState hdr{};
         ImageSyncState swapchain{};
+        VulkanBufferSyncState screenshotReadback{};
     };
 
     struct ImageResource {
@@ -541,6 +550,8 @@ private:
         VkExtent2D extent{};
         std::uint32_t mipLevels = 1;
         std::uint32_t resourceId = GpuResourceRegistry::kInvalidId;
+        VkDeviceSize allocationBytes = 0;
+        VkDeviceSize allocationAlignment = 1;
         ImageSyncState syncState{};
     };
     [[nodiscard]] static ImageResource takeImage(ImageResource& image) noexcept {
@@ -555,6 +566,11 @@ private:
         std::uint32_t firstIndex = 0;
         std::int32_t vertexOffset = 0;
     };
+    struct MeshBatch {
+        const GpuMesh* mesh = nullptr;
+        std::uint32_t firstInstance = 0;
+        std::uint32_t instanceCount = 0;
+    };
 
 
     struct MeshUpload {
@@ -564,7 +580,7 @@ private:
         VkDeviceSize indexStagingOffset = 0;
         VkDeviceSize vertexSize = 0;
         VkDeviceSize indexSize = 0;
-        std::array<GpuMesh, kSceneMeshBatchCount> meshes{};
+        std::vector<GpuMesh> meshes;
     };
 
     struct FrameResources {
@@ -593,6 +609,7 @@ private:
         FrameGraph::ResourceHandle depth;
         FrameGraph::ResourceHandle hdr;
         FrameGraph::ResourceHandle swapchain;
+        FrameGraph::ResourceHandle screenshotReadback;
     };
     struct FrameGraphPasses {
         FrameGraph::PassHandle depthPrepass;
@@ -603,7 +620,19 @@ private:
     struct FrameGraphVariant {
         FrameGraph graph;
         FrameGraphResources resources;
+        FrameGraph::ExecutionState executionState;
         FrameGraphPasses passes;
+    };
+    struct FrameGraphRecordContext {
+        Impl* renderer = nullptr;
+        FrameResources* frame = nullptr;
+        FrameGraphVariant* variant = nullptr;
+        const MeshBatch* meshBatches = nullptr;
+        const Buffer* screenshotReadback = nullptr;
+        std::exception_ptr failure;
+        std::uint32_t imageIndex = 0;
+        std::uint32_t sceneDrawCalls = 0;
+        bool useDepthPrepass = false;
     };
     struct alignas(16) SceneUniforms {
         Mat4 viewProjection;
@@ -664,10 +693,10 @@ private:
     void createCommandPools();
     void createSwapchain();
     void createImageViews();
-    void createDepthResources();
-    void createHdrResources();
+    void realizeFrameGraphResources();
     void createSampler();
     void createTextureResources();
+    [[nodiscard]] const ReferenceAssetBundle& referenceAssets();
     void createDescriptorLayouts();
     void createPipelineCache();
     void savePipelineCache() const;
@@ -685,7 +714,7 @@ private:
     void createMeshes();
     void createTonemapDescriptorSet();
     void createTimestampQueries();
-    void createFrameGraph();
+    void createFrameGraph(bool resizeRecompile);
     void createImGui();
     void shutdownImGui();
     void beginImGuiFrame(double frameDeltaMs);
@@ -698,7 +727,28 @@ private:
     void recreateSwapchain();
     [[nodiscard]] SceneVisibilityPlan planSceneVisibility(const Camera& camera, const Mat4& projection, const Mat4& viewProjection, const SceneRenderList& renderItems);
     [[nodiscard]] bool resolveDepthPrepassForFrame(const SceneVisibilityPlan& visibility);
-    void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback, const FrameGraphVariant& graphVariant);
+    [[nodiscard]] static bool createGraphResource(void* context, FrameGraph::ResourceHandle resource,
+                                                  const FrameGraph::ResourceDesc& desc,
+                                                  const FrameGraph::TransientAllocation& allocation) noexcept;
+    [[nodiscard]] static bool transitionGraphResource(void* context,
+                                                      const FrameGraph::BarrierIntent& intent) noexcept;
+    [[nodiscard]] static bool executeGraphPass(void* context, FrameGraph::PassHandle pass,
+                                               const FrameGraph::PassDesc& desc,
+                                               const FrameGraph::PassResources& resources) noexcept;
+    [[nodiscard]] static bool retireGraphResource(void* context, FrameGraph::ResourceHandle resource,
+                                                  const FrameGraph::ResourceDesc& desc,
+                                                  const FrameGraph::TransientAllocation& allocation) noexcept;
+    void recordSceneBatches(const FrameGraphRecordContext& context) const;
+    void recordDepthGraphPass(const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+                              const FrameGraph::PassResources& resources);
+    void recordHdrGraphPass(const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+                            const FrameGraph::PassResources& resources);
+    void recordTonemapGraphPass(const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+                                const FrameGraph::PassResources& resources);
+    void recordScreenshotGraphPass(const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+                                   const FrameGraph::PassResources& resources);
+    void applyGraphTransition(const FrameGraphRecordContext& context, const FrameGraph::BarrierIntent& intent);
+    void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback, FrameGraphVariant& graphVariant);
     void restoreFrameFenceAfterSubmitFailure(FrameResources& frame, std::size_t frameIndex, VkResult submitResult);
     void replaceFrameImageAvailableSemaphore(FrameResources& frame, std::size_t frameIndex);
     void recoverAcquiredFrame(FrameResources& frame, std::size_t frameIndex, std::uint32_t imageIndex,
@@ -710,7 +760,7 @@ private:
     void updateUniforms(FrameResources& frame, const Camera& camera, const Mat4& viewProjection, double elapsedSeconds);
     void readBackGpuTimestamp(std::uint32_t frameIndex);
     [[nodiscard]] bool screenshotFormatSupported() const;
-    void recordScreenshotCopy(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Buffer& readback, ImageSyncState destinationState);
+    void recordScreenshotCopy(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Buffer& readback);
     void writeScreenshotPpm(const Buffer& readback, VkExtent2D extent, VkFormat format, const std::filesystem::path& path) const;
 
     [[nodiscard]] bool validationLayerAvailable() const;
@@ -748,9 +798,10 @@ private:
     [[nodiscard]] bool formatSupportsLinearMipBlit(VkFormat format) const;
     void generateMipmaps(VkCommandBuffer commandBuffer, ImageResource& image) const;
     [[nodiscard]] VkCommandBuffer beginUploadCommands() const;
-    [[nodiscard]] MeshUpload stageMeshUpload(std::array<MeshData, kSceneMeshBatchCount>& meshes);
+    [[nodiscard]] MeshUpload stageMeshUpload(std::vector<MeshData>& meshes);
     void recordMeshUpload(VkCommandBuffer commandBuffer, const MeshUpload& upload) const;
-    [[nodiscard]] const GpuMesh& meshFor(SceneMeshId mesh) const;
+    [[nodiscard]] const GpuMesh& meshFor(MeshAssetHandle mesh) const;
+    [[nodiscard]] std::size_t meshBatchIndex(MeshAssetHandle mesh) const;
     class DebugLabelScope final {
     public:
         DebugLabelScope(const Impl& renderer, VkCommandBuffer commandBuffer, const char* name, const std::array<float, 4>& color) noexcept;
@@ -780,105 +831,130 @@ private:
 
     Window& window_;
     EngineConfig config_;
-    bool validationEnabled_ = false;
-    bool memoryBudgetEnabled_ = false;
-    bool debugUtilsEnabled_ = false;
-    bool multiDrawIndirectEnabled_ = false;
-    bool drawIndirectFirstInstanceEnabled_ = false;
+    struct DeviceOwner {
+        bool validationEnabled = false;
+        bool memoryBudgetEnabled = false;
+        bool debugUtilsEnabled = false;
+        vulkan_renderer_detail::ValidationMessageState validationMessages{};
+        bool multiDrawIndirectEnabled = false;
+        bool drawIndirectFirstInstanceEnabled = false;
+        VkInstance instance = VK_NULL_HANDLE;
+        VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+        VkDevice device = VK_NULL_HANDLE;
+        VkQueue graphicsQueue = VK_NULL_HANDLE;
+        VkQueue presentQueue = VK_NULL_HANDLE;
+        VkQueue transferQueue = VK_NULL_HANDLE;
+        QueueFamilies queueFamilies{};
+        VkPhysicalDeviceProperties physicalDeviceProperties{};
+        VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties{};
+        VmaAllocator allocator = VK_NULL_HANDLE;
+        RenderDeviceInfo info{};
+        PFN_vkSetDebugUtilsObjectNameEXT setDebugObjectName = nullptr;
+        PFN_vkCmdBeginDebugUtilsLabelEXT beginDebugLabel = nullptr;
+        PFN_vkCmdEndDebugUtilsLabelEXT endDebugLabel = nullptr;
+    };
+    DeviceOwner deviceOwner_;
+
     bool indirectSceneDrawsEnabled_ = false;
     bool acquireRecoverySmokeArmed_ = false;
     bool acquireRecoveryFailed_ = false;
-    mutable std::mutex screenshotRequestMutex_;
-    bool screenshotPending_ = false;
-    std::filesystem::path screenshotPath_;
-    bool swapchainTransferSrcSupported_ = false;
-    Buffer screenshotReadback_;
+    VulkanReadbackState<Buffer> readback_;
 
-    VkInstance instance_ = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
-    VkSurfaceKHR surface_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
-    VkQueue presentQueue_ = VK_NULL_HANDLE;
-    VkQueue transferQueue_ = VK_NULL_HANDLE;
-    QueueFamilies queueFamilies_{};
-    VkPhysicalDeviceProperties physicalDeviceProperties_{};
-    VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_{};
-    VmaAllocator allocator_ = VK_NULL_HANDLE;
+    struct SwapchainOwner {
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        VkSwapchainKHR handle = VK_NULL_HANDLE;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        VkExtent2D extent{};
+        VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        std::vector<VkImage> images;
+        std::vector<VkImageView> imageViews;
+        std::vector<ImageSyncState> imageStates;
+        std::vector<std::uint32_t> resourceIds;
+        std::vector<VkSemaphore> renderFinishedSemaphores;
+        std::uint32_t minimumImageCount = 0;
+    };
+    SwapchainOwner swapchainOwner_;
 
-    VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
-    VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;
-    VkExtent2D swapchainExtent_{};
-    VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
-    std::vector<VkImage> swapchainImages_;
-    std::vector<VkImageView> swapchainImageViews_;
-    std::vector<ImageSyncState> swapchainStates_;
-    std::vector<std::uint32_t> swapchainResourceIds_;
-    std::vector<VkSemaphore> swapchainRenderFinishedSemaphores_;
-    std::uint32_t swapchainMinImageCount_ = 0;
 
-    VkCommandPool graphicsCommandPool_ = VK_NULL_HANDLE;
-    VkCommandPool transferCommandPool_ = VK_NULL_HANDLE;
-    std::array<FrameResources, kMaxFramesInFlight> frames_{};
-    std::vector<PendingUploadBatch> pendingUploads_;
-    std::vector<VkSemaphore> pendingUploadWaitSemaphores_;
-    std::vector<VkSemaphore> submitWaitSemaphores_;
-    std::vector<VkPipelineStageFlags> submitWaitStages_;
-    std::size_t frameIndex_ = 0;
 
-    ImageResource depth_;
-    ImageResource hdr_;
-    ImageResource groundAlbedoTexture_;
-    ImageResource groundNormalTexture_;
-    ImageResource groundOrmTexture_;
-    VkSampler linearSampler_ = VK_NULL_HANDLE;
-    VkSampler textureSampler_ = VK_NULL_HANDLE;
-    VkSampler normalTextureSampler_ = VK_NULL_HANDLE;
-    VkSampler ormTextureSampler_ = VK_NULL_HANDLE;
-    bool samplerAnisotropyEnabled_ = false;
-    float maxSamplerAnisotropy_ = 1.0f;
+    struct FrameOwner {
+        VkCommandPool graphicsCommandPool = VK_NULL_HANDLE;
+        VkCommandPool transferCommandPool = VK_NULL_HANDLE;
+        std::array<FrameResources, kMaxFramesInFlight> frames{};
+        std::vector<PendingUploadBatch> pendingUploads;
+        std::vector<VkSemaphore> pendingUploadWaitSemaphores;
+        std::vector<VkSemaphore> submitWaitSemaphores;
+        std::vector<VkPipelineStageFlags> submitWaitStages;
+        std::size_t currentFrame = 0;
+        VkQueryPool timestampQueryPool = VK_NULL_HANDLE;
+        bool timestampsEnabled = false;
+        std::uint32_t timestampValidBits = 0;
+    };
+    FrameOwner frameOwner_;
 
-    VkDescriptorSetLayout sceneSetLayout_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout tonemapSetLayout_ = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
-    std::array<VkDescriptorSet, kMaxFramesInFlight> sceneDescriptorSets_{};
-    VkDescriptorSet tonemapDescriptorSet_ = VK_NULL_HANDLE;
 
-    VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
-    VkPipelineLayout scenePipelineLayout_ = VK_NULL_HANDLE;
-    VkPipeline depthPrepassPipeline_ = VK_NULL_HANDLE;
-    VkPipeline scenePipeline_ = VK_NULL_HANDLE;
-    VkPipeline sceneNoPrepassPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout tonemapPipelineLayout_ = VK_NULL_HANDLE;
-    VkPipeline tonemapPipeline_ = VK_NULL_HANDLE;
-    std::vector<RetiredPipelineSet> retiredPipelineSets_;
-    bool autoDepthPrepassEnabled_ = false;
-    bool imguiInitialized_ = false;
-    std::uint32_t imguiMinImageCount_ = 0;
-    std::uint32_t imguiImageCount_ = 0;
-    VkFormat imguiSwapchainFormat_ = VK_FORMAT_UNDEFINED;
-    GpuResourceRegistry::Stats imguiResourceStats_{};
-    std::uint64_t imguiMemoryUsageBytes_ = 0;
-    std::uint64_t imguiMemoryBudgetBytes_ = 0;
-    double imguiDiagnosticsRefreshSeconds_ = 0.0;
-    bool imguiDiagnosticsValid_ = false;
+    struct ResourceOwner {
+        ImageResource depth;
+        ImageResource hdr;
+        std::vector<ImageResource> materialTextures;
+        std::array<std::size_t, vulkan_renderer_detail::kMaterialTextureCount>
+            referenceMaterialTextureIndices{};
+        VkSampler linearSampler = VK_NULL_HANDLE;
+        VkSampler textureSampler = VK_NULL_HANDLE;
+        VkSampler normalTextureSampler = VK_NULL_HANDLE;
+        VkSampler ormTextureSampler = VK_NULL_HANDLE;
+        bool samplerAnisotropyEnabled = false;
+        float maxSamplerAnisotropy = 1.0f;
+        VkDescriptorSetLayout sceneSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+        VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+        std::array<VkDescriptorSet, kMaxFramesInFlight> sceneDescriptorSets{};
+        VkDescriptorSet tonemapDescriptorSet = VK_NULL_HANDLE;
+        const ReferenceAssetBundle* referenceAssets = nullptr;
+        Buffer sceneVertexBuffer;
+        Buffer sceneIndexBuffer;
+        std::vector<GpuMesh> sceneMeshes;
+        std::vector<MeshBounds> sceneMeshBounds;
+        std::vector<std::uint32_t> sceneMeshTriangleCounts;
+        GpuResourceRegistry registry;
+    };
+    ResourceOwner resourceOwner_;
 
-    Buffer sceneVertexBuffer_;
-    Buffer sceneIndexBuffer_;
-    std::array<GpuMesh, kSceneMeshBatchCount> sceneMeshes_{};
-    std::array<MeshBounds, kSceneMeshBatchCount> sceneMeshBounds_{};
-    std::array<std::uint32_t, kSceneMeshBatchCount> sceneMeshTriangleCounts_{};
-    VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
-    bool timestampsEnabled_ = false;
-    std::uint32_t timestampValidBits_ = 0;
-    std::array<std::filesystem::file_time_type, 5> shaderWriteTimes_{};
-    double shaderHotReloadRetryDelaySeconds_ = 0.5;
-    double shaderHotReloadLastCheckSeconds_ = 0.0;
+    struct PipelineOwner {
+        VkPipelineCache cache = VK_NULL_HANDLE;
+        VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
+        VkPipeline depthPrepass = VK_NULL_HANDLE;
+        VkPipeline scene = VK_NULL_HANDLE;
+        VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
+        VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
+        VkPipeline tonemap = VK_NULL_HANDLE;
+        std::vector<RetiredPipelineSet> retiredSets;
+        bool autoDepthPrepassEnabled = false;
+        std::array<std::filesystem::file_time_type, 5> shaderWriteTimes{};
+        double hotReloadRetryDelaySeconds = 0.5;
+        double hotReloadLastCheckSeconds = 0.0;
+    };
+    PipelineOwner pipelineOwner_;
+
+    struct ImGuiOwner {
+        bool initialized = false;
+        std::uint32_t minimumImageCount = 0;
+        std::uint32_t imageCount = 0;
+        VkFormat swapchainFormat = VK_FORMAT_UNDEFINED;
+        GpuResourceRegistry::Stats resourceStats{};
+        std::uint64_t memoryUsageBytes = 0;
+        std::uint64_t memoryBudgetBytes = 0;
+        double diagnosticsRefreshSeconds = 0.0;
+        bool diagnosticsValid = false;
+    };
+    ImGuiOwner imguiOwner_;
+
+    struct GraphOwner {
+        std::array<FrameGraphVariant, 4> variants{};
+    };
+    GraphOwner graphOwner_;
     RenderStats stats_{};
-    RenderDeviceInfo deviceInfo_{};
-    std::array<FrameGraphVariant, 4> frameGraphVariants_{};
-    GpuResourceRegistry resourceRegistry_{};
     struct VisibleSceneWork {
         enum class Kind : std::uint8_t {
             Item,
@@ -886,12 +962,12 @@ private:
         };
 
         Kind kind = Kind::Item;
-        std::uint8_t meshIndex = 0;
+        std::uint32_t meshIndex = 0;
         std::uint32_t index = 0;
     };
 
     struct SceneVisibilityPlan {
-        std::array<std::uint32_t, kSceneMeshBatchCount> meshInstanceCounts{};
+        std::vector<std::uint32_t> meshInstanceCounts;
         std::uint32_t visibleItemCount = 0;
         std::uint64_t sceneTriangleCount = 0;
         Vec3 cameraPosition{};
@@ -917,8 +993,8 @@ private:
         std::size_t tileCount = 0;
         Mat4 viewProjection{};
         std::uint32_t workItemCount = 0;
-        std::array<std::vector<InstanceData>, kSceneMeshBatchCount> instanceDataByMesh;
-        std::array<std::uint32_t, kSceneMeshBatchCount> meshInstanceCounts{};
+        std::vector<std::vector<InstanceData>> instanceDataByMesh;
+        std::vector<std::uint32_t> meshInstanceCounts;
         std::uint32_t visibleItemCount = 0;
         std::uint64_t sceneTriangleCount = 0;
         std::uint32_t culledItemCount = 0;
@@ -935,12 +1011,12 @@ private:
     static_assert(sizeof(InstanceSortKey) == 8, "InstanceSortKey should stay compact for per-frame sorting");
 
     std::vector<VisibleSceneWork> visibleSceneWorkScratch_;
-    std::array<std::vector<InstanceData>, kSceneMeshBatchCount> instanceSortScratch_;
-    std::array<std::vector<InstanceSortKey>, kSceneMeshBatchCount> instanceSortKeyScratch_;
+    std::vector<MeshBatch> meshBatchScratch_;
+    std::vector<std::uint32_t> meshFirstInstanceScratch_;
+    std::vector<std::uint32_t> materializedInstanceCountScratch_;
+    std::vector<std::vector<InstanceData>> instanceSortScratch_;
+    std::vector<std::vector<InstanceSortKey>> instanceSortKeyScratch_;
     CachedGridVisibility gridVisibilityCache_;
-    PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT_ = nullptr;
-    PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT_ = nullptr;
-    PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT_ = nullptr;
 };
 
 } // namespace ve

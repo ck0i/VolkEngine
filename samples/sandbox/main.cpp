@@ -121,7 +121,7 @@ void populateWorldScene(ve::World &world) {
     ve::setWorldSceneParent(world, cube, pivot);
 
     auto &renderable = world.emplace<ve::WorldSceneRenderable>(cube);
-    renderable.mesh = ve::SceneMeshId::Cube;
+    renderable.mesh = ve::builtin_assets::kCube;
     renderable.material.albedoRoughness = {0.75f, 0.18f, 0.08f, 0.55f};
     renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
 }
@@ -181,6 +181,14 @@ SandboxArgs parseArguments(int argc, char **argv) {
             args.worldScene = true;
         } else if (arg == "--frames") {
             args.run.maxFrames = parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
+        } else if (arg == "--warmup-frames") {
+            args.run.warmupFrames =
+                parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
+        } else if (arg == "--scenario") {
+            args.run.scenarioName = std::string{requireValue(i, argc, argv, arg)};
+            if (args.run.scenarioName.empty() || args.run.scenarioName.size() > 128U) {
+                throw std::invalid_argument("--scenario must contain 1 to 128 characters");
+            }
         } else if (arg == "--width") {
             args.config.initialWidth = parseWindowDimension(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--height") {
@@ -208,8 +216,12 @@ SandboxArgs parseArguments(int argc, char **argv) {
             args.config.vsync = false;
         } else if (arg == "--validation") {
             args.config.validation = true;
+        } else if (arg == "--require-validation") {
+            args.config.validation = true;
+            args.config.requireValidation = true;
         } else if (arg == "--no-validation") {
             args.config.validation = false;
+            args.config.requireValidation = false;
         } else if (arg == "--indirect-draws") {
             args.config.indirectSceneDraws = true;
         } else if (arg == "--no-indirect-draws") {
@@ -226,6 +238,11 @@ SandboxArgs parseArguments(int argc, char **argv) {
             args.config.exposure = parseFloat(requireValue(i, argc, argv, arg), arg);
         } else if (arg == "--screenshot") {
             args.run.screenshotPath = std::filesystem::path{requireValue(i, argc, argv, arg)};
+        } else if (arg == "--screenshot-frame") {
+            args.run.screenshotFrame =
+                parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
+        } else if (arg == "--run-summary") {
+            args.run.summaryPath = std::filesystem::path{requireValue(i, argc, argv, arg)};
         } else if (arg == "--hot-reload-shaders") {
             args.config.shaderHotReload = true;
         } else {
@@ -236,15 +253,18 @@ SandboxArgs parseArguments(int argc, char **argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--world-scene] [--load-scene "
-                 "FILE.vescene] [--save-scene FILE.vescene] [--resize-smoke] "
-                 "[--acquire-recovery-smoke] [--screenshot FILE.ppm] "
+    std::cout << "Usage: VolkEngineSandbox [--frames N] [--warmup-frames N] "
+                 "[--scenario NAME] [--world-scene] [--load-scene FILE.vescene] "
+                 "[--save-scene FILE.vescene] [--resize-smoke] "
+                 "[--acquire-recovery-smoke] [--screenshot FILE.ppm] [--screenshot-frame N] "
                  "[--hot-reload-shaders] [--grid-rows N] [--grid-columns N] "
                  "[--grid-tile-rows N] [--grid-tile-columns N] "
                  "[--auto-depth-prepass|--depth-prepass|--no-depth-prepass] "
                  "[--indirect-draws|--no-indirect-draws] [--imgui|--no-imgui] "
-                 "[--gpu-timestamps] [--no-gpu-timestamps] [--width N] [--height N] "
-                 "[--exposure F] [--vsync|--no-vsync] [--validation|--no-validation]\n";
+                 "[--gpu-timestamps|--no-gpu-timestamps] [--width N] [--height N] "
+                 "[--exposure F] [--vsync|--no-vsync] "
+                 "[--validation|--no-validation] [--require-validation] "
+                 "[--run-summary FILE.json]\n";
 }
 
 } // namespace
@@ -258,6 +278,14 @@ int main(int argc, char **argv) {
             return 0;
         }
         validateConfig(args.config);
+        if (args.run.maxFrames > 0U &&
+            args.run.warmupFrames >= args.run.maxFrames) {
+            throw std::invalid_argument("--warmup-frames must be less than --frames");
+        }
+        if (!args.run.screenshotPath.empty() && args.run.maxFrames > 0U &&
+            args.run.screenshotFrame >= args.run.maxFrames) {
+            throw std::invalid_argument("--screenshot-frame must be less than --frames");
+        }
         ve::Application app{args.config};
         if (!args.worldScene) {
             return app.run(args.run);

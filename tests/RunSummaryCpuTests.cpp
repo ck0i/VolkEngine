@@ -1,0 +1,80 @@
+#include "core/RunSummary.hpp"
+#include "core/FileSystem.hpp"
+
+#include <cassert>
+#include <filesystem>
+#include <string>
+
+int main() {
+    ve::RunSummary summary{};
+    summary.config.applicationName = "quoted \"name\"";
+    summary.config.validation = true;
+    summary.config.requireValidation = true;
+    summary.config.initialWidth = 1920;
+    summary.config.initialHeight = 1080;
+    summary.config.depthPrepassMode = ve::DepthPrepassMode::ForceOn;
+    summary.config.indirectSceneDraws = false;
+    summary.options.resizeSmoke = true;
+    summary.device.adapterName = "Test GPU";
+    summary.options.scenarioName = "submission-pressure-v1";
+    summary.options.warmupFrames = 20;
+    summary.device.validationEnabled = true;
+    summary.device.apiVersionMajor = 1;
+    summary.device.apiVersionMinor = 3;
+    summary.device.driverVersion = 42;
+    summary.stats.cpuFrameMs = 2.5;
+    summary.stats.gpuTimestampsValid = false;
+    summary.stats.drawCalls = 7;
+    summary.stats.triangleCount = 1234;
+    summary.stats.cpuGraphCompileMs = 0.75;
+    summary.stats.graphPassCount = 4;
+    summary.stats.graphResourceCount = 4;
+    summary.stats.graphBarrierCount = 8;
+    summary.stats.graphPhysicalAllocationCount = 2;
+    summary.stats.graphTransientRequestedBytes = 1024;
+    summary.stats.graphTransientAllocatedBytes = 1024;
+    summary.stats.graphRecompileCount = 2;
+    summary.stats.graphLastCompileWasResize = true;
+    summary.stats.assetCookMs = 1.25;
+    summary.stats.assetRecordCount = 6;
+    summary.stats.assetCacheHits = 6;
+    ve::BoundedMetricSamples samples;
+    for (std::uint32_t value = 1; value <= 100U; ++value) {
+        samples.add(static_cast<double>(value));
+    }
+    summary.distributions.cpuFrame = samples.distribution();
+    assert(summary.distributions.cpuFrame.sampleCount == 100U);
+    assert(summary.distributions.cpuFrame.median == 50.5);
+    assert(summary.distributions.cpuFrame.p95 > 95.0);
+    assert(summary.distributions.cpuFrame.p99 > 99.0);
+    summary.frameCount = 120;
+    const std::string serialized = ve::serializeRunSummary(summary);
+    assert(serialized.find("\"schema\":\"volkengine.run-summary\"") != std::string::npos);
+    assert(serialized.find("\"schema_version\":2") != std::string::npos);
+    assert(serialized.find("\"scenario\":\"submission-pressure-v1\"") != std::string::npos);
+    assert(serialized.find("\"warmup_frames\":20") != std::string::npos);
+    assert(serialized.find("\"enabled\":true") != std::string::npos);
+    assert(serialized.find("\"synchronization_validation\":true") != std::string::npos);
+    assert(serialized.find("\"frame_count\":120") != std::string::npos);
+    assert(serialized.find("\"gpu_frame\":{\"available\":false,\"reason\":\"GPU timestamp result unavailable\"") != std::string::npos);
+    assert(serialized.find("\"host_device_memory\":{\"available\":false") != std::string::npos);
+    assert(serialized.find("\"frame_graph\":{\"passes\":4,\"logical_resources\":4,\"barriers\":8") != std::string::npos);
+    assert(serialized.find("\"last_recompile_reason\":\"resize\"") != std::string::npos);
+    assert(serialized.find("\"assets\":{\"records\":6,\"cache_hits\":6,\"cache_misses\":0,\"rebuilt\":0}") !=
+           std::string::npos);
+    assert(serialized.find("\"cpu_asset_cook\":{\"available\":true,\"value\":1.25,\"unit\":\"ms\"") !=
+           std::string::npos);
+    assert(serialized.find("\"distributions\":{\"cpu_frame\":{\"unit\":\"ms\",\"sample_count\":100,\"available\":true") !=
+           std::string::npos);
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() /
+        (std::string{"volkengine-run-summary-test-"} +
+         std::to_string(reinterpret_cast<std::uintptr_t>(&summary)));
+    const std::filesystem::path output = directory / "nested" / "summary.json";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    ve::writeRunSummaryAtomic(output, summary);
+    assert(ve::readTextFile(output) == serialized);
+    std::filesystem::remove_all(directory, error);
+    return 0;
+}

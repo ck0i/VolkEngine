@@ -13,6 +13,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 option(VOLKENGINE_ENABLE_VALIDATION "Request Vulkan validation layers in debug builds" ON)
 option(VOLKENGINE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(VOLKENGINE_ENABLE_IMGUI "Enable Dear ImGui debug overlay" ON)
+option(VOLKENGINE_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer on project targets" OFF)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/VolkEngineDependencies.cmake")
 volkengine_resolve_dependencies()
@@ -57,6 +58,19 @@ function(volkengine_target_warnings target)
             target_compile_options(${target} PRIVATE -Werror)
         endif()
     endif()
+
+    if(VOLKENGINE_ENABLE_SANITIZERS)
+        if(MSVC)
+            message(FATAL_ERROR "VOLKENGINE_ENABLE_SANITIZERS requires GCC or Clang")
+        endif()
+        target_compile_options(${target} PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+            -fno-sanitize-recover=all)
+        target_link_options(${target} PRIVATE
+            -fsanitize=address,undefined
+            -fno-sanitize-recover=all)
+    endif()
 endfunction()
 
 set(VOLKENGINE_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/engine/shaders")
@@ -91,11 +105,18 @@ add_custom_target(VolkEngineAssets
 
 
 add_library(VolkEngine STATIC
+    engine/assets/ContentHash.cpp
+    engine/assets/AssetDatabase.cpp
+    engine/assets/DerivedDataCache.cpp
+    engine/assets/CgltfUsage.cpp
+    engine/assets/GltfImporter.cpp
+    engine/assets/ReferenceAssetPipeline.cpp
     engine/core/Application.cpp
     engine/core/Camera.cpp
     engine/core/FileSystem.cpp
     engine/core/Log.cpp
     engine/core/Time.cpp
+    engine/core/RunSummary.cpp
     engine/scene/ScenePersistence.cpp
     engine/platform/Input.cpp
     engine/platform/InputActions.cpp
@@ -122,9 +143,17 @@ add_library(VolkEngine STATIC
     engine/renderer/vulkan/VulkanRenderer.Visibility.cpp)
 
 if(MSVC)
-    set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp engine/renderer/StbImageUsage.cpp PROPERTIES COMPILE_OPTIONS /w)
+    set_source_files_properties(
+        engine/renderer/vulkan/VmaUsage.cpp
+        engine/renderer/StbImageUsage.cpp
+        engine/assets/CgltfUsage.cpp
+        PROPERTIES COMPILE_OPTIONS /w)
 else()
-    set_source_files_properties(engine/renderer/vulkan/VmaUsage.cpp engine/renderer/StbImageUsage.cpp PROPERTIES COMPILE_OPTIONS -w)
+    set_source_files_properties(
+        engine/renderer/vulkan/VmaUsage.cpp
+        engine/renderer/StbImageUsage.cpp
+        engine/assets/CgltfUsage.cpp
+        PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
 add_dependencies(VolkEngine VolkEngineShaders VolkEngineAssets)
@@ -142,7 +171,8 @@ target_link_libraries(VolkEngine
         $<$<BOOL:${VOLKENGINE_ENABLE_IMGUI}>:VolkEngineImGui>)
 target_link_libraries(VolkEngine
     PRIVATE
-        ${VOLKENGINE_STB_TARGET})
+        ${VOLKENGINE_STB_TARGET}
+        ${VOLKENGINE_CGLTF_TARGET})
 
 target_compile_definitions(VolkEngine
     PUBLIC
@@ -194,6 +224,42 @@ target_include_directories(VolkEngineConfigCpuTest
 volkengine_target_warnings(VolkEngineConfigCpuTest)
 add_test(NAME ConfigCpu
     COMMAND VolkEngineConfigCpuTest)
+
+add_executable(VolkEngineRunSummaryCpuTest
+    tests/RunSummaryCpuTests.cpp
+    engine/core/RunSummary.cpp
+    engine/core/FileSystem.cpp)
+target_include_directories(VolkEngineRunSummaryCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_compile_definitions(VolkEngineRunSummaryCpuTest
+    PRIVATE
+        VOLKENGINE_DEBUG_BUILD=$<IF:$<CONFIG:Debug>,1,0>)
+volkengine_target_warnings(VolkEngineRunSummaryCpuTest)
+add_test(NAME RunSummaryCpu
+    COMMAND VolkEngineRunSummaryCpuTest)
+
+add_executable(VolkEngineAssetPipelineCpuTest
+    tests/AssetPipelineCpuTests.cpp
+    engine/assets/ContentHash.cpp
+    engine/assets/AssetDatabase.cpp
+    engine/assets/DerivedDataCache.cpp
+    engine/assets/CgltfUsage.cpp
+    engine/assets/GltfImporter.cpp
+    engine/assets/ReferenceAssetPipeline.cpp
+    engine/core/FileSystem.cpp)
+target_link_libraries(VolkEngineAssetPipelineCpuTest
+    PRIVATE
+        ${VOLKENGINE_CGLTF_TARGET})
+target_include_directories(VolkEngineAssetPipelineCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_compile_definitions(VolkEngineAssetPipelineCpuTest
+    PRIVATE
+        VOLKENGINE_TEST_ASSET_DIR="${VOLKENGINE_ASSET_SOURCE_DIR}")
+volkengine_target_warnings(VolkEngineAssetPipelineCpuTest)
+add_test(NAME AssetPipelineCpu
+    COMMAND VolkEngineAssetPipelineCpuTest)
 
 add_executable(VolkEngineSceneRendererTest
     tests/SceneRendererCpuTests.cpp
@@ -304,6 +370,27 @@ target_include_directories(VolkEngineMathCpuTest
 volkengine_target_warnings(VolkEngineMathCpuTest)
 add_test(NAME MathCpu
     COMMAND VolkEngineMathCpuTest)
+add_executable(VolkEngineVulkanFrameGraphSyncCpuTest
+    tests/VulkanFrameGraphSyncCpuTests.cpp)
+target_include_directories(VolkEngineVulkanFrameGraphSyncCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_link_libraries(VolkEngineVulkanFrameGraphSyncCpuTest
+    PRIVATE
+        Vulkan::Vulkan)
+volkengine_target_warnings(VolkEngineVulkanFrameGraphSyncCpuTest)
+add_test(NAME VulkanFrameGraphSyncCpu
+    COMMAND VolkEngineVulkanFrameGraphSyncCpuTest)
+
+add_executable(VolkEngineVulkanReadbackStateCpuTest
+    tests/VulkanReadbackStateCpuTests.cpp)
+target_include_directories(VolkEngineVulkanReadbackStateCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineVulkanReadbackStateCpuTest)
+add_test(NAME VulkanReadbackStateCpu
+    COMMAND VolkEngineVulkanReadbackStateCpuTest)
+
 add_executable(VolkEngineVulkanFrustumCpuTest
     tests/VulkanFrustumCpuTests.cpp)
 target_include_directories(VolkEngineVulkanFrustumCpuTest

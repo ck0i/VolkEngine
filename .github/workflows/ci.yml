@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    name: ${{ matrix.os }} ${{ matrix.configuration }} CPU
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            configuration: debug
+            preset: linux-debug
+          - os: ubuntu-24.04
+            configuration: release
+            preset: linux-release
+          - os: windows-2025
+            configuration: debug
+            preset: windows-debug
+          - os: windows-2025
+            configuration: release
+            preset: windows-release
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Restore bootstrap downloads
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: out/bootstrap/downloads
+          key: bootstrap-${{ runner.os }}-${{ hashFiles('cmake/VolkEngineBootstrap.cmake', 'cmake/VolkEngineDependencies.cmake') }}
+      - name: Environment
+        shell: bash
+        run: |
+          cmake --version
+          "${CXX:-c++}" --version || true
+          echo "os=${RUNNER_OS}"
+          echo "revision=${GITHUB_SHA}"
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DVOLKENGINE_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: Upload failing test logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: test-logs-${{ matrix.preset }}
+          path: out/build/${{ matrix.preset }}/Testing/Temporary/
+          if-no-files-found: ignore
+
+  sanitizers:
+    name: Linux ASan and UBSan CPU
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Restore bootstrap downloads
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: out/bootstrap/downloads
+          key: bootstrap-${{ runner.os }}-${{ hashFiles('cmake/VolkEngineBootstrap.cmake', 'cmake/VolkEngineDependencies.cmake') }}
+      - name: Configure
+        run: cmake --preset linux-sanitize
+      - name: Build CPU tests
+        run: cmake --build --preset linux-sanitize
+      - name: Test CPU suite under sanitizers
+        run: ctest --preset linux-sanitize --output-on-failure
+      - name: Upload failing sanitizer logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sanitizer-logs
+          path: out/build/linux-sanitize/Testing/Temporary/
+          if-no-files-found: ignore
+
+  vulkan-validation:
+    name: Controlled GPU Vulkan validation
+    runs-on: [self-hosted, linux, x64, vulkan-gpu]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Vulkan runner identity
+        shell: bash
+        run: |
+          cmake --version
+          vulkaninfo --summary
+          echo "revision=${GITHUB_SHA}"
+      - name: Configure
+        run: cmake --preset linux-debug -DVOLKENGINE_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build --preset linux-debug
+      - name: Graph validation smoke
+        run: >-
+          ./out/build/linux-debug/VolkEngineSandbox
+          --frames 120 --world-scene --resize-smoke
+          --validation --require-validation --no-imgui
+          --run-summary out/validation-summary.json
+      - name: Acquire recovery and screenshot smoke
+        run: >-
+          ./out/build/linux-debug/VolkEngineSandbox
+          --frames 3 --acquire-recovery-smoke
+          --screenshot out/volk-recovery.ppm
+          --validation --require-validation --no-imgui
+          --run-summary out/recovery-summary.json
+      - name: Deterministic visual regression matrix
+        shell: bash
+        run: |
+          common=(--frames 70 --warmup-frames 60 --screenshot-frame 60 --no-vsync --no-imgui --validation --require-validation)
+          ./out/build/linux-debug/VolkEngineSandbox "${common[@]}" --scenario visual-depth-on-v1 --depth-prepass --indirect-draws --screenshot out/depth-on.ppm
+          ./out/build/linux-debug/VolkEngineSandbox "${common[@]}" --scenario visual-depth-off-v1 --no-depth-prepass --indirect-draws --screenshot out/depth-off.ppm
+          ./out/build/linux-debug/VolkEngineSandbox "${common[@]}" --scenario visual-direct-v1 --depth-prepass --no-indirect-draws --screenshot out/direct.ppm
+          ./out/build/linux-debug/VolkEngineSandbox "${common[@]}" --scenario visual-imported-v1 --depth-prepass --indirect-draws --screenshot out/imported.ppm
+          python tools/compare_ppm.py out/depth-on.ppm out/depth-off.ppm --diff out/depth-diff.ppm
+          python tools/compare_ppm.py out/depth-on.ppm out/direct.ppm --diff out/submission-diff.ppm
+          ./out/build/linux-debug/VolkEngineSandbox --frames 120 --warmup-frames 30 --scenario visual-resize-v1 --resize-smoke --screenshot-frame 110 --screenshot out/resize-final.ppm --no-vsync --no-imgui --validation --require-validation
+      - name: Controlled submission benchmark
+        run: >-
+          ./out/build/linux-debug/VolkEngineSandbox
+          --frames 240 --warmup-frames 60 --scenario submission-pressure-v1
+          --grid-rows 32 --grid-columns 32 --indirect-draws --no-vsync
+          --validation --require-validation --no-imgui
+          --run-summary out/submission-pressure-v1.json
+      - name: Enforce conservative benchmark threshold
+        run: python tools/check_run_summary.py out/submission-pressure-v1.json --scenario submission-pressure-v1
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vulkan-validation-evidence
+          path: |
+            out/*summary.json
+            out/*.ppm
+          if-no-files-found: error

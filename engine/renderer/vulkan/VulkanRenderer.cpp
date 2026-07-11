@@ -4,8 +4,9 @@
 
 namespace ve {
 
-VulkanRenderer::VulkanRenderer(Window& window, EngineConfig config)
-    : impl_(std::make_unique<Impl>(window, std::move(config))) {}
+VulkanRenderer::VulkanRenderer(Window& window, EngineConfig config,
+                               const ReferenceAssetBundle& referenceAssets)
+    : impl_(std::make_unique<Impl>(window, std::move(config), referenceAssets)) {}
 
 VulkanRenderer::~VulkanRenderer() = default;
 
@@ -14,7 +15,7 @@ void VulkanRenderer::draw(const Camera& camera, const SceneRenderList& scene, co
     impl_->draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs);
 }
 
-MeshBounds VulkanRenderer::meshBounds(const SceneMeshId mesh) const {
+MeshBounds VulkanRenderer::meshBounds(const MeshAssetHandle mesh) const {
     return impl_->meshBounds(mesh);
 }
 

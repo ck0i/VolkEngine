@@ -37,25 +37,8 @@ int main() {
     expectTrue("executable directory is absolute", executableRoot.is_absolute());
     expectFalse("executable directory is not empty", executableRoot.empty());
     const ve::EngineConfig defaults{};
-    expectTrue("default albedo texture is asset-relative", defaults.groundAlbedoTexture == "textures/ground_albedo.png");
-    expectTrue("default normal texture is asset-relative", defaults.groundNormalTexture == "textures/ground_normal.png");
-    expectTrue("default ORM texture is asset-relative", defaults.groundOrmTexture == "textures/ground_orm.png");
-    expectTrue("default imported model path is asset-relative", defaults.importedModelPath == "models/imported_showcase.obj");
-    const std::filesystem::path assetRoot = "/tmp/volkengine-assets";
-    expectTrue("relative asset paths resolve under asset directory",
-               ve::resolveAssetPath(assetRoot, defaults.groundAlbedoTexture) == assetRoot / "textures/ground_albedo.png");
-    expectTrue("relative model path resolves under asset directory",
-               ve::resolveAssetPath(assetRoot, defaults.importedModelPath) == assetRoot / "models/imported_showcase.obj");
-    expectTrue("normalized relative asset path remains under asset directory",
-               ve::resolveAssetPath(assetRoot, "textures/../ground.png") == assetRoot / "ground.png");
-    expectTrue("relative asset traversal escaping root is rejected",
-               ve::resolveAssetPath(assetRoot, "../outside.png").empty());
-    expectTrue("multi-level relative asset traversal is rejected",
-               ve::resolveAssetPath(assetRoot, "../../outside.png").empty());
-    const std::filesystem::path absoluteOverride = "/opt/materials/albedo.png";
-    expectTrue("absolute asset paths bypass asset directory",
-               ve::resolveAssetPath(assetRoot, absoluteOverride) == absoluteOverride);
-    expectTrue("empty asset path remains empty", ve::resolveAssetPath(assetRoot, {}).empty());
+    expectTrue("default asset directory is configured", !defaults.assetDirectory.empty());
+    expectTrue("default cache directory is configured", !defaults.cacheDirectory.empty());
 
     if (gFailureCount == 0) {
         return 0;

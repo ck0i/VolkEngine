@@ -2,26 +2,21 @@
 
 #include <chrono>
 #include <fstream>
+#include <utility>
 
 namespace ve {
 
 void VulkanRenderer::Impl::requestScreenshot(std::filesystem::path path) {
-    const std::scoped_lock lock{screenshotRequestMutex_};
-    screenshotPath_ = std::move(path);
-    screenshotPending_ = true;
+    readback_.request(std::move(path));
 }
 
 bool VulkanRenderer::Impl::screenshotFormatSupported() const {
-    return swapchainFormat_ == VK_FORMAT_B8G8R8A8_UNORM || swapchainFormat_ == VK_FORMAT_R8G8B8A8_UNORM;
+    return swapchainOwner_.format == VK_FORMAT_B8G8R8A8_UNORM || swapchainOwner_.format == VK_FORMAT_R8G8B8A8_UNORM;
 }
 
 void VulkanRenderer::Impl::recordScreenshotCopy(const VkCommandBuffer commandBuffer,
                                                  const std::uint32_t imageIndex,
-                                                 const Buffer& readback,
-                                                 const ImageSyncState destinationState) {
-    transitionImageTracked(commandBuffer, swapchainImages_[imageIndex], swapchainStates_[imageIndex],
-                           destinationState,
-                           VK_IMAGE_ASPECT_COLOR_BIT);
+                                                 const Buffer& readback) {
 
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
@@ -32,8 +27,8 @@ void VulkanRenderer::Impl::recordScreenshotCopy(const VkCommandBuffer commandBuf
     region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
     region.imageOffset = {0, 0, 0};
-    region.imageExtent = {swapchainExtent_.width, swapchainExtent_.height, 1};
-    vkCmdCopyImageToBuffer(commandBuffer, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    region.imageExtent = {swapchainOwner_.extent.width, swapchainOwner_.extent.height, 1};
+    vkCmdCopyImageToBuffer(commandBuffer, swapchainOwner_.images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            readback.buffer, 1, &region);
 }
 
@@ -46,7 +41,7 @@ void VulkanRenderer::Impl::writeScreenshotPpm(const Buffer& readback, const VkEx
         std::filesystem::create_directories(path.parent_path());
     }
 
-    ScopedVmaMap mappedReadback{allocator_, readback.allocation, "vmaMapMemory screenshot readback"};
+    ScopedVmaMap mappedReadback{deviceOwner_.allocator, readback.allocation, "vmaMapMemory screenshot readback"};
     const auto* src = static_cast<const std::uint8_t*>(mappedReadback.get());
 
     std::filesystem::path tempPath = path;

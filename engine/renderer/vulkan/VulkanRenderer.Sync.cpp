@@ -2,66 +2,33 @@
 
 namespace ve {
 
-VulkanRenderer::Impl::ImageSyncState VulkanRenderer::Impl::imageSyncStateFor(const FrameGraphAccess access, const FrameGraphUsage usage) {
-    switch (usage) {
-    case FrameGraphUsage::ColorAttachment:
-        return ImageSyncState{
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            access == FrameGraphAccess::Write ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT : VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-        };
-    case FrameGraphUsage::DepthAttachment:
-        return ImageSyncState{
-            depthAttachmentLayout(access),
-            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            access == FrameGraphAccess::Write ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
-        };
-    case FrameGraphUsage::SampledImage:
-        if (access != FrameGraphAccess::Read) {
-            throw std::runtime_error("Sampled image frame-graph usage must be read-only");
-        }
-        return ImageSyncState{
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        };
-    case FrameGraphUsage::TransferSource:
-        if (access != FrameGraphAccess::Read) {
-            throw std::runtime_error("Transfer-source usage must be read-only");
-        }
-        return ImageSyncState{
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_READ_BIT,
-        };
-    case FrameGraphUsage::Present:
-        if (access != FrameGraphAccess::Read) {
-            throw std::runtime_error("Present frame-graph usage must be read-only");
-        }
-        return finalImageSyncStateFor(usage);
-    }
-    throw std::runtime_error("Unknown frame-graph image usage");
+VulkanRenderer::Impl::ImageSyncState VulkanRenderer::Impl::imageSyncStateFor(
+    const FrameGraphAccess access, const FrameGraphUsage usage) {
+    return vulkanImageSyncState(access, usage);
 }
 
-VulkanRenderer::Impl::ImageSyncState VulkanRenderer::Impl::finalImageSyncStateFor(const FrameGraphUsage usage) {
+VulkanRenderer::Impl::ImageSyncState VulkanRenderer::Impl::finalImageSyncStateFor(
+    const FrameGraphUsage usage) {
     if (usage != FrameGraphUsage::Present) {
         throw std::runtime_error("Unsupported frame-graph final image usage");
     }
-    return ImageSyncState{VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE};
+    return vulkanImageSyncState(FrameGraphAccess::Read, usage);
 }
 
 VulkanRenderer::Impl::FrameImageSyncSnapshot VulkanRenderer::Impl::captureFrameImageSyncState(const std::uint32_t imageIndex) const {
     return FrameImageSyncSnapshot{
-        depth_.syncState,
-        hdr_.syncState,
-        swapchainStates_[imageIndex],
+        resourceOwner_.depth.syncState,
+        resourceOwner_.hdr.syncState,
+        swapchainOwner_.imageStates[imageIndex],
+        readback_.buffer().syncState,
     };
 }
 
 void VulkanRenderer::Impl::restoreFrameImageSyncState(const std::uint32_t imageIndex, const FrameImageSyncSnapshot& snapshot) {
-    depth_.syncState = snapshot.depth;
-    hdr_.syncState = snapshot.hdr;
-    swapchainStates_[imageIndex] = snapshot.swapchain;
+    resourceOwner_.depth.syncState = snapshot.depth;
+    resourceOwner_.hdr.syncState = snapshot.hdr;
+    swapchainOwner_.imageStates[imageIndex] = snapshot.swapchain;
+    readback_.buffer().syncState = snapshot.screenshotReadback;
 }
 
 void VulkanRenderer::Impl::transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspect,

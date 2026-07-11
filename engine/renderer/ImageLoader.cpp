@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <span>
+#include <string_view>
 #include <vector>
 #include <utility>
 
@@ -107,30 +109,33 @@ struct StbiPixels {
     StbiPixels& operator=(const StbiPixels&) = delete;
 };
 
-LoadedImageRgba8 loadStbImageRgba8(const std::filesystem::path& path) {
-    const std::vector<std::uint8_t> encoded = readWholeBinaryFile(path);
+LoadedImageRgba8 loadStbImageRgba8(const std::span<const std::byte> encoded,
+                                   const std::string_view sourceName) {
     if (encoded.empty()) {
-        throw std::runtime_error("Image file is empty: " + path.string());
+        throw std::runtime_error("Image payload is empty: " + std::string(sourceName));
+    }
+    if (encoded.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error("Image payload is too large for stb_image: " + std::string(sourceName));
     }
     int width = 0;
     int height = 0;
     int channelsInFile = 0;
-    const StbiPixels decoded{stbi_load_from_memory(encoded.data(),
-                                                   static_cast<int>(encoded.size()),
-                                                   &width,
-                                                   &height,
-                                                   &channelsInFile,
-                                                   STBI_rgb_alpha)};
+    const StbiPixels decoded{stbi_load_from_memory(
+        reinterpret_cast<const stbi_uc*>(encoded.data()),
+        static_cast<int>(encoded.size()), &width, &height, &channelsInFile,
+        STBI_rgb_alpha)};
     if (decoded.data == nullptr) {
         const char* reason = stbi_failure_reason();
-        throw std::runtime_error("Unsupported image format in " + path.string() + (reason != nullptr ? std::string(": ") + reason : std::string{}));
+        throw std::runtime_error("Unsupported image format in " + std::string(sourceName) +
+                                 (reason != nullptr ? std::string(": ") + reason : std::string{}));
     }
     if (width <= 0 || height <= 0) {
-        throw std::runtime_error("Decoded image has invalid dimensions: " + path.string());
+        throw std::runtime_error("Decoded image has invalid dimensions: " + std::string(sourceName));
     }
-    const std::uint64_t pixelCount64 = static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+    const std::uint64_t pixelCount64 =
+        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
     if (pixelCount64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) / 4ULL) {
-        throw std::runtime_error("Decoded image is too large: " + path.string());
+        throw std::runtime_error("Decoded image is too large: " + std::string(sourceName));
     }
     LoadedImageRgba8 image{};
     image.width = static_cast<std::uint32_t>(width);
@@ -138,6 +143,12 @@ LoadedImageRgba8 loadStbImageRgba8(const std::filesystem::path& path) {
     const std::size_t byteCount = static_cast<std::size_t>(pixelCount64) * 4U;
     image.pixels.assign(decoded.data, decoded.data + byteCount);
     return image;
+}
+
+LoadedImageRgba8 loadStbImageRgba8(const std::filesystem::path& path) {
+    const std::vector<std::uint8_t> encoded = readWholeBinaryFile(path);
+    return loadStbImageRgba8(
+        std::as_bytes(std::span{encoded.data(), encoded.size()}), path.string());
 }
 
 struct NormalSample {
@@ -385,6 +396,11 @@ LoadedImageRgba8 loadImageRgba8(const std::filesystem::path& path) {
         return loadPpmRgba8(path);
     }
     return loadStbImageRgba8(path);
+}
+
+LoadedImageRgba8 loadImageRgba8(const std::span<const std::byte> encoded,
+                                const std::string_view sourceName) {
+    return loadStbImageRgba8(encoded, sourceName);
 }
 
 std::vector<LoadedImageRgba8> buildAlbedoMipChainRgba8(LoadedImageRgba8 baseLevel, const bool isSrgb) {

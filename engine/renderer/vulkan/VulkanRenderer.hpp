@@ -8,11 +8,12 @@
 #include <memory>
 
 namespace ve {
+struct ReferenceAssetBundle;
 class Window;
 
 class VulkanRenderer final : public IRenderer {
 public:
-    VulkanRenderer(Window& window, EngineConfig config);
+    VulkanRenderer(Window& window, EngineConfig config, const ReferenceAssetBundle& referenceAssets);
     ~VulkanRenderer() override;
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -22,7 +23,7 @@ public:
 
     void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
               double elapsedSeconds, double frameDeltaMs) override;
-    [[nodiscard]] MeshBounds meshBounds(SceneMeshId mesh) const;
+    [[nodiscard]] MeshBounds meshBounds(MeshAssetHandle mesh) const;
     [[nodiscard]] RenderStats stats() const override;
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const override;
     void requestScreenshot(std::filesystem::path path);

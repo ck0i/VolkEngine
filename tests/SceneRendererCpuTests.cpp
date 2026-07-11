@@ -58,6 +58,20 @@ void expectThrowsRuntimeError(std::string_view context, F&& callable) {
     }
 }
 
+template <typename F>
+void expectThrowsInvalidArgument(std::string_view context, F&& callable) {
+    try {
+        callable();
+        std::cerr << "[FAILED] " << context << ": expected invalid_argument but no exception thrown\n";
+        ++gFailureCount;
+    } catch (const std::invalid_argument&) {
+        // expected
+    } catch (...) {
+        std::cerr << "[FAILED] " << context << ": expected invalid_argument but threw different exception\n";
+        ++gFailureCount;
+    }
+}
+
 template <typename T, typename U>
 void expectGreaterOrEqual(std::string_view context, const T& actual, const U& minimum) {
     if (actual < minimum) {
@@ -186,7 +200,7 @@ int main() {
     {
         ve::SceneRenderList callerOwnedList;
         callerOwnedList.push({});
-        callerOwnedList[0].mesh = ve::SceneMeshId::ImportedModel;
+        callerOwnedList[0].mesh = ve::builtin_assets::kReferenceMesh;
         ve::Camera camera;
         RecordingRenderer recordingRenderer;
         recordingRenderer.draw(camera, callerOwnedList, 1.75, 12.5, 16.0);
@@ -194,8 +208,8 @@ int main() {
         expectEqual("renderer submission preserves scene build telemetry", recordingRenderer.sceneBuildMs(), 1.75);
         expectEqual("renderer submission preserves elapsed time", recordingRenderer.elapsedSeconds(), 12.5);
         expectEqual("renderer submission preserves frame delta", recordingRenderer.frameDeltaMs(), 16.0);
-        expectEqual("renderer submission preserves item order", static_cast<int>((*recordingRenderer.scene())[0].mesh),
-                    static_cast<int>(ve::SceneMeshId::ImportedModel));
+        expectEqual("renderer submission preserves item order", (*recordingRenderer.scene())[0].mesh,
+                    ve::builtin_assets::kReferenceMesh);
     }
 
     expectEqual("requiredItemCount(4, 5)", DemoSceneRenderer::requiredItemCount(4U, 5U), static_cast<std::size_t>(4U * 5U + DemoSceneRenderer::kFixedItemCount));
@@ -205,38 +219,41 @@ int main() {
     const ve::MeshBounds importedModelLocalBounds = {{1.2f, 0.35f, -0.9f}, 1.45f, true};
     const auto importedModelCenter = transformImportedModelCenter(importedModelLocalBounds);
     const auto importedModelRadius = transformImportedModelRadius(importedModelLocalBounds);
-    renderer.setImportedModelBounds(importedModelLocalBounds);
+    const ve::Mat4 importedModel =
+        ve::translate({0.0f, 1.0f, -3.35f}) * ve::rotateY(-0.35f) *
+        ve::scale({0.78f, 0.78f, 0.78f});
+    const ve::SceneRenderItem authoredItem{importedModelCenter, importedModelRadius,
+                                           ve::builtin_assets::kReferenceMesh,
+                                           importedModel, {}};
+    renderer.setAuthoredSceneItems({authoredItem});
 
     const auto& first = renderer.build(0.125, 4U, 5U);
     const auto firstSize = first.size();
     const auto firstCapacity = first.capacity();
     const auto firstImportedItemIndex = first.size() - 1U;
-    const auto expectedFirstSize = (4U * 5U) + DemoSceneRenderer::kFixedItemCount;
+    const auto expectedFirstSize =
+        (4U * 5U) + DemoSceneRenderer::kFixedItemCount + 1U;
     expectEqual("build(4, 5) size", firstSize, expectedFirstSize);
-    expectEqual("build(4, 5) imported model appended", static_cast<int>(first[firstImportedItemIndex].mesh), static_cast<int>(ve::SceneMeshId::ImportedModel));
+    expectEqual("build(4, 5) imported model appended", first[firstImportedItemIndex].mesh, ve::builtin_assets::kReferenceMesh);
     expectVec3Nearly("build(4, 5) imported model transformed center", first[firstImportedItemIndex].boundsCenter, importedModelCenter);
     expectNearly("build(4, 5) imported model transformed radius", first[firstImportedItemIndex].boundsRadius, importedModelRadius);
 
-    const auto importedItemCenterBeforeInvalidBounds = first[firstImportedItemIndex].boundsCenter;
-    const float importedItemRadiusBeforeInvalidBounds = first[firstImportedItemIndex].boundsRadius;
-    renderer.setImportedModelBounds({{std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f}, 1.0f, true});
-    const auto& afterInvalidCenter = renderer.build(0.125, 4U, 5U);
-    expectVec3Nearly("invalid imported bounds center is ignored", afterInvalidCenter[firstImportedItemIndex].boundsCenter,
-                     importedItemCenterBeforeInvalidBounds);
-    expectNearly("invalid imported bounds center preserves radius", afterInvalidCenter[firstImportedItemIndex].boundsRadius,
-                 importedItemRadiusBeforeInvalidBounds);
-    renderer.setImportedModelBounds({{}, -1.0f, true});
-    const auto& afterNegativeRadius = renderer.build(0.125, 4U, 5U);
-    expectNearly("negative imported bounds radius is ignored", afterNegativeRadius[firstImportedItemIndex].boundsRadius,
-                 importedItemRadiusBeforeInvalidBounds);
-    renderer.setImportedModelBounds({{}, std::numeric_limits<float>::quiet_NaN(), true});
-    const auto& afterNaNRadius = renderer.build(0.125, 4U, 5U);
-    expectNearly("NaN imported bounds radius is ignored", afterNaNRadius[firstImportedItemIndex].boundsRadius,
-                 importedItemRadiusBeforeInvalidBounds);
-    renderer.setImportedModelBounds({{}, std::numeric_limits<float>::infinity(), true});
-    const auto& afterInfiniteRadius = renderer.build(0.125, 4U, 5U);
-    expectNearly("infinite imported bounds radius is ignored", afterInfiniteRadius[firstImportedItemIndex].boundsRadius,
-                 importedItemRadiusBeforeInvalidBounds);
+    ve::SceneRenderItem invalidAuthoredItem = authoredItem;
+    invalidAuthoredItem.material.flags.x = std::numeric_limits<float>::quiet_NaN();
+    expectThrowsInvalidArgument("non-finite authored material rejects transactionally", [&] {
+        renderer.setAuthoredSceneItems({invalidAuthoredItem});
+    });
+    const auto& afterInvalidMaterial = renderer.build(0.125, 4U, 5U);
+    expectVec3Nearly("rejected authored items preserve prior center",
+                     afterInvalidMaterial[firstImportedItemIndex].boundsCenter,
+                     importedModelCenter);
+    ve::SceneRenderItem secondAuthoredItem = authoredItem;
+    secondAuthoredItem.mesh = {ve::builtin_assets::kReferenceMesh.index + 1U, 1U};
+    renderer.setAuthoredSceneItems({authoredItem, secondAuthoredItem});
+    expectEqual("multiple authored hierarchy draws append independently",
+                renderer.build(0.125, 4U, 5U).size(), expectedFirstSize + 1U);
+    renderer.setAuthoredSceneItems({authoredItem});
+    (void)renderer.build(0.125, 4U, 5U);
     constexpr std::uint32_t largeRows = 65535U;
     constexpr std::uint32_t largeColumns = 65535U;
     constexpr std::uint64_t largeExpected = static_cast<std::uint64_t>(largeRows) * static_cast<std::uint64_t>(largeColumns)
@@ -367,7 +384,7 @@ int main() {
     }
 
     const auto firstAnimatedItemM00 = first[0].model.m[0];
-    const auto firstStaticItemMesh = static_cast<int>(first[5].mesh);
+    const auto firstStaticItemMesh = first[5].mesh;
     const auto firstStaticItemBoundsCenterX = first[5].boundsCenter.x;
     const auto firstStaticItemBoundsCenterY = first[5].boundsCenter.y;
     const auto firstStaticItemBoundsCenterZ = first[5].boundsCenter.z;
@@ -377,7 +394,7 @@ int main() {
     expectEqual("build(4, 5) repeated size stability", second.size(), expectedFirstSize);
     expectGreaterOrEqual("build(4, 5) repeated capacity", second.capacity(), firstCapacity);
     expectNotEqual("build(4, 5) animated item updates with elapsed", second[0].model.m[0], firstAnimatedItemM00);
-    expectEqual("build(4, 5) static grid item keeps mesh", static_cast<int>(second[5].mesh), firstStaticItemMesh);
+    expectEqual("build(4, 5) static grid item keeps mesh", second[5].mesh, firstStaticItemMesh);
     expectEqual("build(4, 5) static grid item keeps bounds center x", second[5].boundsCenter.x, firstStaticItemBoundsCenterX);
     expectEqual("build(4, 5) static grid item keeps bounds center y", second[5].boundsCenter.y, firstStaticItemBoundsCenterY);
     expectEqual("build(4, 5) static grid item keeps bounds center z", second[5].boundsCenter.z, firstStaticItemBoundsCenterZ);
@@ -390,7 +407,8 @@ int main() {
     expectEqual("build(3, 4) material grid columns", thirdGridRange.columns, 4U);
     const auto thirdGridItemCount = static_cast<std::size_t>(thirdGridRange.rows) * static_cast<std::size_t>(thirdGridRange.columns);
     expectGreaterOrEqual("build(3, 4) trailing item remains outside grid", third.size(), thirdGridRange.firstItem + thirdGridItemCount + 1U);
-    const auto expectedThirdSize = (3U * 4U) + DemoSceneRenderer::kFixedItemCount;
+    const auto expectedThirdSize =
+        (3U * 4U) + DemoSceneRenderer::kFixedItemCount + 1U;
     expectNotEqual("build(3, 4) changes size from prior layout", third.size(), firstSize);
     expectEqual("build(3, 4) size follows rows*columns+kFixedItemCount", third.size(), expectedThirdSize);
 
@@ -407,7 +425,7 @@ int main() {
             const auto itemOffset = static_cast<std::uint32_t>(itemIndex - 1U);
             const auto row = itemOffset / 5U;
             const auto column = itemOffset - row * 5U;
-            renderList[itemIndex].mesh = ve::SceneMeshId::Sphere;
+            renderList[itemIndex].mesh = ve::builtin_assets::kSphere;
             renderList[itemIndex].boundsRadius = syntheticSphereBoundsRadius;
             renderList[itemIndex].boundsCenter = {(static_cast<float>(column) - 2.0f) * 2.0f, 0.28f, -4.4f - (static_cast<float>(row) * 1.25f)};
         }
@@ -425,7 +443,7 @@ int main() {
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile column end", homogeneousTile.columnEnd, 5U);
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile itemCount", homogeneousTile.itemCount, static_cast<std::size_t>(15));
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile reports same mesh", homogeneousTile.homogeneousMesh, true);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile common mesh", static_cast<int>(homogeneousTile.commonMesh), static_cast<int>(ve::SceneMeshId::Sphere));
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile common mesh", homogeneousTile.commonMesh, ve::builtin_assets::kSphere);
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius finite", std::isfinite(homogeneousTile.maxItemBoundsRadius), true);
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius positive", homogeneousTile.maxItemBoundsRadius > 0.0f, true);
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) homogeneous tile maxItemBoundsRadius bounded by tile radius", homogeneousTile.maxItemBoundsRadius <= homogeneousTile.boundsRadius, true);
@@ -439,13 +457,13 @@ int main() {
         expectEqual("SceneRenderList::push(non-grid-item) keeps materialGridTiles cache size", renderList.materialGridTiles().size(), expectedMaterialGridTileCount);
 
         const auto revisionBeforeOutsideMutation = renderList.materialGridTileRevision();
-        renderList[0].mesh = ve::SceneMeshId::Cube;
+        renderList[0].mesh = ve::builtin_assets::kCube;
         expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps material grid tile coverage", renderList.materialGridTilesCoverRange(), true);
         expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps materialGridTiles cache size", renderList.materialGridTiles().size(), expectedMaterialGridTileCount);
         expectEqual("SceneRenderList::operator[](outside materialGridRange) keeps materialGridTileRevision", renderList.materialGridTileRevision(), revisionBeforeOutsideMutation);
 
         const auto revisionBeforeInsideMutation = renderList.materialGridTileRevision();
-        renderList[2].mesh = ve::SceneMeshId::Cube;
+        renderList[2].mesh = ve::builtin_assets::kCube;
         const auto revisionAfterInsideMutation = renderList.materialGridTileRevision();
         expectEqual("SceneRenderList::operator[](inside materialGridRange) clears material grid tile coverage", renderList.materialGridTilesCoverRange(), false);
         expectEqual("SceneRenderList::operator[](inside materialGridRange) clears materialGridTiles cache", renderList.materialGridTiles().empty(), true);
@@ -470,7 +488,7 @@ int main() {
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves column end", mixedTile.columnEnd, 5U);
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile preserves itemCount", mixedTile.itemCount, static_cast<std::size_t>(15));
             expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile reports non-homogeneous mesh", mixedTile.homogeneousMesh, false);
-            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile keeps first mesh as common", static_cast<int>(mixedTile.commonMesh), static_cast<int>(ve::SceneMeshId::Sphere));
+            expectEqual("SceneRenderList::rebuildMaterialGridTiles(16, 16) mixed tile keeps first mesh as common", mixedTile.commonMesh, ve::builtin_assets::kSphere);
         }
 
         renderList.setMaterialGridRange(2U, 2U, 2U);

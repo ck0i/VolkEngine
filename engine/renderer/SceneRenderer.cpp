@@ -330,7 +330,7 @@ void SceneRenderList::rebuildMaterialGridTiles(const std::uint32_t tileRows, con
             const std::size_t firstTileItem = materialGridRange_.firstItem +
                                               (static_cast<std::size_t>(rowBegin) * materialGridRange_.columns) +
                                               columnBegin;
-            const SceneMeshId commonMesh = items_[firstTileItem].mesh;
+            const MeshAssetHandle commonMesh = items_[firstTileItem].mesh;
             bool homogeneousMesh = true;
             float maxItemBoundsRadius = 0.0f;
             for (std::uint32_t row = rowBegin; row < rowEnd; ++row) {
@@ -665,11 +665,23 @@ void DemoSceneRenderer::validateMaterialGridDimensions(const std::uint32_t mater
     (void)requiredItemCount(materialGridRows, materialGridColumns);
 }
 
-void DemoSceneRenderer::setImportedModelBounds(const MeshBounds& bounds) noexcept {
-    if (!validMeshBounds(bounds)) {
-        return;
+void DemoSceneRenderer::setAuthoredSceneItems(std::vector<SceneRenderItem> items) {
+    for (const SceneRenderItem& item : items) {
+        const bool finiteModel = std::ranges::all_of(
+            item.model.m, [](const float value) { return std::isfinite(value); });
+        const auto finiteVec4 = [](const Vec4 value) noexcept {
+            return std::isfinite(value.x) && std::isfinite(value.y) &&
+                   std::isfinite(value.z) && std::isfinite(value.w);
+        };
+        if (!item.mesh.valid() || !finite(item.boundsCenter) ||
+            !std::isfinite(item.boundsRadius) || item.boundsRadius < 0.0f ||
+            !finiteModel || !finiteVec4(item.material.albedoRoughness) ||
+            !finiteVec4(item.material.emissiveMetallic) ||
+            !finiteVec4(item.material.flags)) {
+            throw std::invalid_argument("Authored scene contains an invalid render item");
+        }
     }
-    importedModelLocalBounds_ = bounds;
+    authoredSceneItems_ = std::move(items);
     invalidateStaticSceneLayout();
 }
 
@@ -685,26 +697,6 @@ const SceneRenderList& DemoSceneRenderer::build(const double elapsedSeconds,
     return renderList_;
 }
 
-Mat4 DemoSceneRenderer::importedModelMatrix() {
-    return translate(kImportedModelTranslation) * rotateY(kImportedModelRotationY) *
-           scale({kImportedModelScale, kImportedModelScale, kImportedModelScale});
-}
-
-Vec3 DemoSceneRenderer::transformPoint(const Mat4& matrix, const Vec3 point) noexcept {
-    return Vec3{matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
-                matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
-                matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]};
-}
-
-SceneRenderItem DemoSceneRenderer::importedModelItem() const {
-    const Mat4 model = importedModelMatrix();
-    const MeshBounds& bounds = importedModelLocalBounds_.valid ? importedModelLocalBounds_ : kFallbackImportedModelBounds;
-    return SceneRenderItem{transformPoint(model, bounds.center),
-                           bounds.radius * kImportedModelScale,
-                           SceneMeshId::ImportedModel,
-                           model,
-                           {{0.72f, 0.66f, 0.54f, 0.42f}, {0.0f, 0.0f, 0.0f, 0.65f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
-}
 
 void DemoSceneRenderer::invalidateStaticSceneLayout() noexcept {
     renderList_.clear();
@@ -719,16 +711,18 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
                                                 const std::uint32_t materialGridTileRows,
                                                 const std::uint32_t materialGridTileColumns,
                                                 const std::size_t requiredItems) {
+    const std::size_t actualRequiredItems =
+        requiredItems + authoredSceneItems_.size();
     if (cachedMaterialGridRows_ == materialGridRows &&
         cachedMaterialGridColumns_ == materialGridColumns &&
         cachedMaterialGridTileRows_ == materialGridTileRows &&
         cachedMaterialGridTileColumns_ == materialGridTileColumns &&
-        renderList_.size() == requiredItems) {
+        renderList_.size() == actualRequiredItems) {
         return;
     }
 
     renderList_.clear();
-    renderList_.reserve(requiredItems);
+    renderList_.reserve(actualRequiredItems);
     for (std::size_t itemIndex = 0; itemIndex < kAnimatedItemCount; ++itemIndex) {
         renderList_.push(SceneRenderItem{});
     }
@@ -743,7 +737,7 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
             const Vec3 center{x, 0.28f, z};
             renderList_.push(SceneRenderItem{center,
                                              0.32f,
-                                             SceneMeshId::Sphere,
+                                             builtin_assets::kSphere,
                                              translate(center) * scale({0.28f, 0.28f, 0.28f}),
                                              {{0.38f + 0.11f * metallic * 4.0f, 0.42f + 0.08f * roughness * 3.0f, 0.82f - 0.08f * metallic * 4.0f, roughness},
                                               {0.0f, 0.0f, 0.0f, metallic},
@@ -754,10 +748,12 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
     renderList_.rebuildMaterialGridTiles(materialGridTileRows, materialGridTileColumns);
     renderList_.push(SceneRenderItem{{0.0f, 0.0f, 0.0f},
                                      17.0f,
-                                     SceneMeshId::GroundPlane,
+                                     builtin_assets::kGroundPlane,
                                      Mat4::identity(),
                                      {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.55f}}});
-    renderList_.push(importedModelItem());
+    for (const SceneRenderItem& item : authoredSceneItems_) {
+        renderList_.push(item);
+    }
     cachedMaterialGridRows_ = materialGridRows;
     cachedMaterialGridColumns_ = materialGridColumns;
     cachedMaterialGridTileRows_ = materialGridTileRows;
@@ -768,27 +764,27 @@ void DemoSceneRenderer::writeAnimatedItems(const double elapsedSeconds) {
     const double rotation = elapsedSeconds * 0.55;
     renderList_[0] = SceneRenderItem{{-1.55f, 0.9f, 0.0f},
                                      1.30f,
-                                     SceneMeshId::Cube,
+                                     builtin_assets::kCube,
                                      translate({-1.55f, 0.9f, 0.0f}) * rotateY(static_cast<float>(rotation)) * scale({0.75f, 0.75f, 0.75f}),
                                      {{0.75f, 0.18f, 0.08f, 0.58f}, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
     renderList_[1] = SceneRenderItem{{1.35f, 1.05f, 0.0f},
                                      0.95f,
-                                     SceneMeshId::Sphere,
+                                     builtin_assets::kSphere,
                                      translate({1.35f, 1.05f, 0.0f}) * rotateY(static_cast<float>(-rotation * 0.6)) * scale({0.9f, 0.9f, 0.9f}),
                                      {{0.82f, 0.78f, 0.66f, 0.32f}, {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
     renderList_[2] = SceneRenderItem{{-2.75f, 0.5f, -2.1f},
                                      0.50f,
-                                     SceneMeshId::Sphere,
+                                     builtin_assets::kSphere,
                                      translate({-2.75f, 0.5f, -2.1f}) * scale({0.45f, 0.45f, 0.45f}),
                                      {{0.95f, 0.54f, 0.28f, 0.18f}, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
     renderList_[3] = SceneRenderItem{{0.0f, 0.5f, -2.1f},
                                      0.50f,
-                                     SceneMeshId::Sphere,
+                                     builtin_assets::kSphere,
                                      translate({0.0f, 0.5f, -2.1f}) * scale({0.45f, 0.45f, 0.45f}),
                                      {{0.62f, 0.68f, 0.78f, 0.52f}, {0.0f, 0.0f, 0.0f, 0.45f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
     renderList_[4] = SceneRenderItem{{2.75f, 0.5f, -2.1f},
                                      0.50f,
-                                     SceneMeshId::Sphere,
+                                     builtin_assets::kSphere,
                                      translate({2.75f, 0.5f, -2.1f}) * scale({0.45f, 0.45f, 0.45f}),
                                      {{0.88f, 0.82f, 0.68f, 0.08f}, {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}};
 }

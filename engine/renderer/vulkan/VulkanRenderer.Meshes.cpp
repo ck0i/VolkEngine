@@ -36,7 +36,7 @@ void VulkanRenderer::Impl::recordMeshUpload(VkCommandBuffer commandBuffer, const
     indexCopy.size = upload.indexSize;
     vkCmdCopyBuffer(commandBuffer, upload.staging.buffer, upload.indices.buffer, 1, &indexCopy);
 
-    if (transferQueue_ == graphicsQueue_) {
+    if (deviceOwner_.transferQueue == deviceOwner_.graphicsQueue) {
         std::array<VkBufferMemoryBarrier2, 2> barriers{};
         barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
         barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
@@ -61,27 +61,46 @@ void VulkanRenderer::Impl::recordMeshUpload(VkCommandBuffer commandBuffer, const
     }
 }
 
-const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshFor(const SceneMeshId mesh) const {
-    return meshForBatch(sceneMeshBatchIndex(mesh));
+const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshFor(const MeshAssetHandle mesh) const {
+    return meshForBatch(meshBatchIndex(mesh));
+}
+
+std::size_t VulkanRenderer::Impl::meshBatchIndex(const MeshAssetHandle mesh) const {
+    if (mesh == builtin_assets::kCube || mesh == builtin_assets::kSphere ||
+        mesh == builtin_assets::kGroundPlane) {
+        return baseSceneMeshBatchIndex(mesh);
+    }
+    constexpr std::uint32_t kFirstAuthoredMeshIndex = builtin_assets::kReferenceMesh.index;
+    if (mesh.generation != 1U || mesh.index < kFirstAuthoredMeshIndex) {
+        throw std::runtime_error("Unknown or stale scene mesh handle");
+    }
+    const std::size_t batch = kBaseSceneMeshBatchOrder.size() +
+        static_cast<std::size_t>(mesh.index - kFirstAuthoredMeshIndex);
+    if (batch >= resourceOwner_.sceneMeshes.size()) {
+        throw std::runtime_error("Unknown or stale authored mesh handle");
+    }
+    return batch;
 }
 
 const VulkanRenderer::Impl::GpuMesh& VulkanRenderer::Impl::meshForBatch(const std::size_t meshIndex) const {
-    if (meshIndex >= sceneMeshes_.size()) {
+    if (meshIndex >= resourceOwner_.sceneMeshes.size()) {
         throw std::runtime_error("Scene mesh batch index out of range");
     }
-    return sceneMeshes_[meshIndex];
+    return resourceOwner_.sceneMeshes[meshIndex];
 }
 
-MeshBounds VulkanRenderer::Impl::meshBounds(const SceneMeshId mesh) const {
-    const std::size_t meshIndex = sceneMeshBatchIndex(mesh);
-    if (meshIndex >= sceneMeshBounds_.size()) {
+MeshBounds VulkanRenderer::Impl::meshBounds(const MeshAssetHandle mesh) const {
+    const std::size_t meshIndex = meshBatchIndex(mesh);
+    if (meshIndex >= resourceOwner_.sceneMeshBounds.size()) {
         throw std::runtime_error("Scene mesh bounds index out of range");
     }
-    return sceneMeshBounds_[meshIndex];
+    return resourceOwner_.sceneMeshBounds[meshIndex];
 }
 
-VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::array<MeshData, kSceneMeshBatchCount>& meshes) {
+VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
+    std::vector<MeshData>& meshes) {
     MeshUpload upload{};
+    upload.meshes.resize(meshes.size());
     for (const MeshData& mesh : meshes) {
         if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
             throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
@@ -120,7 +139,7 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::arra
         upload.staging = createBuffer(stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         {
-            ScopedVmaMap stagingMap{allocator_, upload.staging.allocation, "vmaMapMemory mesh staging"};
+            ScopedVmaMap stagingMap{deviceOwner_.allocator, upload.staging.allocation, "vmaMapMemory mesh staging"};
             auto* stagingBytes = static_cast<std::uint8_t*>(stagingMap.get());
             auto* vertexDst = reinterpret_cast<GpuVertex*>(stagingBytes);
             auto* indexDst = reinterpret_cast<std::uint32_t*>(stagingBytes + static_cast<std::size_t>(upload.indexStagingOffset));
@@ -167,26 +186,42 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(std::arra
     }
 }
 
+const ReferenceAssetBundle& VulkanRenderer::Impl::referenceAssets() {
+    if (resourceOwner_.referenceAssets == nullptr) {
+        throw std::logic_error("Renderer has no reference asset bundle");
+    }
+    return *resourceOwner_.referenceAssets;
+}
+
 void VulkanRenderer::Impl::createMeshes() {
     MeshUpload meshUpload{};
     try {
-        std::array<MeshData, kSceneMeshBatchCount> meshes{};
+        const ReferenceAssetBundle& authored = referenceAssets();
+        if (authored.scene.meshes.empty()) {
+            throw std::runtime_error("Authored reference scene contains no mesh primitives");
+        }
+        std::vector<MeshData> meshes(kBaseSceneMeshBatchOrder.size() +
+                                     authored.scene.meshes.size());
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::Cube)] = createCubeMesh();
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh)] = createUvSphereMesh(32, 64);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(16, 32);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(8, 16);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = createPlaneMesh(12.0f, 12.0f);
-        const std::filesystem::path importedModelPath = resolveAssetPath(config_.assetDirectory, config_.importedModelPath);
-        if (importedModelPath.empty()) {
-            throw std::runtime_error("Imported model path is empty");
+        stats_.assetCookMs = authored.metrics.cookMilliseconds;
+        stats_.assetRecordCount = static_cast<unsigned>(authored.database.records().size());
+        stats_.assetCacheHits = authored.metrics.cacheHits;
+        stats_.assetCacheMisses = authored.metrics.cacheMisses;
+        stats_.assetRebuiltCount = authored.metrics.rebuiltAssets;
+        logger()->info("Reference assets: {} records, {} hits, {} misses, {:.3f} ms",
+                       authored.database.records().size(), authored.metrics.cacheHits,
+                       authored.metrics.cacheMisses, authored.metrics.cookMilliseconds);
+        for (std::size_t index = 0; index < authored.scene.meshes.size(); ++index) {
+            meshes[kBaseSceneMeshBatchOrder.size() + index] =
+                authored.scene.meshes[index].mesh;
         }
-        std::error_code modelFileError;
-        if (!std::filesystem::is_regular_file(importedModelPath, modelFileError)) {
-            throw std::runtime_error("Imported model path is not a regular file: " + importedModelPath.string());
-        }
-        meshes[sceneMeshBatchIndex(SceneMeshBatchId::ImportedModel)] = loadObjMesh(importedModelPath);
+        resourceOwner_.sceneMeshBounds.resize(meshes.size());
         for (std::size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex) {
-            sceneMeshBounds_[meshIndex] = meshes[meshIndex].bounds;
+            resourceOwner_.sceneMeshBounds[meshIndex] = meshes[meshIndex].bounds;
         }
         meshUpload = stageMeshUpload(meshes);
         for (MeshData& mesh : meshes) {
@@ -201,19 +236,20 @@ void VulkanRenderer::Impl::createMeshes() {
         throw;
     }
 
-    sceneVertexBuffer_ = takeBuffer(meshUpload.vertices);
-    sceneIndexBuffer_ = takeBuffer(meshUpload.indices);
-    sceneMeshes_ = meshUpload.meshes;
-    for (std::size_t meshIndex = 0; meshIndex < sceneMeshes_.size(); ++meshIndex) {
-        sceneMeshTriangleCounts_[meshIndex] = sceneMeshes_[meshIndex].indexCount / 3U;
+    resourceOwner_.sceneVertexBuffer = takeBuffer(meshUpload.vertices);
+    resourceOwner_.sceneIndexBuffer = takeBuffer(meshUpload.indices);
+    resourceOwner_.sceneMeshes = meshUpload.meshes;
+    resourceOwner_.sceneMeshTriangleCounts.resize(resourceOwner_.sceneMeshes.size());
+    for (std::size_t meshIndex = 0; meshIndex < resourceOwner_.sceneMeshes.size(); ++meshIndex) {
+        resourceOwner_.sceneMeshTriangleCounts[meshIndex] = resourceOwner_.sceneMeshes[meshIndex].indexCount / 3U;
     }
 
-    setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(sceneVertexBuffer_.buffer), "Scene Geometry Vertex Buffer");
-    vmaSetAllocationName(allocator_, sceneVertexBuffer_.allocation, "Scene Geometry Vertex Allocation");
-    sceneVertexBuffer_.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, "Scene Geometry Vertex Buffer", sceneVertexBuffer_.size);
-    setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(sceneIndexBuffer_.buffer), "Scene Geometry Index Buffer");
-    vmaSetAllocationName(allocator_, sceneIndexBuffer_.allocation, "Scene Geometry Index Allocation");
-    sceneIndexBuffer_.resourceId = resourceRegistry_.registerResource(GpuResourceKind::Buffer, "Scene Geometry Index Buffer", sceneIndexBuffer_.size);
+    setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(resourceOwner_.sceneVertexBuffer.buffer), "Scene Geometry Vertex Buffer");
+    vmaSetAllocationName(deviceOwner_.allocator, resourceOwner_.sceneVertexBuffer.allocation, "Scene Geometry Vertex Allocation");
+    resourceOwner_.sceneVertexBuffer.resourceId = resourceOwner_.registry.registerResource(GpuResourceKind::Buffer, "Scene Geometry Vertex Buffer", resourceOwner_.sceneVertexBuffer.size);
+    setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(resourceOwner_.sceneIndexBuffer.buffer), "Scene Geometry Index Buffer");
+    vmaSetAllocationName(deviceOwner_.allocator, resourceOwner_.sceneIndexBuffer.allocation, "Scene Geometry Index Allocation");
+    resourceOwner_.sceneIndexBuffer.resourceId = resourceOwner_.registry.registerResource(GpuResourceKind::Buffer, "Scene Geometry Index Buffer", resourceOwner_.sceneIndexBuffer.size);
 }
 
 } // namespace ve

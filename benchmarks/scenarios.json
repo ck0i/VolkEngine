@@ -1,0 +1,54 @@
+{
+  "schema": "volkengine.benchmark-scenarios",
+  "schema_version": 1,
+  "scenarios": {
+    "submission-pressure-v1": {
+      "frames": 240,
+      "warmup_frames": 60,
+      "resolution": [1280, 720],
+      "arguments": ["--grid-rows", "32", "--grid-columns", "32", "--indirect-draws", "--no-vsync"],
+      "scene_revision": "reference-gltf-v1",
+      "limits": {"cpu_frame_p95_ms": 33.0, "gpu_frame_p95_ms": 33.0, "hitches": 12, "graph_transient_bytes": 67108864}
+    },
+    "geometry-pressure-v1": {
+      "frames": 240,
+      "warmup_frames": 60,
+      "resolution": [1280, 720],
+      "arguments": ["--grid-rows", "16", "--grid-columns", "16", "--depth-prepass", "--no-vsync"],
+      "scene_revision": "reference-gltf-v1",
+      "limits": {"cpu_frame_p95_ms": 33.0, "gpu_frame_p95_ms": 33.0, "hitches": 12, "graph_transient_bytes": 67108864}
+    },
+    "material-pressure-v1": {
+      "frames": 240,
+      "warmup_frames": 60,
+      "resolution": [1280, 720],
+      "arguments": ["--grid-rows", "32", "--grid-columns", "32", "--no-depth-prepass", "--no-vsync"],
+      "scene_revision": "reference-gltf-v1",
+      "limits": {"cpu_frame_p95_ms": 33.0, "gpu_frame_p95_ms": 33.0, "hitches": 12, "graph_transient_bytes": 67108864}
+    },
+    "visibility-pressure-v1": {
+      "frames": 240,
+      "warmup_frames": 60,
+      "resolution": [1280, 720],
+      "arguments": ["--grid-rows", "64", "--grid-columns", "64", "--grid-tile-rows", "8", "--grid-tile-columns", "8", "--no-vsync"],
+      "scene_revision": "reference-gltf-v1",
+      "limits": {"cpu_frame_p95_ms": 50.0, "gpu_frame_p95_ms": 50.0, "hitches": 18, "graph_transient_bytes": 67108864}
+    },
+    "resize-recompile-v1": {
+      "frames": 180,
+      "warmup_frames": 30,
+      "resolution": [1280, 720],
+      "arguments": ["--resize-smoke", "--no-vsync"],
+      "scene_revision": "reference-gltf-v1",
+      "limits": {"cpu_frame_p95_ms": 50.0, "gpu_frame_p95_ms": 50.0, "hitches": 18, "graph_transient_bytes": 67108864, "minimum_graph_recompiles": 3}
+    },
+    "asset-cold-warm-v1": {
+      "frames": 1,
+      "warmup_frames": 0,
+      "resolution": [1280, 720],
+      "arguments": ["--no-vsync"],
+      "scene_revision": "reference-gltf-v1",
+      "limits": {"cold_rebuilt_assets": 6, "warm_cache_hits": 6}
+    }
+  }
+}

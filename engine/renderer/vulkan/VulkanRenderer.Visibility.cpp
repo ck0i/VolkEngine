@@ -3,12 +3,17 @@
 namespace ve {
 
 VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibility(const Camera& camera, const Mat4& projection, const Mat4& viewProjection, const SceneRenderList& renderItems) {
-    static_assert(kSceneMeshBatchOrder.size() == kSceneMeshBatchCount);
     SceneVisibilityPlan plan{};
+    plan.meshInstanceCounts.resize(resourceOwner_.sceneMeshes.size());
+    if (gridVisibilityCache_.meshInstanceCounts.size() != resourceOwner_.sceneMeshes.size()) {
+        gridVisibilityCache_.valid = false;
+        gridVisibilityCache_.meshInstanceCounts.resize(resourceOwner_.sceneMeshes.size());
+        gridVisibilityCache_.instanceDataByMesh.resize(resourceOwner_.sceneMeshes.size());
+    }
     const Frustum frustum = extractFrustumPlanes(viewProjection);
     auto& visibleSceneWork = visibleSceneWorkScratch_;
     visibleSceneWork.clear();
-    const auto& meshTriangleCounts = sceneMeshTriangleCounts_;
+    const auto& meshTriangleCounts = resourceOwner_.sceneMeshTriangleCounts;
 
     const Vec3 cameraPosition = camera.position();
     const Vec3 cameraForward = camera.forward();
@@ -49,17 +54,17 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
         }
         return sphereLowBatchIndex;
     };
-    const auto meshBatchIndexFor = [&](const SceneMeshId mesh, const Vec3 boundsCenter, const float projectedBoundsRadius, const float conservativeDepthRadius) {
-        if (mesh == SceneMeshId::Sphere) {
+    const auto meshBatchIndexFor = [&](const MeshAssetHandle mesh, const Vec3 boundsCenter, const float projectedBoundsRadius, const float conservativeDepthRadius) {
+        if (mesh == builtin_assets::kSphere) {
             return sphereLodBatchIndex(boundsCenter, projectedBoundsRadius, conservativeDepthRadius);
         }
-        return sceneMeshBatchIndex(mesh);
+        return meshBatchIndex(mesh);
     };
     const auto acceptVisibleItem = [&](const std::size_t itemIndex, const SceneRenderItem& item) {
         const std::size_t meshIndex = meshBatchIndexFor(item.mesh, item.boundsCenter, item.boundsRadius, 0.0f);
-        visibleSceneWork.push_back(VisibleSceneWork{VisibleSceneWork::Kind::Item,
-                                                    static_cast<std::uint8_t>(meshIndex),
-                                                    static_cast<std::uint32_t>(itemIndex)});
+        visibleSceneWork.push_back(VisibleSceneWork{
+            VisibleSceneWork::Kind::Item, static_cast<std::uint32_t>(meshIndex),
+            static_cast<std::uint32_t>(itemIndex)});
         ++plan.visibleItemCount;
         ++plan.meshInstanceCounts[meshIndex];
         plan.sceneTriangleCount += meshTriangleCounts[meshIndex];
@@ -72,16 +77,17 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
         }
         // Sphere tiles are logically homogeneous but camera-dependent LOD is per item.
         // Fall back to the tile's item loop while retaining its accepted frustum result.
-        if (tile.commonMesh == SceneMeshId::Sphere) {
+        if (tile.commonMesh == builtin_assets::kSphere) {
             return false;
         }
         const std::size_t meshIndex = meshBatchIndexFor(tile.commonMesh, tile.boundsCenter, tile.maxItemBoundsRadius, tile.boundsRadius);
         if (tile.itemCount > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max() - plan.meshInstanceCounts[meshIndex])) {
             return false;
         }
-        visibleSceneWork.push_back(VisibleSceneWork{VisibleSceneWork::Kind::HomogeneousGridTile,
-                                                    static_cast<std::uint8_t>(meshIndex),
-                                                    static_cast<std::uint32_t>(tileIndex)});
+        visibleSceneWork.push_back(VisibleSceneWork{
+            VisibleSceneWork::Kind::HomogeneousGridTile,
+            static_cast<std::uint32_t>(meshIndex),
+            static_cast<std::uint32_t>(tileIndex)});
         plan.visibleItemCount += static_cast<std::uint32_t>(tile.itemCount);
         plan.meshInstanceCounts[meshIndex] += static_cast<std::uint32_t>(tile.itemCount);
         plan.sceneTriangleCount += static_cast<std::uint64_t>(meshTriangleCounts[meshIndex]) * static_cast<std::uint64_t>(tile.itemCount);
@@ -118,7 +124,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
             plan.gridTilesAccepted += gridVisibilityCache_.gridTilesAccepted;
             plan.gridTilesCulled += gridVisibilityCache_.gridTilesCulled;
             plan.gridTilesIntersected += gridVisibilityCache_.gridTilesIntersected;
-            for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
+            for (std::size_t meshIndex = 0; meshIndex < resourceOwner_.sceneMeshes.size(); ++meshIndex) {
                 plan.meshInstanceCounts[meshIndex] += gridVisibilityCache_.meshInstanceCounts[meshIndex];
             }
             plan.gridVisibilityCacheHit = true;
@@ -170,7 +176,7 @@ VulkanRenderer::Impl::SceneVisibilityPlan VulkanRenderer::Impl::planSceneVisibil
             gridVisibilityCache_.tileCount = gridTiles.size();
             gridVisibilityCache_.viewProjection = viewProjection;
             gridVisibilityCache_.workItemCount = static_cast<std::uint32_t>(plan.gridWorkEnd - plan.gridWorkBegin);
-            for (std::size_t meshIndex = 0; meshIndex < kSceneMeshBatchOrder.size(); ++meshIndex) {
+            for (std::size_t meshIndex = 0; meshIndex < resourceOwner_.sceneMeshes.size(); ++meshIndex) {
                 gridVisibilityCache_.meshInstanceCounts[meshIndex] = plan.meshInstanceCounts[meshIndex] - meshCountBegin[meshIndex];
                 gridVisibilityCache_.instanceDataByMesh[meshIndex].clear();
                 gridVisibilityCache_.instanceDataByMesh[meshIndex].reserve(gridVisibilityCache_.meshInstanceCounts[meshIndex]);

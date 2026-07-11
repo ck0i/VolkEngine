@@ -9,25 +9,25 @@ VkCommandBuffer VulkanRenderer::Impl::beginOneShotUploadCommands(const VkCommand
     allocInfo.commandBufferCount = 1;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     const std::string allocateOperation = std::string("vkAllocateCommandBuffers ") + operationName;
-    checkVk(vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer), allocateOperation.c_str());
+    checkVk(vkAllocateCommandBuffers(deviceOwner_.device, &allocInfo, &commandBuffer), allocateOperation.c_str());
     try {
         VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         const std::string beginOperation = std::string("vkBeginCommandBuffer ") + operationName;
         checkVk(vkBeginCommandBuffer(commandBuffer, &beginInfo), beginOperation.c_str());
     } catch (...) {
-        vkFreeCommandBuffers(device_, commandPool, 1, &commandBuffer);
+        vkFreeCommandBuffers(deviceOwner_.device, commandPool, 1, &commandBuffer);
         throw;
     }
     return commandBuffer;
 }
 
 VkCommandBuffer VulkanRenderer::Impl::beginGraphicsUploadCommands() const {
-    return beginOneShotUploadCommands(graphicsCommandPool_, "graphics upload");
+    return beginOneShotUploadCommands(frameOwner_.graphicsCommandPool, "graphics upload");
 }
 
 void VulkanRenderer::Impl::submitGraphicsUpload(VkCommandBuffer commandBuffer, Buffer staging) {
-    submitUploadBatch(graphicsQueue_, graphicsCommandPool_, commandBuffer, "graphics upload", staging, false);
+    submitUploadBatch(deviceOwner_.graphicsQueue, frameOwner_.graphicsCommandPool, commandBuffer, "graphics upload", staging, false);
 }
 
 void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
@@ -48,13 +48,13 @@ void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
 
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         const std::string fenceOperation = std::string("vkCreateFence ") + operationName;
-        checkVk(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence), fenceOperation.c_str());
+        checkVk(vkCreateFence(deviceOwner_.device, &fenceInfo, nullptr, &upload.fence), fenceOperation.c_str());
         setObjectName(VK_OBJECT_TYPE_FENCE, handleToUint64(upload.fence), std::string("One-Shot ") + operationName + " Fence");
 
         if (signalSemaphore) {
             VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             const std::string semaphoreOperation = std::string("vkCreateSemaphore ") + operationName;
-            checkVk(vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &upload.signalSemaphore), semaphoreOperation.c_str());
+            checkVk(vkCreateSemaphore(deviceOwner_.device, &semaphoreInfo, nullptr, &upload.signalSemaphore), semaphoreOperation.c_str());
             setObjectName(VK_OBJECT_TYPE_SEMAPHORE, handleToUint64(upload.signalSemaphore), std::string("One-Shot ") + operationName + " Semaphore");
         }
 
@@ -62,9 +62,9 @@ void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
 
-        pendingUploads_.push_back(std::move(upload));
+        frameOwner_.pendingUploads.push_back(std::move(upload));
         queued = true;
-        PendingUploadBatch& queuedUpload = pendingUploads_.back();
+        PendingUploadBatch& queuedUpload = frameOwner_.pendingUploads.back();
         if (queuedUpload.signalSemaphore != VK_NULL_HANDLE) {
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.pSignalSemaphores = &queuedUpload.signalSemaphore;
@@ -73,8 +73,8 @@ void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
         checkVk(vkQueueSubmit(queue, 1, &submitInfo, queuedUpload.fence), submitOperation.c_str());
     } catch (...) {
         if (queued) {
-            destroyPendingUpload(pendingUploads_.back());
-            pendingUploads_.pop_back();
+            destroyPendingUpload(frameOwner_.pendingUploads.back());
+            frameOwner_.pendingUploads.pop_back();
         } else {
             destroyPendingUpload(upload);
         }
@@ -85,11 +85,11 @@ void VulkanRenderer::Impl::submitUploadBatch(const VkQueue queue,
 void VulkanRenderer::Impl::retirePendingUploadResources(PendingUploadBatch& upload) {
     destroyBuffer(upload.staging);
     if (upload.fence != VK_NULL_HANDLE) {
-        vkDestroyFence(device_, upload.fence, nullptr);
+        vkDestroyFence(deviceOwner_.device, upload.fence, nullptr);
         upload.fence = VK_NULL_HANDLE;
     }
     if (upload.commandBuffer != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(device_, upload.commandPool, 1, &upload.commandBuffer);
+        vkFreeCommandBuffers(deviceOwner_.device, upload.commandPool, 1, &upload.commandBuffer);
         upload.commandBuffer = VK_NULL_HANDLE;
     }
 }
@@ -97,28 +97,28 @@ void VulkanRenderer::Impl::retirePendingUploadResources(PendingUploadBatch& uplo
 void VulkanRenderer::Impl::destroyPendingUpload(PendingUploadBatch& upload) {
     retirePendingUploadResources(upload);
     if (upload.signalSemaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(device_, upload.signalSemaphore, nullptr);
+        vkDestroySemaphore(deviceOwner_.device, upload.signalSemaphore, nullptr);
         upload.signalSemaphore = VK_NULL_HANDLE;
     }
     upload.commandPool = VK_NULL_HANDLE;
 }
 
 void VulkanRenderer::Impl::retireCompletedUploads() {
-    for (std::size_t index = 0; index < pendingUploads_.size();) {
-        PendingUploadBatch& upload = pendingUploads_[index];
+    for (std::size_t index = 0; index < frameOwner_.pendingUploads.size();) {
+        PendingUploadBatch& upload = frameOwner_.pendingUploads[index];
         if (upload.fence == VK_NULL_HANDLE) {
             if (upload.signalSemaphore == VK_NULL_HANDLE) {
-                if (index + 1U < pendingUploads_.size()) {
-                    pendingUploads_[index] = std::move(pendingUploads_.back());
+                if (index + 1U < frameOwner_.pendingUploads.size()) {
+                    frameOwner_.pendingUploads[index] = std::move(frameOwner_.pendingUploads.back());
                 }
-                pendingUploads_.pop_back();
+                frameOwner_.pendingUploads.pop_back();
                 continue;
             }
             ++index;
             continue;
         }
 
-        const VkResult status = vkGetFenceStatus(device_, upload.fence);
+        const VkResult status = vkGetFenceStatus(deviceOwner_.device, upload.fence);
         if (status == VK_NOT_READY) {
             ++index;
             continue;
@@ -126,10 +126,10 @@ void VulkanRenderer::Impl::retireCompletedUploads() {
         checkVk(status, "vkGetFenceStatus upload");
         retirePendingUploadResources(upload);
         if (upload.signalSemaphore == VK_NULL_HANDLE) {
-            if (index + 1U < pendingUploads_.size()) {
-                pendingUploads_[index] = std::move(pendingUploads_.back());
+            if (index + 1U < frameOwner_.pendingUploads.size()) {
+                frameOwner_.pendingUploads[index] = std::move(frameOwner_.pendingUploads.back());
             }
-            pendingUploads_.pop_back();
+            frameOwner_.pendingUploads.pop_back();
             continue;
         }
         ++index;
@@ -139,7 +139,7 @@ void VulkanRenderer::Impl::retireCompletedUploads() {
 void VulkanRenderer::Impl::destroyFrameUploadWaitSemaphores(FrameResources& frame) {
     for (VkSemaphore& semaphore : frame.uploadWaitSemaphores) {
         if (semaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(device_, semaphore, nullptr);
+            vkDestroySemaphore(deviceOwner_.device, semaphore, nullptr);
             semaphore = VK_NULL_HANDLE;
         }
     }
@@ -148,8 +148,8 @@ void VulkanRenderer::Impl::destroyFrameUploadWaitSemaphores(FrameResources& fram
 
 void VulkanRenderer::Impl::collectPendingUploadWaitSemaphores(std::vector<VkSemaphore>& semaphores) const {
     semaphores.clear();
-    semaphores.reserve(pendingUploads_.size());
-    for (const PendingUploadBatch& upload : pendingUploads_) {
+    semaphores.reserve(frameOwner_.pendingUploads.size());
+    for (const PendingUploadBatch& upload : frameOwner_.pendingUploads) {
         if (upload.signalSemaphore == VK_NULL_HANDLE) {
             continue;
         }
@@ -158,12 +158,12 @@ void VulkanRenderer::Impl::collectPendingUploadWaitSemaphores(std::vector<VkSema
 }
 
 void VulkanRenderer::Impl::markUploadWaitSemaphoresQueued(FrameResources& frame) noexcept {
-    vulkan_renderer_detail::queueReservedUploadWaitSemaphores(pendingUploads_, frame.uploadWaitSemaphores);
+    vulkan_renderer_detail::queueReservedUploadWaitSemaphores(frameOwner_.pendingUploads, frame.uploadWaitSemaphores);
 }
 
 bool VulkanRenderer::Impl::formatSupportsLinearMipBlit(const VkFormat format) const {
     VkFormatProperties properties{};
-    vkGetPhysicalDeviceFormatProperties(physicalDevice_, format, &properties);
+    vkGetPhysicalDeviceFormatProperties(deviceOwner_.physicalDevice, format, &properties);
     constexpr VkFormatFeatureFlags requiredFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT |
                                                       VK_FORMAT_FEATURE_BLIT_DST_BIT |
                                                       VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
@@ -222,12 +222,12 @@ void VulkanRenderer::Impl::generateMipmaps(VkCommandBuffer commandBuffer, ImageR
 }
 
 VkCommandBuffer VulkanRenderer::Impl::beginUploadCommands() const {
-    return beginOneShotUploadCommands(transferCommandPool_, "transfer upload");
+    return beginOneShotUploadCommands(frameOwner_.transferCommandPool, "transfer upload");
 }
 
 void VulkanRenderer::Impl::submitTransferUpload(VkCommandBuffer commandBuffer, Buffer staging) {
-    const bool needsQueueSemaphore = transferQueue_ != graphicsQueue_;
-    submitUploadBatch(transferQueue_, transferCommandPool_, commandBuffer, "transfer upload", staging, needsQueueSemaphore);
+    const bool needsQueueSemaphore = deviceOwner_.transferQueue != deviceOwner_.graphicsQueue;
+    submitUploadBatch(deviceOwner_.transferQueue, frameOwner_.transferCommandPool, commandBuffer, "transfer upload", staging, needsQueueSemaphore);
 }
 
 } // namespace ve

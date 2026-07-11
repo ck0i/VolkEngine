@@ -160,9 +160,10 @@ class GamepadState {
 
     [[nodiscard]] static constexpr std::uint16_t buttonMask(const GamepadButton button) noexcept {
         const auto ordinal = static_cast<std::uint8_t>(button);
-        return ordinal < static_cast<std::uint8_t>(GamepadButton::Count)
-                   ? static_cast<std::uint16_t>(std::uint16_t{1} << ordinal)
-                   : 0U;
+        if (ordinal >= static_cast<std::uint8_t>(GamepadButton::Count)) {
+            return 0U;
+        }
+        return static_cast<std::uint16_t>(std::uint16_t{1} << ordinal);
     }
 
     bool connected_ = false;
@@ -218,9 +219,10 @@ class InputState {
 
     [[nodiscard]] static constexpr std::uint8_t mouseButtonMask(const InputMouseButton button) noexcept {
         const auto ordinal = static_cast<std::uint8_t>(button);
-        return ordinal < static_cast<std::uint8_t>(InputMouseButton::Count)
-                   ? static_cast<std::uint8_t>(std::uint8_t{1} << ordinal)
-                   : 0U;
+        if (ordinal >= static_cast<std::uint8_t>(InputMouseButton::Count)) {
+            return 0U;
+        }
+        return static_cast<std::uint8_t>(std::uint8_t{1} << ordinal);
     }
 
     std::uint64_t heldKeys_ = 0U;

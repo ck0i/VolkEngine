@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assets/ReferenceAssetPipeline.hpp"
 #include "core/Camera.hpp"
 #include "core/Config.hpp"
 #include "core/Time.hpp"
@@ -31,6 +32,7 @@ private:
                     WorldSystemScheduler* scheduler,
                     const RunOptions& options);
     EngineConfig config_;
+    ReferenceAssetBundle referenceAssets_;
     FixedStepClock simulationClock_;
     InputTracker simulationInputTracker_;
     GlfwRuntime glfwRuntime_;

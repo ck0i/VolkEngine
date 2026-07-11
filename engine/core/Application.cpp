@@ -1,11 +1,15 @@
 #include "core/Application.hpp"
 #include "core/WorldScheduler.hpp"
+#include "core/RunSummary.hpp"
 
 #include "core/Log.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <spdlog/spdlog.h>
 
@@ -22,22 +26,108 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
     return "unknown";
 }
 
+RenderMaterial renderMaterial(const ImportedMaterial& material) {
+    RenderMaterial result{
+        {material.baseColorFactor.x, material.baseColorFactor.y,
+         material.baseColorFactor.z, material.roughnessFactor},
+        {material.emissiveFactor.x, material.emissiveFactor.y,
+         material.emissiveFactor.z, material.metallicFactor},
+        {}};
+    float normalScale = 1.0f;
+    for (const ImportedTextureReference& texture : material.textures) {
+        switch (texture.role) {
+        case TextureRole::BaseColor: result.flags.x = 1.0f; break;
+        case TextureRole::Normal:
+            result.flags.y = 1.0f;
+            normalScale = texture.scale;
+            break;
+        case TextureRole::MetallicRoughness: result.flags.z = 1.0f; break;
+        case TextureRole::Occlusion:
+        case TextureRole::Emissive: break;
+        }
+    }
+    result.flags.w = normalScale;
+    return result;
+}
+
+Mat4 nodeWorldTransform(const ImportedGltfScene& scene, const std::size_t nodeIndex) {
+    Mat4 model = scene.nodes[nodeIndex].localTransform;
+    std::uint32_t parent = scene.nodes[nodeIndex].parent;
+    for (std::size_t depth = 0; parent != std::numeric_limits<std::uint32_t>::max(); ++depth) {
+        if (parent >= scene.nodes.size() || depth >= scene.nodes.size()) {
+            throw std::runtime_error("Reference scene hierarchy is invalid");
+        }
+        model = scene.nodes[parent].localTransform * model;
+        parent = scene.nodes[parent].parent;
+    }
+    return model;
+}
+
+Vec3 transformPoint(const Mat4& matrix, const Vec3 point) noexcept {
+    return {matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
+            matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
+            matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]};
+}
+
+float maximumScale(const Mat4& matrix) noexcept {
+    const Vec3 c0{matrix.m[0], matrix.m[1], matrix.m[2]};
+    const Vec3 c1{matrix.m[4], matrix.m[5], matrix.m[6]};
+    const Vec3 c2{matrix.m[8], matrix.m[9], matrix.m[10]};
+    return std::sqrt(std::max({dot(c0, c0), dot(c1, c1), dot(c2, c2)}));
+}
+
+std::vector<SceneRenderItem> referenceDraws(const ImportedGltfScene& scene,
+                                            const VulkanRenderer& renderer) {
+    std::size_t drawCount = 0;
+    for (const ImportedSceneNode& node : scene.nodes) {
+        drawCount += node.meshPrimitives.size();
+    }
+    std::vector<SceneRenderItem> draws;
+    draws.reserve(drawCount);
+    for (std::size_t nodeIndex = 0; nodeIndex < scene.nodes.size(); ++nodeIndex) {
+        const ImportedSceneNode& node = scene.nodes[nodeIndex];
+        const Mat4 model = nodeWorldTransform(scene, nodeIndex);
+        for (const AssetId meshId : node.meshPrimitives) {
+            const auto mesh = std::ranges::find(scene.meshes, meshId,
+                                                &ImportedMeshPrimitive::id);
+            if (mesh == scene.meshes.end()) {
+                throw std::runtime_error("Reference node uses a missing mesh primitive");
+            }
+            const auto material = std::ranges::find(scene.materials, mesh->material,
+                                                    &ImportedMaterial::id);
+            if (material == scene.materials.end()) {
+                throw std::runtime_error("Reference mesh material is missing");
+            }
+            const MeshAssetHandle handle = referenceMeshHandle(scene, meshId);
+            const MeshBounds bounds = renderer.meshBounds(handle);
+            draws.push_back({transformPoint(model, bounds.center),
+                             bounds.radius * maximumScale(model), handle, model,
+                             renderMaterial(*material)});
+        }
+    }
+    return draws;
+}
+
 
 } // namespace
 
 
 Application::Application(EngineConfig config)
     : config_(std::move(config)),
+      referenceAssets_(cookReferenceAssets(config_.assetDirectory,
+                                           config_.cacheDirectory / "assets",
+                                           "vulkan-runtime")),
       simulationClock_(config_.fixedSimulationStepSeconds,
                        config_.maximumSimulationAccumulatedSeconds,
                        config_.maximumSimulationSubsteps),
-      simulationInputTracker_{}, glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{}, renderer_(window_, config_),
+      simulationInputTracker_{}, glfwRuntime_{}, window_(glfwRuntime_, config_), camera_{},
+      renderer_(window_, config_, referenceAssets_),
       sceneRenderer_{}, worldSceneExtractor_{}, clock_{} {
     const VkExtent2D extent = window_.framebufferExtent();
     if (extent.width > 0U && extent.height > 0U) {
         camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
     }
-    sceneRenderer_.setImportedModelBounds(renderer_.meshBounds(SceneMeshId::ImportedModel));
+    sceneRenderer_.setAuthoredSceneItems(referenceDraws(referenceAssets_.scene, renderer_));
 }
 int Application::run(const RunOptions& options) {
     return runInternal(nullptr, nullptr, nullptr, nullptr, options);
@@ -74,6 +164,12 @@ int Application::runInternal(World* world,
     double titleUpdateSeconds = 0.0;
     std::uint64_t titleUpdateFrames = 0;
     bool screenshotRequested = false;
+    std::uint64_t renderedFrames = 0;
+    BoundedMetricSamples cpuFrameSamples;
+    BoundedMetricSamples cpuSceneBuildSamples;
+    BoundedMetricSamples cpuCommandRecordSamples;
+    BoundedMetricSamples cpuQueueSubmitSamples;
+    BoundedMetricSamples gpuFrameSamples;
     while (!window_.shouldClose()) {
         const FrameTiming timing = clock_.tick();
         window_.pollEvents();
@@ -113,25 +209,41 @@ int Application::runInternal(World* world,
 
         const VkExtent2D extent = window_.framebufferExtent();
         if (extent.width > 0U && extent.height > 0U) {
-            camera_.setAspect(static_cast<float>(extent.width) / static_cast<float>(extent.height));
+            camera_.setAspect(static_cast<float>(extent.width) /
+                              static_cast<float>(extent.height));
         }
 
-        if (!screenshotRequested && !options.screenshotPath.empty()) {
+        if (!screenshotRequested && !options.screenshotPath.empty() &&
+            renderedFrames == options.screenshotFrame) {
             renderer_.requestScreenshot(options.screenshotPath);
             screenshotRequested = true;
         }
 
         const auto sceneBuildStart = std::chrono::steady_clock::now();
-        const SceneRenderList& renderItems = world != nullptr
-            ? worldSceneExtractor_.build(*world, simulationBatch.interpolationAlpha)
-            : sceneRenderer_.build(simulationClock_.elapsedSeconds(),
-                                   config_.materialGridRows,
-                                   config_.materialGridColumns,
-                                   config_.materialGridTileRows,
-                                   config_.materialGridTileColumns);
+        const double authoredSceneSeconds =
+            options.scenarioName == "interactive"
+                ? simulationClock_.elapsedSeconds()
+                : static_cast<double>(renderedFrames) / 60.0;
+        const SceneRenderList& renderItems =
+            world != nullptr
+                ? worldSceneExtractor_.build(*world, simulationBatch.interpolationAlpha)
+                : sceneRenderer_.build(authoredSceneSeconds,
+                                       config_.materialGridRows,
+                                       config_.materialGridColumns,
+                                       config_.materialGridTileRows,
+                                       config_.materialGridTileColumns);
         const double sceneBuildMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - sceneBuildStart).count();
         renderer_.draw(camera_, renderItems, sceneBuildMs, timing.elapsedSeconds, timing.deltaSeconds * 1000.0);
+        if (renderedFrames >= options.warmupFrames) {
+            const RenderStats sample = renderer_.stats();
+            cpuFrameSamples.add(sample.cpuFrameMs);
+            cpuSceneBuildSamples.add(sample.cpuSceneBuildMs);
+            cpuCommandRecordSamples.add(sample.cpuCommandRecordMs);
+            cpuQueueSubmitSamples.add(sample.cpuQueueSubmitMs);
+            if (sample.gpuTimestampsValid) gpuFrameSamples.add(sample.gpuFrameMs);
+        }
+        ++renderedFrames;
         titleUpdateSeconds += timing.deltaSeconds;
         ++titleUpdateFrames;
         if (titleUpdateSeconds >= 0.5) {
@@ -183,6 +295,18 @@ int Application::runInternal(World* world,
                    finalStats.gridVisibilityCacheHit ? "hit" : "miss", finalStats.gridVisibilityWorkItems,
                    finalStats.sceneInstanceCapacity, finalStats.sceneInstanceBufferMiB,
                    finalStats.sphereLodHighCount, finalStats.sphereLodMediumCount, finalStats.sphereLodLowCount);
+    const RunMetricDistributions distributions{
+        cpuFrameSamples.distribution(),
+        cpuSceneBuildSamples.distribution(),
+        cpuCommandRecordSamples.distribution(),
+        cpuQueueSubmitSamples.distribution(),
+        gpuFrameSamples.distribution()};
+    if (!options.summaryPath.empty()) {
+        writeRunSummaryAtomic(options.summaryPath,
+                              RunSummary{config_, options, finalDevice, finalStats,
+                                         distributions, renderedFrames, 0});
+        logger()->info("Saved run summary {}", options.summaryPath.string());
+    }
     return 0;
 }
 
