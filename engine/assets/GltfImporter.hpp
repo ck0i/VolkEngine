@@ -11,6 +11,8 @@
 #include <vector>
 
 namespace ve {
+class SceneImporterRegistry;
+
 
 enum class TextureColorSpace : std::uint8_t { Linear, Srgb };
 enum class TextureRole : std::uint8_t { BaseColor, Normal, MetallicRoughness, Occlusion, Emissive };
@@ -96,6 +98,8 @@ struct GltfImportOptions {
     bool generateMissingNormals = true;
     bool generateMissingTangents = true;
 };
+void registerGltfImporter(SceneImporterRegistry& registry);
+
 
 [[nodiscard]] ImportedGltfScene importGltfScene(const std::filesystem::path& path, AssetId sceneId,
                                                 const GltfImportOptions& options = {});

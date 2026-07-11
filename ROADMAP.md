@@ -82,16 +82,17 @@ Current limits:
 Implemented:
 
 - Stable 128-bit asset identity, transactional dependency records, SHA-256 derived-data keys, versioned atomic artifacts, and generational runtime handles.
-- glTF 2.0 import for mesh primitives, scene hierarchy, metallic-roughness materials, texture roles/color spaces, bounds, and validated animation clip/channel metadata.
-- Incremental reference-asset cooking and transactional reload; artifact-content keys avoid rebuilding unchanged mesh/material outputs when animation-only scene metadata changes.
-- OBJ/procedural geometry and stb_image-backed texture ingestion remain available alongside the authored glTF path.
+- glTF 2.0 import for mesh primitives, scene hierarchy, metallic-roughness materials, texture roles/color spaces, bounds, and validated animation clip/channel metadata, routed through a deterministic extension registry.
+- Incremental reference-asset cooking and transactional reload; artifact-content keys avoid rebuilding byte-identical outputs and propagate only real dependency changes.
+- Versioned texture artifacts validate and preserve decoded RGBA8, linear RGBA32F HDR, and non-supercompressed KTX2 BC1/BC3/BC7 payloads with explicit role, color-space, dimensions, and mip metadata.
+- OBJ/procedural geometry and direct stb_image-backed texture overrides remain available alongside the authored glTF path.
 - Linux and Windows CMake presets with pinned bootstrap dependencies.
 - Twenty-one CPU test executables plus the sandbox help test.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
 Current limits:
 
-- No FBX importer, animation sample-data artifact or runtime playback, general importer extension registry, platform packaging/cooking, asynchronous streaming, material database, or GPU-native compressed/HDR texture pipeline.
+- No FBX importer, animation sample-data artifact or runtime playback, platform packaging/cooking, asynchronous streaming, material database, BasisLZ/Zstd texture transcoder, or runtime HDR/BC texture upload path.
 - No scene editor, asset browser, viewport picking/gizmos, inspector, undo stack, play mode, project creation, packaging, installed SDK, plugin manifest, or package registry.
 - A self-hosted live-Vulkan workflow is defined, but coverage still depends on controlled runner availability; cross-driver visual/performance policy and a maintained external-style sample project remain incomplete.
 
@@ -102,8 +103,9 @@ Current local baseline (11 July 2026):
 - `ctest --preset linux-debug` passed all 22 registered tests.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
+- A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
 
-This baseline establishes S1's executable frame-graph and synchronization contract on one local Vulkan driver. It is evidence of a working renderer foundation, not production readiness or cross-hardware correctness.
+This baseline establishes S1's executable frame-graph/synchronization contract and S2's authored-asset workflow on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -147,7 +149,7 @@ Current evidence:
 - The controlled GPU workflow requires Khronos validation plus synchronization validation and exercises resize/recreation, injected post-acquire recovery, graph recompilation, screenshots, and machine-readable summaries.
 - `RenderStats`, ImGui, and run-summary schema v2 expose pass/resource/barrier counts, transient requested/allocated bytes, physical slot count, compile/recompile state, and depth/HDR/tone-map GPU timings.
 
-## S2. Asset identity, derived-data cache, and authored-scene import — **Next**
+## S2. Asset identity, derived-data cache, and authored-scene import — **Current**
 
 Build the minimum real content pipeline in parallel with S1. This is the first contributor-visible product milestone.
 
@@ -167,6 +169,14 @@ Exit criteria:
 - Missing, corrupt, cyclic, stale, and incompatible assets fail with actionable diagnostics and without partially mutating the asset database.
 - A second clean checkout reproduces the same cooked outputs from the same inputs and tool versions.
 - Dependency and cache behavior has deterministic tests; the imported scene has a screenshot and live-render smoke path.
+
+Current evidence:
+
+- Stable IDs, transactional dependency records, importer/settings/source hashes, content-addressed versioned artifacts, runtime handles, and atomic database/cache publication are active in the sandbox path.
+- The registered cgltf importer produces deterministic mesh, material, scene, animation-metadata, and texture artifacts; unknown/duplicate importer extensions fail before import.
+- Texture contracts decode and validate common RGBA8 sources and Radiance HDR, preserve finite RGBA32F data, and validate bounded non-overlapping KTX2 BC1/BC3/BC7 mip payloads while rejecting unsupported formats and supercompression actionably.
+- CPU contracts cover cold/warm/independent cooks, selective animation and decoded-texture invalidation, equivalent-source cache reuse, missing/corrupt/cyclic/stale/incompatible failures, failed-reload preservation, artifact round-trips, and DDC corruption.
+- The maintained authored fixture contains a three-node hierarchy, two independently transformed mesh primitives, a metallic-roughness material with sRGB albedo plus linear normal/ORM roles, and validated animation metadata. Its live screenshot path consumes cooked artifacts rather than source image bytes.
 
 ## S3. GPU-driven geometry and bindless material foundation — **Next**
 

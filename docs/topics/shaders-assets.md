@@ -2,6 +2,8 @@
 
 This page covers runtime file flow. Current ownership is split across these backend units:
 
+- `SceneImporter.cpp`, `GltfImporter.cpp`, and `TextureArtifact.cpp` — importer dispatch, authored-scene conversion, and engine-native texture validation/serialization.
+- `ReferenceAssetPipeline.cpp`, `AssetDatabase.cpp`, and `DerivedDataCache.cpp` — dependency records, deterministic cooking, cache publication, and transactional reload.
 - `VulkanRenderer.Pipelines.cpp` — SPIR-V validation/loading, pipeline set construction, pipeline cache load/save, and hot-reload rebuild/retire.
 - `VulkanRenderer.Resources.cpp` — texture asset upload/sampler/descriptor setup and texture resource lifetime.
 - `VulkanRenderer.Meshes.cpp` — procedural geometry, imported OBJ mesh loading, mesh upload, and shared vertex/index buffer ownership.
@@ -68,10 +70,12 @@ Runtime assets are copied from `assets/` to `EngineConfig::assetDirectory`.
 The reference authored-scene path runs through `ReferenceAssetPipeline` before renderer upload:
 
 - `AssetId` supplies stable 128-bit identities; the transactional asset database records source/importer/settings hashes, dependencies, artifact keys, target, state, and diagnostics.
+- `SceneImporterRegistry` owns importer identity, version, normalized extensions, and the import function. Registration and lookup are deterministic; duplicate IDs/extensions and unknown source extensions fail before source mutation. The built-in cgltf importer handles `.gltf` and `.glb`.
 - `GltfImporter` imports glTF 2.0 mesh primitives, hierarchy/local transforms, metallic-roughness materials, texture roles/color spaces, bounds, and animation clip/channel metadata. Animation metadata validates target nodes, interpolation, accessor shape, finite output values, strictly increasing non-negative keyframe times, and configured size limits; sample payloads and playback remain future work.
-- Mesh, material, and scene artifacts have independent schema versions. Derived-data keys use serialized artifact content plus dependency keys, so an animation-only source edit rebuilds the scene artifact without invalidating byte-identical mesh/material artifacts.
+- Mesh, material, scene, and texture artifacts have independent schema versions. Derived-data keys use serialized artifact content plus dependency keys, so animation-only edits rebuild only the scene and source-byte changes that decode identically reuse the existing texture/dependent artifacts.
+- `TextureArtifact` decodes ordinary sources to RGBA8, preserves Radiance HDR as finite linear RGBA32F, and validates non-supercompressed KTX2 BC1/BC3/BC7 dimensions, color space, mip sizes, ranges, and non-overlap. BasisLZ/Zstd KTX2 and unsupported GPU block formats fail actionably rather than publishing partial cache state.
 - `DerivedDataCache` verifies headers, schema, payload sizes, and content hashes and publishes through atomic temporary files. `ReferenceAssetReloader` cooks a candidate bundle and publishes it only after the complete database and artifacts validate.
-- The sandbox resolves the cooked reference scene and authored textures through this path; cache/rebuild counts and cook latency are included in the machine-readable run summary.
+- The sandbox resolves the cooked reference scene and RGBA8 texture artifacts through this path; it no longer decodes source image bytes during renderer startup. Cache/rebuild counts and cook latency are included in the machine-readable run summary. HDR and BC artifacts remain available for a future capability-aware Vulkan upload path.
 
 The direct `EngineConfig` texture and OBJ settings remain explicit fallback/override paths.
 
@@ -100,4 +104,4 @@ Current geometry path (`VulkanRenderer.Meshes.cpp`):
 - converts triangle-list CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes; uploaded indices are reordered for post-transform vertex-cache locality, then vertices are remapped to first-use order for vertex-fetch locality.
 - writes all startup mesh vertex/index payloads directly into one mapped staging buffer, then submits one transfer/graphics upload command during startup.
 
-The texture path now accepts common stb_image-backed source formats; material libraries, GPU-native compressed texture formats, and streaming pipelines are future work.
+The source path accepts common stb_image-backed formats, Radiance HDR, and bounded non-supercompressed KTX2 BC1/BC3/BC7 artifacts. Material libraries, BasisLZ/Zstd transcoding, runtime HDR/BC upload, and streaming remain future work.

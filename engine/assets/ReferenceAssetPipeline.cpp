@@ -1,6 +1,8 @@
 #include "assets/ReferenceAssetPipeline.hpp"
 
 #include "assets/DerivedDataCache.hpp"
+#include "assets/SceneImporter.hpp"
+#include "assets/TextureArtifact.hpp"
 #include "assets/RuntimeAssets.hpp"
 #include "core/FileSystem.hpp"
 
@@ -11,9 +13,16 @@
 namespace ve {
 namespace {
 
-constexpr std::string_view kImporterId = "volkengine.cgltf";
-constexpr std::uint32_t kImporterVersion = 1;
 constexpr std::string_view kSettings = "normals=generate;tangents=generate;coordinates=gltf-rhs-y-up";
+
+const SceneImporter& referenceImporter() {
+    static const SceneImporterRegistry registry = [] {
+        SceneImporterRegistry value;
+        registerGltfImporter(value);
+        return value;
+    }();
+    return registry.importerFor("reference.gltf");
+}
 
 
 std::vector<std::byte> readSource(const std::filesystem::path& path) {
@@ -35,17 +44,25 @@ ImportedGltfScene loadBundle(const AssetDatabase& database, const DerivedDataCac
     const AssetRecord* sceneRecord = database.find(builtin_assets::kReferenceSceneId);
     if (sceneRecord == nullptr) throw std::runtime_error("Reference scene record is missing");
     ImportedGltfScene scene = deserializeSceneArtifact(
-        cache.load(sceneRecord->artifactKey, ArtifactType::Scene, sceneRecord->artifactSchemaVersion).payload);
+        cache.load(sceneRecord->artifactKey, ArtifactType::Scene,
+                   sceneRecord->artifactSchemaVersion).payload);
     for (const AssetRecord& record : database.records()) {
         if (record.type == AssetType::Mesh) {
             scene.meshes.push_back(deserializeMeshArtifact(
-                cache.load(record.artifactKey, ArtifactType::Mesh, record.artifactSchemaVersion).payload));
+                cache.load(record.artifactKey, ArtifactType::Mesh,
+                           record.artifactSchemaVersion).payload));
         } else if (record.type == AssetType::Material) {
             scene.materials.push_back(deserializeMaterialArtifact(
-                cache.load(record.artifactKey, ArtifactType::Material, record.artifactSchemaVersion).payload));
+                cache.load(record.artifactKey, ArtifactType::Material,
+                           record.artifactSchemaVersion).payload));
         } else if (record.type == AssetType::Texture) {
-            static_cast<void>(cache.load(record.artifactKey, ArtifactType::Texture,
-                                         record.artifactSchemaVersion));
+            const TextureArtifact texture = deserializeTextureArtifact(
+                cache.load(record.artifactKey, ArtifactType::Texture,
+                           record.artifactSchemaVersion).payload);
+            if (texture.id != record.id) {
+                throw std::runtime_error(
+                    "Texture artifact identity does not match its asset record");
+            }
         }
     }
     std::ranges::sort(scene.meshes, {}, &ImportedMeshPrimitive::id);
@@ -55,15 +72,18 @@ ImportedGltfScene loadBundle(const AssetDatabase& database, const DerivedDataCac
 
 bool databaseIsCurrent(const AssetDatabase& database, const std::filesystem::path& assetRoot,
                        const ContentHash sceneSourceHash, const ContentHash settingsHash,
-                       const std::string& target) {
+                       const SceneImporter& importer, const std::string& target) {
     const AssetRecord* scene = database.find(builtin_assets::kReferenceSceneId);
     if (scene == nullptr || scene->sourceHash != sceneSourceHash || scene->settingsHash != settingsHash ||
-        scene->importerId != kImporterId || scene->importerVersion != kImporterVersion ||
+        scene->importerId != importer.id || scene->importerVersion != importer.version ||
         scene->target != target || scene->state != AssetState::Ready) {
         return false;
     }
     for (const AssetRecord& record : database.records()) {
-        if (record.state != AssetState::Ready || record.target != target) return false;
+        if (record.state != AssetState::Ready || record.target != target ||
+            record.importerId != importer.id || record.importerVersion != importer.version) {
+            return false;
+        }
         if (!record.sourcePath.empty()) {
             std::error_code error;
             const std::filesystem::path path = assetRoot / record.sourcePath;
@@ -74,12 +94,15 @@ bool databaseIsCurrent(const AssetDatabase& database, const std::filesystem::pat
 }
 
 AssetRecord baseRecord(const AssetId id, const AssetType type, std::filesystem::path sourcePath,
-                       const ContentHash source, const ContentHash settingsHash, const std::string& target) {
+                       const ContentHash source, const ContentHash settingsHash,
+                       const SceneImporter& importer, const std::string& target) {
     AssetRecord record;
     record.id = id;
     record.type = type;
     switch (type) {
-    case AssetType::Texture: record.artifactSchemaVersion = 1U; break;
+    case AssetType::Texture:
+        record.artifactSchemaVersion = TextureArtifact::kSchemaVersion;
+        break;
     case AssetType::Mesh:
         record.artifactSchemaVersion = ImportedGltfScene::kMeshArtifactSchemaVersion;
         break;
@@ -93,8 +116,8 @@ AssetRecord baseRecord(const AssetId id, const AssetType type, std::filesystem::
     }
     record.sourcePath = std::move(sourcePath);
     record.sourceHash = source;
-    record.importerId = std::string{kImporterId};
-    record.importerVersion = kImporterVersion;
+    record.importerId = importer.id;
+    record.importerVersion = importer.version;
     record.normalizedSettings = std::string{kSettings};
     record.settingsHash = settingsHash;
     record.target = target;
@@ -124,6 +147,7 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
     const auto start = std::chrono::steady_clock::now();
     if (targetPlatform.empty()) throw std::invalid_argument("Asset target platform must not be empty");
     const std::filesystem::path scenePath = assetRoot / "reference_scene.gltf";
+    const SceneImporter& importer = referenceImporter();
     const ContentHash sceneHash = sourceHash(scenePath);
     const ContentHash settingsHash = hashString(kSettings);
     DerivedDataCache cache{cacheRoot / "ddc"};
@@ -142,7 +166,8 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
     if (std::filesystem::is_regular_file(databasePath, existsError) && !existsError) {
         try {
             AssetDatabase existing = AssetDatabase::load(databasePath);
-            if (databaseIsCurrent(existing, assetRoot, sceneHash, settingsHash, targetPlatform)) {
+            if (databaseIsCurrent(existing, assetRoot, sceneHash, settingsHash, importer,
+                                  targetPlatform)) {
                 result.scene = loadBundle(existing, cache);
                 result.database = std::move(existing);
                 result.metrics.cacheHits = static_cast<std::uint32_t>(result.database.records().size());
@@ -156,7 +181,7 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
         }
     }
 
-    ImportedGltfScene imported = importGltfScene(scenePath, builtin_assets::kReferenceSceneId);
+    ImportedGltfScene imported = importer.import(scenePath, builtin_assets::kReferenceSceneId);
     std::ranges::sort(imported.meshes, {}, &ImportedMeshPrimitive::id);
     std::ranges::sort(imported.materials, {}, &ImportedMaterial::id);
     std::vector<AssetRecord> records;
@@ -166,11 +191,15 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
         for (const ImportedTextureReference& texture : material.textures) {
             const std::filesystem::path textureSourcePath = texture.sourcePath;
             const ContentHash textureHash = sourceHash(assetRoot / textureSourcePath);
-            AssetRecord textureRecord = baseRecord(texture.id, AssetType::Texture, textureSourcePath,
-                                                   textureHash, settingsHash, targetPlatform);
-            const std::vector<std::byte> texturePayload = readSource(assetRoot / textureSourcePath);
-            textureRecord.artifactKey = keyFor(textureRecord, textureHash, ArtifactType::Texture,
-                                               {}, targetPlatform);
+            AssetRecord textureRecord = baseRecord(texture.id, AssetType::Texture,
+                                                   textureSourcePath, textureHash, settingsHash,
+                                                   importer, targetPlatform);
+            const TextureArtifact importedTexture = importTextureArtifact(
+                assetRoot / textureSourcePath, texture.id, texture.role, texture.colorSpace);
+            const std::vector<std::byte> texturePayload =
+                serializeTextureArtifact(importedTexture);
+            textureRecord.artifactKey = keyFor(textureRecord, hashBytes(texturePayload),
+                                               ArtifactType::Texture, {}, targetPlatform);
             accountPublication(cache.publish(textureRecord.artifactKey, ArtifactType::Texture,
                                              textureRecord.artifactSchemaVersion, texturePayload));
             textureRecord.artifactPath = cache.artifactPath(textureRecord.artifactKey, ArtifactType::Texture)
@@ -186,8 +215,8 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
 
     for (const ImportedMaterial& material : imported.materials) {
         AssetRecord materialRecord = baseRecord(material.id, AssetType::Material,
-                                                "reference_scene.gltf", sceneHash,
-                                                settingsHash, targetPlatform);
+                                                "reference_scene.gltf", sceneHash, settingsHash,
+                                                importer, targetPlatform);
         std::vector<ContentHash> dependencyHashes;
         for (const ImportedTextureReference& texture : material.textures) {
             materialRecord.dependencies.push_back(texture.id);
@@ -208,7 +237,7 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
 
     for (const ImportedMeshPrimitive& mesh : imported.meshes) {
         AssetRecord meshRecord = baseRecord(mesh.id, AssetType::Mesh, "reference_scene.gltf",
-                                            sceneHash, settingsHash, targetPlatform);
+                                            sceneHash, settingsHash, importer, targetPlatform);
         std::vector<ContentHash> dependencyHashes;
         if (mesh.material.valid()) {
             meshRecord.dependencies.push_back(mesh.material);
@@ -226,8 +255,9 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
         records.push_back(std::move(meshRecord));
     }
 
-    AssetRecord sceneRecord = baseRecord(imported.sceneId, AssetType::Scene, "reference_scene.gltf",
-                                         sceneHash, settingsHash, targetPlatform);
+    AssetRecord sceneRecord = baseRecord(imported.sceneId, AssetType::Scene,
+                                         "reference_scene.gltf", sceneHash, settingsHash,
+                                         importer, targetPlatform);
     std::vector<ContentHash> sceneDependencies;
     for (const AssetRecord& record : records) {
         if (record.type == AssetType::Mesh || record.type == AssetType::Material) {
@@ -281,14 +311,17 @@ AssetReloadResult ReferenceAssetReloader::reload() noexcept {
         result.status = AssetReloadStatus::Failed;
         result.diagnostic = "Asset reload failed; source=" +
             (assetRoot_ / "reference_scene.gltf").generic_string() +
-            "; importer=volkengine.cgltf@1; cache=" + cacheRoot_.generic_string() +
+            "; importer=" + referenceImporter().id + "@" +
+            std::to_string(referenceImporter().version) + "; cache=" + cacheRoot_.generic_string() +
             "; dependency_chain=scene->material->texture; reason=" + error.what();
         return result;
     } catch (...) {
         result.status = AssetReloadStatus::Failed;
         result.diagnostic = "Asset reload failed with a non-standard exception; source=" +
             (assetRoot_ / "reference_scene.gltf").generic_string() +
-            "; importer=volkengine.cgltf@1; cache=" + cacheRoot_.generic_string();
+            "; importer=" + referenceImporter().id + "@" +
+            std::to_string(referenceImporter().version) + "; cache=" +
+            cacheRoot_.generic_string();
         return result;
     }
 }

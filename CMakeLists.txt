@@ -110,6 +110,8 @@ add_library(VolkEngine STATIC
     engine/assets/DerivedDataCache.cpp
     engine/assets/CgltfUsage.cpp
     engine/assets/GltfImporter.cpp
+    engine/assets/SceneImporter.cpp
+    engine/assets/TextureArtifact.cpp
     engine/assets/ReferenceAssetPipeline.cpp
     engine/core/Application.cpp
     engine/core/Camera.cpp
@@ -246,11 +248,16 @@ add_executable(VolkEngineAssetPipelineCpuTest
     engine/assets/DerivedDataCache.cpp
     engine/assets/CgltfUsage.cpp
     engine/assets/GltfImporter.cpp
+    engine/assets/SceneImporter.cpp
+    engine/assets/TextureArtifact.cpp
     engine/assets/ReferenceAssetPipeline.cpp
-    engine/core/FileSystem.cpp)
+    engine/core/FileSystem.cpp
+    engine/renderer/ImageLoader.cpp
+    engine/renderer/StbImageUsage.cpp)
 target_link_libraries(VolkEngineAssetPipelineCpuTest
     PRIVATE
-        ${VOLKENGINE_CGLTF_TARGET})
+        ${VOLKENGINE_CGLTF_TARGET}
+        ${VOLKENGINE_STB_TARGET})
 target_include_directories(VolkEngineAssetPipelineCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")

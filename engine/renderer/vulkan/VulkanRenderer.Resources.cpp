@@ -1,5 +1,8 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 #include "assets/DerivedDataCache.hpp"
+#include "assets/TextureArtifact.hpp"
+
+#include <cstring>
 
 namespace ve {
 namespace {
@@ -84,10 +87,11 @@ void VulkanRenderer::Impl::createTextureResources() {
 
     struct TextureUpload {
         std::filesystem::path path;
-        std::vector<std::byte> encoded;
+        TextureArtifact artifact;
         VkFormat format = VK_FORMAT_UNDEFINED;
         std::string debugName;
         TextureMipPolicy mipPolicy = TextureMipPolicy::Albedo;
+        TextureRole role = TextureRole::BaseColor;
         std::uint32_t baseWidth = 0;
         std::uint32_t baseHeight = 0;
         std::vector<LoadedImageRgba8> mipLevels;
@@ -113,7 +117,7 @@ void VulkanRenderer::Impl::createTextureResources() {
         const ImportedMaterial& material = authored.scene.materials[materialIndex];
         for (const ImportedTextureReference& reference : material.textures) {
             auto existing = std::ranges::find_if(uploads, [&](const TextureUpload& upload) {
-                return upload.path == reference.sourcePath &&
+                return upload.path == reference.sourcePath && upload.role == reference.role &&
                        upload.format == (reference.colorSpace == TextureColorSpace::Srgb
                                              ? VK_FORMAT_R8G8B8A8_SRGB
                                              : VK_FORMAT_R8G8B8A8_UNORM);
@@ -127,6 +131,7 @@ void VulkanRenderer::Impl::createTextureResources() {
                 }
                 TextureUpload upload;
                 upload.path = reference.sourcePath;
+                upload.role = reference.role;
                 upload.format = reference.colorSpace == TextureColorSpace::Srgb
                                     ? VK_FORMAT_R8G8B8A8_SRGB
                                     : VK_FORMAT_R8G8B8A8_UNORM;
@@ -136,8 +141,15 @@ void VulkanRenderer::Impl::createTextureResources() {
                                        : (reference.colorSpace == TextureColorSpace::Srgb
                                               ? TextureMipPolicy::Albedo
                                               : TextureMipPolicy::Linear);
-                upload.encoded = textureCache.load(record->artifactKey, ArtifactType::Texture,
-                                                   record->artifactSchemaVersion).payload;
+                upload.artifact = deserializeTextureArtifact(
+                    textureCache.load(record->artifactKey, ArtifactType::Texture,
+                                      record->artifactSchemaVersion).payload);
+                if (upload.artifact.id != reference.id ||
+                    upload.artifact.role != reference.role ||
+                    upload.artifact.colorSpace != reference.colorSpace) {
+                    throw std::runtime_error(
+                        "Authored texture artifact metadata does not match its material reference");
+                }
                 uploads.push_back(std::move(upload));
                 textureIndex = uploads.size() - 1U;
             }
@@ -171,7 +183,18 @@ void VulkanRenderer::Impl::createTextureResources() {
 
     try {
         for (TextureUpload& upload : uploads) {
-            LoadedImageRgba8 baseLevel = loadImageRgba8(upload.encoded, upload.path.generic_string());
+            if (upload.artifact.storage != TextureStorage::Rgba8 ||
+                upload.artifact.mips.size() != 1U) {
+                throw std::runtime_error(
+                    "Authored texture storage is cooked but unsupported by the current Vulkan material upload path: " +
+                    upload.path.generic_string());
+            }
+            LoadedImageRgba8 baseLevel;
+            baseLevel.width = upload.artifact.width;
+            baseLevel.height = upload.artifact.height;
+            baseLevel.pixels.resize(upload.artifact.data.size());
+            std::memcpy(baseLevel.pixels.data(), upload.artifact.data.data(),
+                        upload.artifact.data.size());
             const VkExtent2D textureExtent{baseLevel.width, baseLevel.height};
             if (!vulkan_renderer_detail::textureExtentFitsDeviceLimit(textureExtent, deviceOwner_.info.maxImageDimension2D)) {
                 throw std::runtime_error("Texture " + upload.path.string() + " is " + std::to_string(textureExtent.width) + "x" +

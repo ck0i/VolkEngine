@@ -1,4 +1,5 @@
 #include "assets/GltfImporter.hpp"
+#include "assets/SceneImporter.hpp"
 
 #include "core/FileSystem.hpp"
 
@@ -157,11 +158,16 @@ std::filesystem::path texturePath(const cgltf_texture_view& view) {
     return path.lexically_normal();
 }
 
-void addTexture(ImportedMaterial& material, const cgltf_texture_view& view, const TextureRole role,
-                const TextureColorSpace colorSpace, const AssetId sceneId, const std::size_t materialIndex) {
+void addTexture(ImportedMaterial& material, const cgltf_data& data,
+                const cgltf_texture_view& view, const TextureRole role,
+                const TextureColorSpace colorSpace, const AssetId sceneId) {
     if (view.texture == nullptr) return;
+    const std::size_t textureIndex =
+        static_cast<std::size_t>(view.texture - data.textures);
     ImportedTextureReference reference;
-    reference.id = AssetId::derive(sceneId, "material/" + std::to_string(materialIndex) + "/texture/" + std::to_string(static_cast<int>(role)));
+    reference.id = AssetId::derive(
+        sceneId, "texture/" + std::to_string(textureIndex) + "/role/" +
+                     std::to_string(static_cast<int>(role)));
     reference.sourcePath = texturePath(view);
     reference.role = role;
     reference.colorSpace = colorSpace;
@@ -262,11 +268,16 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
         material.alphaCutoff = sourceMaterial.alpha_cutoff; material.doubleSided = sourceMaterial.double_sided != 0;
         requireFinite(&material.baseColorFactor.x, 4U, "material base color"); requireFinite(&material.emissiveFactor.x, 3U, "material emissive factor");
         if (!std::isfinite(material.metallicFactor) || !std::isfinite(material.roughnessFactor) || !std::isfinite(material.alphaCutoff)) throw std::runtime_error("glTF material contains a non-finite factor");
-        addTexture(material, pbr.base_color_texture, TextureRole::BaseColor, TextureColorSpace::Srgb, sceneId, materialIndex);
-        addTexture(material, pbr.metallic_roughness_texture, TextureRole::MetallicRoughness, TextureColorSpace::Linear, sceneId, materialIndex);
-        addTexture(material, sourceMaterial.normal_texture, TextureRole::Normal, TextureColorSpace::Linear, sceneId, materialIndex);
-        addTexture(material, sourceMaterial.occlusion_texture, TextureRole::Occlusion, TextureColorSpace::Linear, sceneId, materialIndex);
-        addTexture(material, sourceMaterial.emissive_texture, TextureRole::Emissive, TextureColorSpace::Srgb, sceneId, materialIndex);
+        addTexture(material, *data, pbr.base_color_texture, TextureRole::BaseColor,
+                   TextureColorSpace::Srgb, sceneId);
+        addTexture(material, *data, pbr.metallic_roughness_texture,
+                   TextureRole::MetallicRoughness, TextureColorSpace::Linear, sceneId);
+        addTexture(material, *data, sourceMaterial.normal_texture, TextureRole::Normal,
+                   TextureColorSpace::Linear, sceneId);
+        addTexture(material, *data, sourceMaterial.occlusion_texture, TextureRole::Occlusion,
+                   TextureColorSpace::Linear, sceneId);
+        addTexture(material, *data, sourceMaterial.emissive_texture, TextureRole::Emissive,
+                   TextureColorSpace::Srgb, sceneId);
         result.materials.push_back(std::move(material));
     }
 
@@ -375,13 +386,12 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
                 channel.interpolation == AnimationInterpolation::CubicSpline ? 3U : 1U;
             const cgltf_size minimumOutputCount = input.count * interpolationMultiplier;
             const cgltf_size outputComponents = cgltf_num_components(output.type);
-            if (output.type != expectedOutputType ||
+            if (outputComponents == 0U || output.type != expectedOutputType ||
                 output.component_type != cgltf_component_type_r_32f ||
                 (channel.target == AnimationTarget::Weights
                      ? output.count < minimumOutputCount ||
                            output.count % minimumOutputCount != 0U
                      : output.count != minimumOutputCount) ||
-                outputComponents == 0U ||
                 output.count > options.maximumAnimationValues / outputComponents) {
                 throw std::runtime_error(
                     "glTF animation output accessor is incompatible with its target or exceeds the value limit");
@@ -657,6 +667,15 @@ ImportedGltfScene deserializeSceneArtifact(const std::span<const std::byte> byte
         }
     }
     return scene;
+}
+
+void registerGltfImporter(SceneImporterRegistry& registry) {
+    static constexpr std::array<std::string_view, 2> extensions{".glb", ".gltf"};
+    registry.registerImporter({
+        "volkengine.cgltf", 2U, extensions,
+        +[](const std::filesystem::path& source, const AssetId sceneId) {
+            return importGltfScene(source, sceneId);
+        }});
 }
 
 } // namespace ve

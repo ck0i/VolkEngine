@@ -3,20 +3,29 @@
   "scene": 0,
   "scenes": [{"name": "Reference Scene", "nodes": [0]}],
   "nodes": [
-    {"name": "Root", "translation": [0.0, 0.0, -2.0], "children": [1]},
-    {"name": "Textured Triangle", "mesh": 0, "translation": [0.0, -0.5, 0.0]}
+    {"name": "Root", "translation": [0.0, 0.0, 1.0], "children": [1, 2]},
+    {"name": "Animated Ground Triangle", "mesh": 0, "translation": [-1.5, 0.0, 0.0], "scale": [2.0, 2.0, 2.0]},
+    {"name": "Detail Triangle", "mesh": 1, "translation": [1.5, 0.0, 0.0], "scale": [2.0, 2.0, 2.0]}
   ],
   "animations": [{
     "name": "Triangle Move",
     "samplers": [{"input": 4, "output": 5, "interpolation": "LINEAR"}],
     "channels": [{"sampler": 0, "target": {"node": 1, "path": "translation"}}]
   }],
-  "meshes": [{"name": "Reference Triangle", "primitives": [{
-    "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
-    "indices": 3,
-    "material": 0,
-    "mode": 4
-  }]}],
+  "meshes": [
+    {"name": "Ground Triangle", "primitives": [{
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
+      "material": 0,
+      "mode": 4
+    }]},
+    {"name": "Detail Triangle", "primitives": [{
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
+      "material": 0,
+      "mode": 4
+    }]}
+  ],
   "materials": [{
     "name": "Ground Material",
     "pbrMetallicRoughness": {
@@ -43,7 +52,7 @@
     "uri": "data:application/octet-stream;base64,AAAAvwAAAAAAAAAAAAAAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAD8AAIA/AAABAAIA"
   }, {
     "byteLength": 32,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAEAAAAAAAAAAvwAAAAAAAIA/AAAAvwAAAAA="
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAEAAAMC/AAAAAAAAAAAAAAC/AAAAAAAAAAA="
   }],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},

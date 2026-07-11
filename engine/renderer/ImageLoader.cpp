@@ -150,6 +150,56 @@ LoadedImageRgba8 loadStbImageRgba8(const std::filesystem::path& path) {
     return loadStbImageRgba8(
         std::as_bytes(std::span{encoded.data(), encoded.size()}), path.string());
 }
+struct StbiFloatPixels {
+    float* data = nullptr;
+    explicit StbiFloatPixels(float* pixels) noexcept : data(pixels) {}
+    ~StbiFloatPixels() { stbi_image_free(data); }
+    StbiFloatPixels(const StbiFloatPixels&) = delete;
+    StbiFloatPixels& operator=(const StbiFloatPixels&) = delete;
+};
+
+LoadedImageRgba32F loadStbImageRgba32F(const std::span<const std::byte> encoded,
+                                       const std::string_view sourceName) {
+    if (encoded.empty() ||
+        encoded.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error("HDR image payload is empty or too large: " +
+                                 std::string(sourceName));
+    }
+    int width = 0;
+    int height = 0;
+    int channelsInFile = 0;
+    const StbiFloatPixels decoded{stbi_loadf_from_memory(
+        reinterpret_cast<const stbi_uc*>(encoded.data()), static_cast<int>(encoded.size()),
+        &width, &height, &channelsInFile, STBI_rgb_alpha)};
+    if (decoded.data == nullptr) {
+        const char* reason = stbi_failure_reason();
+        throw std::runtime_error("Unsupported HDR image format in " + std::string(sourceName) +
+                                 (reason != nullptr ? std::string(": ") + reason : std::string{}));
+    }
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error("Decoded HDR image has invalid dimensions: " +
+                                 std::string(sourceName));
+    }
+    const std::uint64_t pixelCount =
+        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+    if (pixelCount > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) /
+                         (4ULL * sizeof(float))) {
+        throw std::runtime_error("Decoded HDR image is too large: " + std::string(sourceName));
+    }
+    LoadedImageRgba32F image;
+    image.width = static_cast<std::uint32_t>(width);
+    image.height = static_cast<std::uint32_t>(height);
+    const std::size_t valueCount = static_cast<std::size_t>(pixelCount) * 4U;
+    image.pixels.assign(decoded.data, decoded.data + valueCount);
+    if (!std::ranges::all_of(image.pixels, [](const float value) {
+            return std::isfinite(value);
+        })) {
+        throw std::runtime_error("Decoded HDR image contains NaN or infinity: " +
+                                 std::string(sourceName));
+    }
+    return image;
+}
+
 
 struct NormalSample {
     float x = 0.0f;
@@ -401,6 +451,17 @@ LoadedImageRgba8 loadImageRgba8(const std::filesystem::path& path) {
 LoadedImageRgba8 loadImageRgba8(const std::span<const std::byte> encoded,
                                 const std::string_view sourceName) {
     return loadStbImageRgba8(encoded, sourceName);
+}
+
+LoadedImageRgba32F loadImageRgba32F(const std::filesystem::path& path) {
+    const std::vector<std::uint8_t> encoded = readWholeBinaryFile(path);
+    return loadStbImageRgba32F(
+        std::as_bytes(std::span{encoded.data(), encoded.size()}), path.string());
+}
+
+LoadedImageRgba32F loadImageRgba32F(const std::span<const std::byte> encoded,
+                                   const std::string_view sourceName) {
+    return loadStbImageRgba32F(encoded, sourceName);
 }
 
 std::vector<LoadedImageRgba8> buildAlbedoMipChainRgba8(LoadedImageRgba8 baseLevel, const bool isSrgb) {

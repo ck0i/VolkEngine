@@ -1,13 +1,17 @@
 #include "assets/AssetDatabase.hpp"
 #include "assets/DerivedDataCache.hpp"
 #include "assets/GltfImporter.hpp"
+#include "assets/SceneImporter.hpp"
+#include "assets/TextureArtifact.hpp"
 #include "assets/RuntimeAssets.hpp"
 #include "assets/ReferenceAssetPipeline.hpp"
 #include "core/FileSystem.hpp"
 
 #include <array>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -19,6 +23,11 @@ namespace {
 template <typename F>
 bool throwsRuntimeError(F&& function) {
     try { function(); return false; } catch (const std::runtime_error&) { return true; }
+}
+
+template <typename F>
+bool throwsInvalidArgument(F&& function) {
+    try { function(); return false; } catch (const std::invalid_argument&) { return true; }
 }
 
 ve::AssetRecord record(const ve::AssetId id, const ve::AssetType type, const std::string& path,
@@ -39,6 +48,46 @@ ve::AssetRecord record(const ve::AssetId id, const ve::AssetType type, const std
     value.state = ve::AssetState::Ready;
     return value;
 }
+template <typename T>
+void appendLittle(std::vector<std::byte>& bytes, const T value) {
+    for (std::size_t index = 0; index < sizeof(T); ++index) {
+        bytes.push_back(static_cast<std::byte>(
+            static_cast<std::uint64_t>(value) >> (index * 8U)));
+    }
+}
+
+std::vector<std::byte> makeBc1Ktx2(const std::uint32_t supercompression = 0U,
+                                   const bool overlappingMetadata = false) {
+    constexpr std::array<std::byte, 12> identifier{
+        std::byte{0xAB}, std::byte{'K'}, std::byte{'T'}, std::byte{'X'}, std::byte{' '},
+        std::byte{'2'}, std::byte{'0'}, std::byte{0xBB}, std::byte{0x0D}, std::byte{0x0A},
+        std::byte{0x1A}, std::byte{0x0A}};
+    std::vector<std::byte> bytes(identifier.begin(), identifier.end());
+    appendLittle<std::uint32_t>(bytes, 134U);
+    appendLittle<std::uint32_t>(bytes, 1U);
+    appendLittle<std::uint32_t>(bytes, 4U);
+    appendLittle<std::uint32_t>(bytes, 4U);
+    appendLittle<std::uint32_t>(bytes, 0U);
+    appendLittle<std::uint32_t>(bytes, 0U);
+    appendLittle<std::uint32_t>(bytes, 1U);
+    appendLittle<std::uint32_t>(bytes, 1U);
+    appendLittle<std::uint32_t>(bytes, supercompression);
+    appendLittle<std::uint32_t>(bytes, 0U);
+    appendLittle<std::uint32_t>(bytes, 0U);
+    appendLittle<std::uint32_t>(bytes, overlappingMetadata ? 104U : 0U);
+    appendLittle<std::uint32_t>(bytes, overlappingMetadata ? 4U : 0U);
+    appendLittle<std::uint64_t>(bytes, 0U);
+    appendLittle<std::uint64_t>(bytes, 0U);
+    appendLittle<std::uint64_t>(bytes, 104U);
+    appendLittle<std::uint64_t>(bytes, 8U);
+    appendLittle<std::uint64_t>(bytes, 8U);
+    constexpr std::array<std::byte, 8> block{
+        std::byte{0x00}, std::byte{0xF8}, std::byte{0xE0}, std::byte{0x07},
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    bytes.insert(bytes.end(), block.begin(), block.end());
+    return bytes;
+}
+
 
 } // namespace
 
@@ -52,6 +101,16 @@ int main() {
     assert(ve::AssetId::fromHex(texture.hex()) == texture);
     assert(ve::AssetId::derive(scene, "mesh/0") == ve::AssetId::derive(scene, "mesh/0"));
     assert(ve::AssetId::derive(scene, "mesh/0") != ve::AssetId::derive(scene, "mesh/1"));
+
+    ve::SceneImporterRegistry importers;
+    ve::registerGltfImporter(importers);
+    assert(importers.importers().size() == 1U);
+    assert(importers.importerFor("scene.GLTF").id == "volkengine.cgltf");
+    assert(importers.importerFor("scene.glb").version == 2U);
+    assert(throwsRuntimeError([&] {
+        static_cast<void>(importers.importerFor("scene.fbx"));
+    }));
+    assert(throwsInvalidArgument([&] { ve::registerGltfImporter(importers); }));
 
     ve::AssetDatabase database;
     database.replaceAll({record(scene, ve::AssetType::Scene, "scene/reference.gltf", {material}),
@@ -117,9 +176,10 @@ int main() {
     const std::filesystem::path referenceScene =
         std::filesystem::path{VOLKENGINE_TEST_ASSET_DIR} / "reference_scene.gltf";
     const ve::ImportedGltfScene imported = ve::importGltfScene(referenceScene, scene);
-    assert(imported.nodes.size() == 2U);
+    assert(imported.nodes.size() == 3U);
     assert(imported.nodes[1].parent == 0U);
-    assert(imported.meshes.size() == 1U);
+    assert(imported.nodes[2].parent == 0U);
+    assert(imported.meshes.size() == 2U);
     assert(imported.meshes[0].mesh.vertices.size() == 3U);
     assert(imported.meshes[0].mesh.indices == std::vector<std::uint32_t>({0U, 1U, 2U}));
     assert(imported.meshes[0].mesh.bounds.valid);
@@ -179,13 +239,13 @@ int main() {
     std::string corruptAnimationSource(
         reinterpret_cast<const char*>(referenceSource.data()), referenceSource.size());
     const std::string validAnimationPayload =
-        "AAAAAAAAAEAAAAAAAAAAvwAAAAAAAIA/AAAAvwAAAAA=";
+        "AAAAAAAAAEAAAMC/AAAAAAAAAAAAAAC/AAAAAAAAAAA=";
     const std::size_t animationPayloadOffset =
         corruptAnimationSource.find(validAnimationPayload);
     assert(animationPayloadOffset != std::string::npos);
     corruptAnimationSource.replace(
         animationPayloadOffset, validAnimationPayload.size(),
-        "AAAAAAAAAEAAAAAAAAAAvwAAAAAAAIA/AAAAvwAAwH8=");
+        "AAAAAAAAAEAAAMC/AAAAAAAAAAAAAAC/AAAAAAAAwH8=");
     const std::filesystem::path corruptAnimationPath = temp / "corrupt-animation.gltf";
     ve::writeBinaryFileAtomic(
         corruptAnimationPath,
@@ -194,12 +254,58 @@ int main() {
     assert(throwsRuntimeError([&] {
         static_cast<void>(ve::importGltfScene(corruptAnimationPath, scene));
     }));
+    const ve::AssetId hdrId = ve::AssetId::derive(scene, "texture/test-hdr");
+    const std::string hdrSource =
+        "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n"
+        "\x80\x40\x20\x81";
+    const std::filesystem::path hdrPath = temp / "test.hdr";
+    ve::writeBinaryFileAtomic(
+        hdrPath, std::as_bytes(std::span{hdrSource.data(), hdrSource.size()}));
+    const ve::TextureArtifact hdr = ve::importTextureArtifact(
+        hdrPath, hdrId, ve::TextureRole::Emissive, ve::TextureColorSpace::Linear);
+    assert(hdr.storage == ve::TextureStorage::Rgba32Float);
+    assert(hdr.width == 1U && hdr.height == 1U);
+    assert(hdr.data.size() == 4U * sizeof(float));
+    float hdrRed = 0.0f;
+    std::memcpy(&hdrRed, hdr.data.data(), sizeof(hdrRed));
+    assert(std::fabs(hdrRed - 1.0f) < 0.01f);
+    const std::vector<std::byte> hdrArtifactBytes = ve::serializeTextureArtifact(hdr);
+    assert(ve::deserializeTextureArtifact(hdrArtifactBytes).data == hdr.data);
+
+    const ve::AssetId ktxId = ve::AssetId::derive(scene, "texture/test-ktx");
+    const std::filesystem::path ktxPath = temp / "test.ktx2";
+    ve::writeBinaryFileAtomic(ktxPath, makeBc1Ktx2());
+    const ve::TextureArtifact ktx = ve::importTextureArtifact(
+        ktxPath, ktxId, ve::TextureRole::BaseColor, ve::TextureColorSpace::Srgb);
+    assert(ktx.storage == ve::TextureStorage::Bc1Rgba);
+    assert(ktx.width == 4U && ktx.height == 4U);
+    assert(ktx.mips.size() == 1U && ktx.mips[0].size == 8U);
+    const std::vector<std::byte> ktxArtifactBytes = ve::serializeTextureArtifact(ktx);
+    assert(ve::deserializeTextureArtifact(ktxArtifactBytes).data == ktx.data);
+    ve::writeBinaryFileAtomic(ktxPath, makeBc1Ktx2(1U));
+    assert(throwsRuntimeError([&] {
+        static_cast<void>(ve::importTextureArtifact(
+            ktxPath, ktxId, ve::TextureRole::BaseColor, ve::TextureColorSpace::Srgb));
+    }));
+    ve::writeBinaryFileAtomic(ktxPath, makeBc1Ktx2(0U, true));
+    assert(throwsRuntimeError([&] {
+        static_cast<void>(ve::importTextureArtifact(
+            ktxPath, ktxId, ve::TextureRole::BaseColor, ve::TextureColorSpace::Srgb));
+    }));
+    std::vector<std::byte> unalignedKtx = makeBc1Ktx2();
+    unalignedKtx.insert(unalignedKtx.begin() + 104, std::byte{0});
+    unalignedKtx[80] = std::byte{105};
+    ve::writeBinaryFileAtomic(ktxPath, unalignedKtx);
+    assert(throwsRuntimeError([&] {
+        static_cast<void>(ve::importTextureArtifact(
+            ktxPath, ktxId, ve::TextureRole::BaseColor, ve::TextureColorSpace::Srgb));
+    }));
     const std::filesystem::path assetRoot{VOLKENGINE_TEST_ASSET_DIR};
     const ve::ReferenceAssetBundle coldCook =
         ve::cookReferenceAssets(assetRoot, temp / "cook-a", "test-x64");
     assert(coldCook.metrics.cacheMisses == coldCook.database.records().size());
     assert(coldCook.metrics.rebuiltAssets == coldCook.database.records().size());
-    assert(coldCook.scene.meshes.size() == 1U);
+    assert(coldCook.scene.meshes.size() == 2U);
     const std::vector<std::byte> firstManifest = coldCook.database.serialize();
     const ve::ReferenceAssetBundle warmCook =
         ve::cookReferenceAssets(assetRoot, temp / "cook-a", "test-x64");
@@ -259,20 +365,40 @@ int main() {
     changedAlbedo.push_back(std::byte{0x00});
     ve::writeBinaryFileAtomic(incrementalRoot / "textures/ground_albedo.png",
                               changedAlbedo);
+    const ve::ReferenceAssetBundle equivalentSourceReload =
+        ve::cookReferenceAssets(incrementalRoot, temp / "incremental-cache", "test-x64");
+    assert(equivalentSourceReload.metrics.cacheMisses == 0U);
+    assert(equivalentSourceReload.metrics.cacheHits ==
+           equivalentSourceReload.database.records().size());
+    std::vector<std::byte> changedDecodedAlbedo =
+        ve::readBinaryFile(assetRoot / "textures/ground_albedo.ppm");
+    changedDecodedAlbedo.back() ^= std::byte{1};
+    ve::writeBinaryFileAtomic(incrementalRoot / "textures/ground_albedo.png",
+                              changedDecodedAlbedo);
     const ve::ReferenceAssetBundle incrementalReload =
         ve::cookReferenceAssets(incrementalRoot, temp / "incremental-cache", "test-x64");
-    assert(incrementalReload.metrics.cacheMisses == 4U);
+    assert(incrementalReload.metrics.cacheMisses == 5U);
     ve::ReferenceAssetReloader reloader{
         incrementalRoot, temp / "incremental-cache", "test-x64"};
     const std::vector<std::byte> activeBeforeFailure =
         reloader.active().database.serialize();
+    assert(std::filesystem::remove(
+        incrementalRoot / "textures/ground_normal.png"));
+    const ve::AssetReloadResult missingSourceReload = reloader.reload();
+    assert(missingSourceReload.status == ve::AssetReloadStatus::Failed);
+    assert(missingSourceReload.diagnostic.find("ground_normal.png") != std::string::npos);
+    assert(reloader.generation() == 1U);
+    assert(reloader.active().database.serialize() == activeBeforeFailure);
+    ve::writeBinaryFileAtomic(
+        incrementalRoot / "textures/ground_normal.png",
+        ve::readBinaryFile(assetRoot / "textures/ground_normal.png"));
     const std::array corruptScene{std::byte{'{'}, std::byte{0x00}};
     ve::writeBinaryFileAtomic(incrementalRoot / "reference_scene.gltf", corruptScene);
     ve::writeBinaryFileAtomic(incrementalRoot / "textures/ground_albedo.png",
                               ve::readBinaryFile(assetRoot / "textures/ground_albedo.png"));
     const ve::AssetReloadResult failedReload = reloader.reload();
     assert(failedReload.status == ve::AssetReloadStatus::Failed);
-    assert(failedReload.diagnostic.find("volkengine.cgltf@1") != std::string::npos);
+    assert(failedReload.diagnostic.find("volkengine.cgltf@2") != std::string::npos);
     assert(failedReload.diagnostic.find("dependency_chain") != std::string::npos);
     assert(reloader.generation() == 1U);
     assert(reloader.active().database.serialize() == activeBeforeFailure);
@@ -285,8 +411,9 @@ int main() {
            reloader.active().database.records().size());
     assert(reloader.generation() == 2U);
     assert(reloader.reload().status == ve::AssetReloadStatus::Unchanged);
-    assert(incrementalReload.metrics.rebuiltAssets == 4U);
-    assert(incrementalReload.metrics.cacheHits == 2U);
+    assert(incrementalReload.metrics.rebuiltAssets == 5U);
+    assert(incrementalReload.metrics.cacheHits ==
+           incrementalReload.database.records().size() - 5U);
     ve::DerivedDataCache cache{temp / "cache"};
     ve::DerivedDataKeyInput keyInput;
     keyInput.sourceHash = ve::hashString("mesh source");
