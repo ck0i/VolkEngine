@@ -1,0 +1,8 @@
+component|Transform|ve.scene.transform|2
+property|Transform|Translation|translation|Vec3|-100000|100000|0.1|System.Numerics.Vector3
+property|Transform|Rotation|rotation|Quaternion|-1|1|0.01|System.Numerics.Quaternion
+property|Transform|Scale|scale|Vec3|-10000|10000|0.01|System.Numerics.Vector3
+component|Renderable|ve.scene.renderable|1
+property|Renderable|Mesh|mesh|AssetId|0|0|0|VolkEngine.AssetId
+property|Renderable|Material|material|AssetId|0|0|0|VolkEngine.AssetId
+property|Renderable|Visible|visible|Bool|0|1|1|System.Boolean

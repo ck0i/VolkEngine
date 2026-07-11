@@ -30,6 +30,8 @@ public:
   materialTextureHandles(AssetId material) const;
   [[nodiscard]] RenderStats stats() const override;
   void reloadReferenceAssets(ReferenceAssetBundle candidate);
+  void setOverlayCallback(RendererOverlayCallback callback,
+                          void *context) noexcept;
   [[nodiscard]] const RenderDeviceInfo &deviceInfo() const override;
   void requestScreenshot(std::filesystem::path path);
   void armAcquireRecoverySmoke();

@@ -542,6 +542,11 @@ public:
   void armAcquireRecoverySmoke() noexcept { acquireRecoverySmokeArmed_ = true; }
   void waitIdle();
   void reloadReferenceAssets(ReferenceAssetBundle candidate);
+  void setOverlayCallback(const RendererOverlayCallback callback,
+                          void *const context) noexcept {
+    overlayCallback_ = callback;
+    overlayContext_ = context;
+  }
 
 private:
   static constexpr std::size_t kMaxFramesInFlight = 2;
@@ -961,7 +966,7 @@ private:
     void createFrameGraph(bool resizeRecompile);
     void createImGui();
     void shutdownImGui();
-    void beginImGuiFrame(double frameDeltaMs);
+    void beginImGuiFrame(const Camera &camera, double frameDeltaMs);
   void renderImGui(VkCommandBuffer commandBuffer) const;
   struct SceneVisibilityPlan;
 
@@ -1423,6 +1428,8 @@ private:
     std::vector<std::vector<InstanceData>> instanceSortScratch_;
     std::vector<std::vector<InstanceSortKey>> instanceSortKeyScratch_;
     CachedGridVisibility gridVisibilityCache_;
+    RendererOverlayCallback overlayCallback_ = nullptr;
+    void *overlayContext_ = nullptr;
 };
 
 } // namespace ve

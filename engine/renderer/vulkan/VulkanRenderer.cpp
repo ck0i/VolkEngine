@@ -33,6 +33,11 @@ void VulkanRenderer::reloadReferenceAssets(ReferenceAssetBundle candidate) {
   impl_->reloadReferenceAssets(std::move(candidate));
 }
 
+void VulkanRenderer::setOverlayCallback(
+    const RendererOverlayCallback callback, void *const context) noexcept {
+  impl_->setOverlayCallback(callback, context);
+}
+
 const RenderDeviceInfo &VulkanRenderer::deviceInfo() const {
     return impl_->deviceInfo();
 }

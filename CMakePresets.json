@@ -70,6 +70,29 @@
       }
     },
     {
+      "name": "linux-runtime",
+      "displayName": "Linux Runtime Only",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-runtime",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MAKE_PROGRAM": {
+          "type": "FILEPATH",
+          "value": "${sourceDir}/out/bootstrap/ninja/ninja"
+        },
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "VOLKENGINE_ENABLE_VALIDATION": "OFF",
+        "VOLKENGINE_ENABLE_IMGUI": "OFF",
+        "VOLKENGINE_ENABLE_EDITOR": "OFF",
+        "VOLKENGINE_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
       "name": "windows-debug",
       "displayName": "Windows Debug",
       "generator": "Ninja",
@@ -163,6 +186,15 @@
       ]
     },
     {
+      "name": "linux-runtime",
+      "configurePreset": "linux-runtime",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
       "condition": {
@@ -228,6 +260,21 @@
       "environment": {
         "ASAN_OPTIONS": "detect_leaks=1:strict_string_checks=1:check_initialization_order=1",
         "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-runtime",
+      "configurePreset": "linux-runtime",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
       },
       "output": {
         "outputOnFailure": true

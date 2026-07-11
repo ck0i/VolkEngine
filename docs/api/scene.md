@@ -1,8 +1,12 @@
 # Scene API
 
-Header: `engine/renderer/SceneRenderer.hpp`; sandbox implementation: `engine/renderer/SceneRenderer.cpp`.
+Headers: `engine/renderer/SceneRenderer.hpp`, `engine/scene/SceneReflection.hpp`,
+`engine/scene/CookedWorld.hpp`; implementation spans the corresponding source
+files plus editor-only authoring code under `engine/editor`.
 
-The scene API provides renderer-facing data plus a CPU-only `WorldSceneExtractor` bridge. The bridge converts explicit world transform/renderable components into an extractor-owned, reusable `SceneRenderList`; Vulkan remains behind the renderer boundary.
+The scene API provides renderer-facing data, a CPU-only `WorldSceneExtractor`
+bridge, stable reflected authoring metadata, and a deterministic cooked-world
+boundary. Vulkan remains behind the renderer boundary.
 
 ## `SceneMeshId`
 
@@ -130,6 +134,78 @@ Version 1 streams remain loadable. Their file-local ordinal `i` migrates determi
 Encoding rejects missing/zero/duplicate identities, malformed or oversized names, dangling parents, cycles, non-finite values, invalid mesh identifiers, and valid bounds with negative radius. Decoding additionally rejects bad magic/version, unknown component bits, invalid booleans, truncated or trailing bytes, malformed or unknown parent IDs, unreferenced identity-only records, and configured limit breaches. Minimum record footprints and name totals are checked before large allocations. Parsing and graph validation finish before a temporary `World` is constructed, and the destination is move-replaced only after the complete load succeeds.
 
 `saveWorldScene(world, path, limits)` publishes encoded bytes through `writeBinaryFileAtomic`; `loadWorldScene(destination, path, limits)` reads and transactionally decodes them. The one-shot path uses bounded hash deduplication while gathering, canonical $O(N \log N)$ sorting, binary-search parent resolution, and linear encoding/reconstruction. It adds no per-frame processing.
+
+## Reflected scene types
+
+`SceneTypeRegistry` owns immutable component metadata keyed by stable 64-bit
+FNV-1a type/property IDs. A `SceneTypeMetadata` record contains the display
+name, stable name, schema version, payload size/alignment, inspector ranges,
+and encode/decode/migrate/property-write hooks. Registration rejects duplicate
+or malformed type/property IDs before publishing a type.
+
+The built-in `Transform` and `Renderable` schemas are defined once in
+`SceneComponents.annotations.hpp`. The build generator emits
+`SceneSchema.generated.hpp`; `generatedSceneTypeRegistry()` and the handwritten
+`explicitSceneTypeRegistry()` must produce byte-identical binding manifests.
+`externalSceneTypeRegistry()` parses the line-oriented
+`schemas/scene-components.schema` representation and produces that same
+manifest. This keeps annotation, explicit-registration, and external-schema
+prototypes executable while the long-term binding source remains evolvable.
+
+Known payloads are canonical little-endian records. Transform schema v2 stores
+translation, quaternion rotation, and scale; the registered v1-to-v2 migration
+adds identity rotation to the legacy translation/scale payload. Decode and
+migration validate the complete candidate before replacing caller state.
+
+## Authoring documents and commands
+
+Editor builds expose `editor::AuthoringDocument`. Entities use stable
+`SceneEntityId`s, names, parent identities, and a sorted set of versioned
+component payloads. Known components are decoded through the registry on every
+load/edit; unknown component payloads and versions round-trip opaquely so a
+tool does not destroy data it cannot inspect. Cooking rejects unknown types
+instead of silently omitting them.
+
+Create, subtree delete, rename, reparent, component replacement, reflected
+property edits, and multi-entity edits are `DocumentCommand`s containing
+before/after entity patches. A command applies to a copied candidate, validates
+the full identity/component/hierarchy graph, then swaps atomically. Undo and
+redo require the exact expected state; divergence raises without consuming the
+history entry. History is bounded and grows lazily before publication, so
+allocation failure cannot leave an applied edit without its inverse. Dirty
+state compares the canonical document fingerprint with the last saved
+fingerprint, so preview replacement, undo/redo, and transactional load all
+report state rather than history position.
+
+`encodeAuthoringDocument` writes canonical little-endian `VEAU` data sorted by
+entity and component ID. `decodeAuthoringDocument` parses into a temporary
+document, applies registered migrations, preserves unknown payloads, and
+replaces the destination only after complete validation.
+`saveAuthoringDocument` uses atomic publication; `importAuthoringScene`
+deterministically maps a glTF scene's asset identities, hierarchy, transforms,
+meshes, and materials into the same document model.
+
+## Cooked worlds
+
+`editor::cookAuthoringDocument` converts a validated document into compact
+structure-of-arrays `CookedWorld` data: stable identities, names, parent
+indices, transforms, renderable masks, and authored mesh/material identities.
+Records sort by stable identity, parents resolve to indices, and all arrays
+must have identical entity counts. `VECW` encode/decode and file helpers use
+explicit little-endian fields, configured entity/name/byte limits, and
+transactional replacement.
+
+`instantiateCookedWorld(destination, source, resolver)` resolves authored asset
+IDs into current generational runtime handles, renderer materials, and mesh
+bounds while constructing a temporary `World`. Invalid/stale resolution,
+non-finite data, malformed hierarchy, or any component failure leaves the
+destination untouched. `Application::instantiateCookedWorld` supplies the
+active renderer-backed resolver. Runtime builds include `CookedWorld` but not
+the editor document, command stack, importer, cooker, session, or ImGui shell.
+
+VESN v2 remains the explicit low-level `WorldScene*` snapshot contract described
+above; creator workflows use `VEAU` authoring source and `VECW` runtime output
+instead of treating VESN as a generic editor format.
 
 ## `SceneGridRange`
 

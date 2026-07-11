@@ -3,6 +3,7 @@
 #include "core/WorldScheduler.hpp"
 
 #include "core/Log.hpp"
+#include "scene/CookedWorld.hpp"
 
 #include <algorithm>
 #include <array>
@@ -148,6 +149,37 @@ Application::Application(EngineConfig config)
   }
   sceneRenderer_.setAuthoredSceneItems(
       referenceDraws(referenceAssets_.scene, renderer_));
+}
+
+void Application::setRendererOverlay(
+    const RendererOverlayCallback callback, void *const context) noexcept {
+  renderer_.setOverlayCallback(callback, context);
+}
+
+void Application::instantiateCookedWorld(
+    World &destination, const CookedWorld &source) const {
+  const CookedWorldAssetResolver resolver{
+      const_cast<Application *>(this),
+      [](void *context, const AssetId id) {
+        const auto &application = *static_cast<const Application *>(context);
+        return referenceMeshHandle(application.referenceAssets_.scene, id);
+      },
+      [](void *context, const AssetId id) {
+        const auto &application = *static_cast<const Application *>(context);
+        const auto found =
+            std::ranges::find(application.referenceAssets_.scene.materials, id,
+                              &ImportedMaterial::id);
+        if (found == application.referenceAssets_.scene.materials.end()) {
+          throw std::runtime_error(
+              "Cooked world references an unknown material");
+        }
+        return renderMaterial(*found, application.renderer_);
+      },
+      [](void *context, const MeshAssetHandle mesh) {
+        const auto &application = *static_cast<const Application *>(context);
+        return application.renderer_.meshBounds(mesh);
+      }};
+  ve::instantiateCookedWorld(destination, source, resolver);
 }
 
 void Application::pollAssetReload(const double elapsedSeconds) {

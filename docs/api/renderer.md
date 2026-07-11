@@ -150,6 +150,13 @@ Current public operations:
 - `materialTextureHandles(AssetId)` — resolves the active authored material's base-color, normal, and metallic-roughness texture handles.
 - `stats()`, `deviceInfo()` — implement `IRenderer`.
 - `reloadReferenceAssets(ReferenceAssetBundle candidate)` — main-thread publication boundary for a fully cooked candidate. Mesh/cluster/texture resources and dependent descriptors replace the old set transactionally after GPU idle; failure restores the old GPU resources, descriptors, stats, and active bundle.
+- `setOverlayCallback(RendererOverlayCallback, void*)` — installs a non-owning
+  engine/editor overlay hook. When ImGui is compiled in,
+  `EngineConfig::debugOverlay` is enabled, and backend initialization succeeds,
+  a non-null hook replaces the built-in diagnostics window and receives
+  `RendererOverlayFrame {camera, stats, width, height}` during the existing
+  ImGui frame. Otherwise the hook is retained but not invoked. Callback
+  exceptions are logged and contained before renderer submission.
 - `requestScreenshot(std::filesystem::path)` — queues one screenshot for the next `draw()`.
 - `armAcquireRecoverySmoke()` — diagnostics-only one-shot fault injection used by `RunOptions::acquireRecoverySmoke`; ordinary game-facing code should not call it.
 - `waitIdle()` — explicit idle synchronization point for shutdown/test boundaries, not for normal pacing.

@@ -59,6 +59,22 @@ return app.run(ve::RunOptions{.maxFrames = 120});
 `Application` owns the main `Window`, `Camera`, bounded `JobSystem`, active `ReferenceAssetBundle`, concrete `VulkanRenderer` facade, demo/world scene extractors, wall `Clock`, and `FixedStepClock`. Asset cooking starts before platform/renderer construction. With `assetHotReload` enabled, subsequent cooks execute in the background; the main thread only polls completion and publishes a validated candidate at a frame boundary. Publication replaces GPU geometry, clusters, textures, descriptors, authored draws, and visibility caches transactionally, while failure leaves the prior CPU/GPU bundle live.
 `run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback zero or more times per rendered frame using the configured fixed step. `runWithInput(world, update, options)` additionally passes a read-only `InputState` snapshot to each substep. Input transitions and accumulated cursor/scroll motion are retained across render frames that emit no simulation update, delivered once to the first available substep, then consumed; held state persists for later substeps. Camera input remains render-rate and uses the bounded wall delta. Both world callback paths then extract the latest world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
 
+Creator/runtime integration uses three narrow application seams:
+
+- `instantiateCookedWorld(destination, source)` resolves cooked authored
+  mesh/material IDs through the active renderer and transactionally replaces
+  `destination`; any stale asset or invalid cooked record leaves it unchanged.
+- `setRendererOverlay(callback, context)` installs a non-owning ImGui overlay
+  callback. When ImGui is compiled in, `EngineConfig::debugOverlay` is enabled,
+  and backend initialization succeeds, the callback receives camera, renderer
+  stats, and swapchain dimensions after `ImGui::NewFrame`; otherwise it is
+  retained but not invoked.
+  Its context must outlive the run.
+- `jobStats()` returns the bounded scheduler aggregate used by profiling views.
+
+These methods expose no Vulkan handles and do not make `Application` own an
+editor document or shell.
+
 ### `JobSystem`
 
 `JobSystem` is a fixed-capacity dependency scheduler. Construction preallocates job slots, dependency edges, per-worker queues, and a bounded timeline. External submissions distribute ready jobs round-robin; each worker consumes its own queue LIFO and steals from peers FIFO. `JobDesc` names are copied into fixed timeline storage, while callbacks and contexts remain non-owning and must outlive completion.

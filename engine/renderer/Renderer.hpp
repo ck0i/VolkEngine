@@ -123,6 +123,16 @@ struct RenderStats {
     std::uint64_t triangleCount = 0;
 };
 
+struct RendererOverlayFrame {
+    const Camera& camera;
+    const RenderStats& stats;
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+};
+
+using RendererOverlayCallback = void (*)(void* context,
+                                         const RendererOverlayFrame& frame);
+
 class IRenderer {
 public:
     virtual ~IRenderer() = default;

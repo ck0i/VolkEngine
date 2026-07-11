@@ -8,13 +8,16 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | --- | --- | --- |
 | `engine/core` | Application lifecycle, bounded job scheduling, deterministic serial/parallel simulation phases, config, clock, camera, world/entity-component storage, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `JobSystem`, `WorldSystemScheduler`, `World`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW process runtime, window, input, framebuffer resize state, Vulkan surface creation. | `GlfwRuntime`, `Window`. |
+| `engine/scene` | Runtime reflection metadata, stable scene component payloads, legacy world snapshots, and optimized cooked-world loading/instantiation. | `SceneTypeRegistry`, generated/explicit/external schemas, `CookedWorld`, runtime instantiation. |
 | `engine/renderer` | Renderer contracts, lighting/material ABI and bounded planning contracts, world-to-scene extraction, scene submission data, procedural/imported mesh helpers, image loading, executable frame graph, and resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, lighting/environment records, `WorldSceneExtractor`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle, renderer entry points, and transactional authored-asset publication. | `VulkanRenderer`, `draw`, `reloadReferenceAssets`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
 | `engine/renderer/vulkan/VulkanRenderer.cpp` | Thin forwarding wrapper over `VulkanRenderer::Impl`. | Delegates each public call to private implementation. |
 | `engine/shaders` | GLSL source compiled to SPIR-V by CMake. | Runtime shader files copied beside the sandbox. |
+| `engine/editor` | Editor-only authoring document, command history, glTF conversion, cooker, session interactions, and optional ImGui shell. | `AuthoringDocument`, `EditorSession`, `AuthoringCooker`; excluded when `VOLKENGINE_ENABLE_EDITOR=OFF`. |
 | `samples/sandbox` | Demo app, CLI flags, smoke scenarios. | Executable entry point, not engine API. |
+| `samples/editor` | Interim creator executable and runtime publication wiring. | `VolkEngineEditor`, built only when editor and ImGui options are both enabled. |
 
 ## Ownership model
 
@@ -46,6 +49,16 @@ graph TD
 - Typed `SimulationEventChannel` instances are scheduler-owned setup resources with fixed inline payload storage. Systems observe the previous successful step and publish the next FIFO batch; callback/overflow rollback and partial-command-playback promotion keep event lifetime aligned with the scheduler's actual mutation boundary.
 - Scheduler-owned `SimulationTimerQueue` resources add delayed and recurring typed payloads on integer successful-step ticks. Schedule/cancel mutations share the same rollback/promotion boundary as event channels, while monotonic handles and fixed storage avoid wall-time drift, stale-handle aliasing, and steady-state allocation.
 - `ScenePersistence` is a stateless one-shot boundary over the explicit scene component subset. VESN v2 canonicalizes records by persistent 128-bit `WorldSceneIdentity`, stores hierarchy references by stable ID, validates bounded UTF-8 labels and complete parent graphs, and reconstructs into a temporary `World`; v1 file-local ordinals migrate deterministically on load. It does not expose or serialize generic type-erased component pools.
+- `SceneTypeRegistry` is runtime-neutral metadata. Generated annotation output,
+  explicit C++ registration, and the external schema prototype publish the same
+  stable binding manifest. Payload hooks validate and migrate copied candidates;
+  registry publication never depends on ImGui or Vulkan.
+- Editor-only `AuthoringDocument` owns stable entities, opaque/known component
+  payloads, selection, dirty state, and bounded command history.
+  `AuthoringCooker` converts that source model into deterministic `CookedWorld`
+  arrays. Runtime instantiation resolves active asset handles into a temporary
+  `World` and swaps only after complete success. Runtime builds retain the
+  reflection/cooked-world reader while CMake omits all `engine/editor` sources.
 - `GlfwRuntime` owns GLFW process initialization/termination. `Window` borrows the runtime and owns only its native window handle; one runtime is allowed per process and GLFW calls remain on the main thread.
 - `InputTracker` converts platform callbacks and bounded gamepad polling into GLFW-free value snapshots. Caller-owned fixed-capacity `InputActionMap` instances translate those physical snapshots into semantic gameplay actions at fixed-step boundaries without allocating or mutating global input policy.
 - `VulkanRenderer` owns runtime Vulkan behavior via private `Impl`, but keeps ownership boundaries explicit:
@@ -77,6 +90,13 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 7. `RenderStats` and `RenderDeviceInfo` expose the actual GPU path, bounded pressure, feature capabilities, material coverage, and last completed timing state.
 
 Scene files are loaded before entering `Application::run` and saved after it returns. Persistence therefore performs no frame-loop work and never competes with scheduler queries, deferred structural playback, extraction, or renderer borrowing.
+
+The interim editor adds a separate creator path: glTF import → reflected
+`AuthoringDocument` → transactional edits/undo → atomic authoring save →
+deterministic `CookedWorld` cook → runtime asset resolution → temporary-world
+publication. Its ImGui hierarchy, inspector, viewport picking/gizmos, and
+profiling panels call only editor/session and renderer-overlay contracts; ImGui
+state never enters either serialized format.
 
 ## Public/private line
 

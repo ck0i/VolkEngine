@@ -18,7 +18,9 @@ VolkEngine's Vulkan renderer keeps public API in `VulkanRenderer.hpp` and implem
 - `engine/renderer/vulkan/VulkanRenderer.Resources.cpp`: long-lived texture/image/buffer resources, samplers, descriptor layouts/pools/sets, and resource registry accounting.
 - `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp`: generated cube/sphere/plane geometry, imported OBJ geometry, bounds propagation, and shared device-local vertex/index uploads.
 - `engine/renderer/vulkan/VulkanRenderer.Screenshot.cpp`: screenshot request gating, image-to-buffer transfer setup, PPM writing, and atomic publish semantics.
-- `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp`: optional diagnostics overlay lifecycle, periodic diagnostics refresh, and ImGui draw-data emission.
+- `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp`: optional built-in
+  diagnostics or engine/editor overlay callback lifecycle, periodic diagnostics
+  refresh, and ImGui draw-data emission.
 
 ## Hot-path rules
 
@@ -56,7 +58,7 @@ VolkEngine's Vulkan renderer keeps public API in `VulkanRenderer.hpp` and implem
 | Timestamps | Fixed timestamp ranges report frame, Forward+ assignment, GPU visibility cull, shadow atlas, depth, HDR, depth-pyramid, and final-pass durations; `gpuTimestampsValid` distinguishes completed query data from pending/unavailable values. | `VulkanRenderer.FrameResources.cpp` |
 | Pipeline cache / creation | Header/device validated cache load/save at `${binaryDir}/cache/pipeline_cache.bin` with temp-file publish and post-readback validation; standard/masked shadow, depth-prepass, prepass-aware scene, no-prepass scene, Forward+ compute, and depth-pyramid pipelines share one transactional pipeline-set lifecycle. | `VulkanRenderer.Pipelines.cpp` |
 | Resource accounting | Vector-backed registry reports live renderer-owned/imported estimated bytes—including the shadow atlas and generated environment—without owning memory or imposing a fixed small resource cap. | `VulkanRenderer.Resources.cpp`, `GpuResourceRegistry.hpp` |
-| Diagnostics | Optional overlay and schema-v4 run summaries expose graph structure/allocation, recompiles, independent light/shadow timings, light-list and atlas pressure, probes/environment/exposure, material-class coverage, descriptor pressure, cooked cluster count, command granularity, and visible/tested/occluded culling units. | `VulkanRenderer.ImGui.cpp`, `RunSummary.cpp` |
+| Diagnostics | Optional built-in/editor overlay and schema-v5 run summaries expose graph structure/allocation, recompiles, independent light/shadow timings, light-list and atlas pressure, probes/environment/exposure, material-class coverage, descriptor pressure, cooked cluster count, command granularity, visible/tested/occluded culling units, and bounded job/IO scheduling. | `VulkanRenderer.ImGui.cpp`, `RunSummary.cpp` |
 | Dynamic rendering | Graph callbacks record Forward+ assignment, visibility cull/command generation, shadow atlas, optional depth, HDR PBR/environment lighting, temporal Hi-Z build, tonemap/ImGui, and screenshot copy. Tracked image/buffer state skips exact no-op transitions; graph final transitions cover presentation and host readback. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.Sync.cpp` |
 
 ## Reading `RenderStats`

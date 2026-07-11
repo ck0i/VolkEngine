@@ -136,7 +136,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
             }
         }
 
-        beginImGuiFrame(frameDeltaMs);
+        beginImGuiFrame(camera, frameDeltaMs);
         cpuPrepareEnd = std::chrono::steady_clock::now();
         cpuRecordEnd = cpuPrepareEnd;
         cpuEnd = cpuPrepareEnd;

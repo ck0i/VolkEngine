@@ -36,7 +36,7 @@ void VulkanRenderer::Impl::createImGui() {
         io.LogFilename = nullptr;
         ImGui::StyleColorsDark();
 
-        if (!ImGui_ImplGlfw_InitForVulkan(window_.handle(), false)) {
+        if (!ImGui_ImplGlfw_InitForVulkan(window_.handle(), true)) {
             throw std::runtime_error("Failed to initialize Dear ImGui GLFW backend");
         }
         glfwBackendInitialized = true;
@@ -104,7 +104,8 @@ void VulkanRenderer::Impl::shutdownImGui() {
 #endif
 }
 
-void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
+void VulkanRenderer::Impl::beginImGuiFrame(const Camera &camera,
+                                           const double frameDeltaMs) {
 #if VOLKENGINE_ENABLE_IMGUI
     if (!config_.debugOverlay || !imguiOwner_.initialized) {
         return;
@@ -114,6 +115,7 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
+    if (overlayCallback_ == nullptr) {
     constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
                                        ImGuiWindowFlags_AlwaysAutoResize |
                                        ImGuiWindowFlags_NoSavedSettings |
@@ -241,8 +243,23 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
                     bytesToMiB(resourceStats.importedImageBytes));
     }
     ImGui::End();
+    }
+    if (overlayCallback_ != nullptr) {
+        try {
+            overlayCallback_(
+                overlayContext_,
+                RendererOverlayFrame{camera, stats_, swapchainOwner_.extent.width,
+                                     swapchainOwner_.extent.height});
+        } catch (const std::exception &error) {
+            logger()->error("Renderer overlay callback failed: {}", error.what());
+        } catch (...) {
+            logger()->error(
+                "Renderer overlay callback failed with an unknown exception");
+        }
+    }
     ImGui::Render();
 #else
+    (void)camera;
     (void)frameDeltaMs;
 #endif
 }

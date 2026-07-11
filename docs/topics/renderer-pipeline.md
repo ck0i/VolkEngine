@@ -24,7 +24,9 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 - `engine/renderer/vulkan/VulkanRenderer.Visibility.cpp` — frustum extraction/culling, grid visibility acceleration, LOD bucketing, and draw-work planning.
 - `engine/renderer/vulkan/VulkanRenderer.Lighting.cpp` — per-frame light/probe validation, tile-list capacity, Forward+ descriptor writes, practical directional cascade/local spot-shadow matrices, and bounded atlas preparation.
 - `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — draw orchestration, graph execution callbacks, dynamic-rendering pass recording, submission/presentation, stats, and screenshot integration.
-- `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp` — optional diagnostics overlay (`VOLKENGINE_ENABLE_IMGUI`) lifecycle and rendering.
+- `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp` — optional built-in
+  diagnostics or non-owning engine/editor overlay callback
+  (`VOLKENGINE_ENABLE_IMGUI`) lifecycle and rendering.
 - `engine/renderer/vulkan/VulkanRenderer.Screenshot.cpp` — screenshot request/readback handling, swapchain readback copy, PPM publishing, and temp/backup file behavior.
 - `engine/renderer/vulkan/VmaUsage.cpp` — single translation unit containing `#define VMA_IMPLEMENTATION`.
 
@@ -129,4 +131,8 @@ Unsupported format/usage combinations (no `TRANSFER_SRC` support or non-UNORM sw
 - Pass regions are labeled for RenderDoc/validation captures.
 - `RenderStats` exposes CPU timing buckets; light-assignment/cull/shadow/depth/HDR/Hi-Z/final GPU intervals; draw/triangle/visibility state; light-list and shadow-atlas pressure; probes/environment/exposure; material-class counts; and submission mode.
 - `RenderDeviceInfo` mirrors adapter, Vulkan 1.3 masked-fragment capability, descriptor/indirect features, and upload-sync decisions.
-- ImGui and run-summary schema v5 expose bounded lighting/material state; the summary additionally records bounded job/IO counters and worker timing. `--no-imgui` skips overlay initialization and overlay work.
+- ImGui and run-summary schema v5 expose bounded lighting/material state; the
+  summary additionally records bounded job/IO counters and worker timing.
+  A configured overlay callback replaces the built-in diagnostics window while
+  reusing the same ImGui frame and graph pass. `--no-imgui` skips overlay
+  initialization and callback work.

@@ -14,6 +14,7 @@
 namespace ve {
 
 class WorldSystemScheduler;
+struct CookedWorld;
 
 class Application {
 public:
@@ -30,6 +31,11 @@ public:
                    const RunOptions &options);
   int run(World &world, WorldSystemScheduler &scheduler,
           const RunOptions &options);
+  void setRendererOverlay(RendererOverlayCallback callback,
+                          void *context) noexcept;
+  [[nodiscard]] JobSystemStats jobStats() const { return jobs_.stats(); }
+  void instantiateCookedWorld(World &destination,
+                              const CookedWorld &source) const;
 
 private:
   int runInternal(World *world, WorldUpdateCallback update,

@@ -38,7 +38,7 @@ Dependencies should be minimized. VolkEngine should own its differentiating rend
 
 **Status: implemented foundation**
 
-As of July 2026, the repository contains a C++23 static engine library and one GLFW/Vulkan sandbox.
+As of July 2026, the repository contains a C++23 static engine library, a GLFW/Vulkan sandbox, and a separable interim ImGui editor executable.
 
 ### Engine and scene foundation
 
@@ -50,13 +50,13 @@ Implemented:
 - Fixed-step simulation, accumulated input, camera, time, and file helpers.
 - Fixed-capacity dependency-aware work stealing with cooperative waits, cancellation/failure propagation, background asset IO/cooking, and bounded profiling.
 - Persistent UUID entity identity, validated scene hierarchy, fixed-step TRS interpolation, and deterministic CPU scene extraction.
-- Bounded, transactional VESN v2 scene persistence for transforms, hierarchy links, and renderables.
+- Bounded transactional VESN v2 world snapshots, stable reflected component metadata, versioned authoring documents, and deterministic cooked-world instantiation.
 
 Current limits:
 
-- No general thread-safe world mutation model, reflection/schema system, or headless game application lifecycle.
-- Scene persistence is an explicit component subset, not a generic authoring schema or optimized cooked-world format.
-- No prefab model, undo/redo, asset GUID database, dirty extraction, spatial streaming, gameplay serialization, or editor metadata.
+- No general thread-safe world mutation model or headless game application lifecycle.
+- Reflection currently covers the built-in authoring components rather than arbitrary gameplay/ECS pools, and VESN remains an explicit low-level scene subset.
+- No prefab/override model, asset GUID database, dirty extraction, spatial streaming, gameplay serialization, or project-level editor metadata.
 - No C# host, Lua integration, production input mapping, runtime UI contract, physics, audio, animation stack, navigation, networking, or replay system.
 
 ### Renderer foundation
@@ -90,19 +90,20 @@ Implemented:
 - Incremental reference-asset cooking and transactional reload; artifact-content keys avoid rebuilding byte-identical outputs and propagate only real dependency changes.
 - Versioned texture artifacts validate and preserve decoded RGBA8, linear RGBA32F HDR, and non-supercompressed KTX2 BC1/BC3/BC7 payloads with explicit role, color-space, dimensions, and mip metadata.
 - OBJ/procedural geometry and direct stb_image-backed texture overrides remain available alongside the authored glTF path.
-- Twenty-three CPU test executables plus the sandbox help test.
+- Stable generated/explicit/external reflection manifests, transactional authoring commands and migration, canonical authoring/cooked-world formats, and a separable hierarchy/inspector/viewport/profiling editor shell.
+- Twenty-five CPU test executables plus sandbox and editor help tests.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
 Current limits:
 
 - No FBX importer, animation sample-data artifact or runtime playback, platform packaging/cooking, asynchronous streaming, material database, BasisLZ/Zstd texture transcoder, or runtime HDR/BC texture upload path.
-- No scene editor, asset browser, viewport picking/gizmos, inspector, undo stack, play mode, project creation, packaging, installed SDK, plugin manifest, or package registry.
+- The interim editor has no asset browser, prefab/override workflow, isolated play mode, project creation, packaging, installed SDK, plugin manifest, or package registry.
 - A self-hosted live-Vulkan workflow is defined, but coverage still depends on controlled runner availability; cross-driver visual/performance policy and a maintained external-style sample project remain incomplete.
 
 ### Verified baseline
 
 Current local baseline (11 July 2026):
-- `ctest --preset linux-debug` passed all 25 registered tests.
+- `ctest --preset linux-debug` passed all 27 registered tests; the editor-free `linux-runtime` preset passed all 25 of its registered tests and its generated build contains no `engine/editor` source or editor target.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
@@ -113,8 +114,9 @@ Current local baseline (11 July 2026):
 - S5's deterministic job benchmark executed 128 independent one-million-iteration integer jobs over three rounds with checksum equality. The best exact 1-worker sample was 502.060 ms and the best exact 8-worker sample was 61.353 ms: an 8.183× speedup with nine steals.
 - A 1,400-frame Vulkan asset-reload smoke on Intel RPL-S graphics changed and restored a live authored texture, published both complete candidates without stopping rendering, wrote a visually inspected 1280×720 screenshot and schema-v5 summary, and exited cleanly. Its 25 jobs all succeeded; telemetry recorded six IO jobs, nineteen Asset jobs, twenty-three steals, a queue high-water mark of three, and 53.903 ms aggregate worker time. Validation was requested but unavailable on the current machine, so this is functional publication evidence rather than new validation-layer evidence.
 - A separate 1,400-frame corrupt-source smoke rejected two invalid-image candidates, retained the active CPU/GPU bundle, continued rendering, emitted a schema-v5 summary, and exited cleanly. The final profile reported twenty-one succeeded and four failed jobs with no leaked active work.
+- A 90-frame `VolkEngineEditor --editor-smoke` run imported the reference glTF, created/reparented/edited an entity, exercised undo/redo, atomically saved and reopened a 584-byte authoring document, cooked and loaded a 404-byte runtime world, rendered the two authored primitives, captured the hierarchy/inspector/viewport/profiling shell at 1280×720, emitted a schema-v5 summary, reported zero failed jobs, and exited cleanly. Validation was requested but unavailable on the current machine, so this is functional creator-workflow evidence rather than new validation-layer evidence.
 
-This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, and S5's bounded parallel execution plus transactional background asset-publication path on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, S5's bounded parallel execution plus transactional background asset-publication path, and S6's reflected authoring-to-cooked-runtime creator loop on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -275,7 +277,7 @@ Implemented baseline:
 - `Application` polls background reloads without waiting on normal frames. Changed candidates publish at a main-thread safe point through `VulkanRenderer::reloadReferenceAssets`; geometry, clusters, textures, descriptors, authored draws, and visibility caches cut over transactionally, while failure retains the old CPU/GPU bundle.
 - Run-summary schema v5, shutdown logs, and the live title expose worker/job/category counts, active/running work, queue high-water mark, steals, and worker time. The deterministic exact 1-worker/8-worker benchmark and full 25-test suite satisfy the local S5 gate.
 
-## S6. Reflected authoring model and interim editor foundation — **Next**
+## S6. Reflected authoring model and interim editor foundation — **Current**
 
 Prevent the renderer-only trap by establishing a real creator workflow while APIs are still allowed to evolve.
 
@@ -293,6 +295,15 @@ Exit criteria:
 - A user can import the reference scene, create and reparent entities, edit reflected components, undo/redo edits, save an authoring scene, cook it, reopen it, and render equivalent runtime content.
 - Unknown/incompatible component data, migration failure, undo failure, and invalid hierarchy operations are handled transactionally.
 - Editor-only code is absent from a headless/runtime build configuration.
+
+Implemented baseline:
+
+- Annotation-driven generation, explicit C++ registration, and the external line schema produce identical stable type/property binding manifests for reflected Transform v2 and Renderable v1 payloads. Known payloads have canonical little-endian hooks, bounded inspector metadata, and transactional v1-to-v2 transform migration.
+- `AuthoringDocument` owns stable entities, hierarchy, known/opaque versioned component payloads, selection, content-fingerprint dirty state, and bounded command history. Create/delete/rename/reparent/component/property commands, multi-selection edits, preview gestures, undo/redo divergence, decode/migration failure, and hierarchy rejection preserve complete state transactionally.
+- Canonical `VEAU` authoring files preserve unknown payloads; cooking rejects them explicitly. Deterministic `VECW` structure-of-arrays artifacts resolve authored mesh/material IDs through active generational renderer handles and construct a temporary runtime `World` before publication.
+- `VolkEngineEditor` provides import/save/load/cook/runtime publication controls, hierarchy drag reparenting, reflected inspector edits, viewport picking, one-command snapped translation gizmos, multi-selection, dirty/undo/redo state, and CPU/GPU/job/frame-graph profiling through the renderer's non-owning overlay callback.
+- `VolkEngineEditorCore` has no ImGui dependency; the UI/executable require both editor and ImGui options. The `linux-runtime` preset disables both and demonstrably emits no editor sources or targets.
+- Focused authoring contracts cover generated/explicit/external manifest equivalence, known/unknown round trips, migration success/failure rollback, bounded history and undo divergence, hierarchy transactions, import/create/edit/save/reopen/cook/runtime equivalence, picking/snapping, and failed runtime resolution rollback. The complete debug suite passes all 27 tests.
 
 ## Cross-cutting short-term quality gates — **Next**
 

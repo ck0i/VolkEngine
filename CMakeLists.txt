@@ -13,11 +13,33 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 option(VOLKENGINE_ENABLE_VALIDATION "Request Vulkan validation layers in debug builds" ON)
 option(VOLKENGINE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(VOLKENGINE_ENABLE_IMGUI "Enable Dear ImGui debug overlay" ON)
+option(VOLKENGINE_ENABLE_EDITOR "Build the interim authoring editor and editor-only tests" ON)
 option(VOLKENGINE_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer on project targets" OFF)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/VolkEngineDependencies.cmake")
 volkengine_resolve_dependencies()
 find_package(Threads REQUIRED)
+if(VOLKENGINE_ENABLE_EDITOR)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(VOLKENGINE_SCENE_ANNOTATIONS
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine/scene/SceneComponents.annotations.hpp")
+    set(VOLKENGINE_GENERATED_SCENE_SCHEMA
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine/scene/SceneSchema.generated.hpp")
+    add_custom_command(
+        OUTPUT "${VOLKENGINE_GENERATED_SCENE_SCHEMA}"
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_scene_schema.py"
+            "${VOLKENGINE_SCENE_ANNOTATIONS}"
+            "${VOLKENGINE_GENERATED_SCENE_SCHEMA}"
+        DEPENDS
+            "${VOLKENGINE_SCENE_ANNOTATIONS}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_scene_schema.py"
+        COMMENT "Generating stable scene reflection metadata"
+        VERBATIM)
+    add_custom_target(VolkEngineSceneSchema
+        DEPENDS "${VOLKENGINE_GENERATED_SCENE_SCHEMA}")
+endif()
 
 if(VOLKENGINE_ENABLE_IMGUI)
     add_library(VolkEngineImGui STATIC
@@ -223,6 +245,8 @@ add_library(VolkEngine STATIC
     engine/core/Log.cpp
     engine/core/Time.cpp
     engine/core/RunSummary.cpp
+    engine/scene/CookedWorld.cpp
+    engine/scene/SceneReflection.cpp
     engine/scene/ScenePersistence.cpp
     engine/platform/Input.cpp
     engine/platform/InputActions.cpp
@@ -251,6 +275,9 @@ add_library(VolkEngine STATIC
     engine/renderer/vulkan/VulkanRenderer.Sync.cpp
     engine/renderer/vulkan/VulkanRenderer.Uploads.cpp
     engine/renderer/vulkan/VulkanRenderer.Visibility.cpp)
+if(VOLKENGINE_ENABLE_EDITOR)
+    add_dependencies(VolkEngine VolkEngineSceneSchema)
+endif()
 
 if(MSVC)
     set_source_files_properties(
@@ -294,7 +321,47 @@ target_compile_definitions(VolkEngine
         $<$<CONFIG:Debug>:VOLKENGINE_DEBUG_BUILD=1>
         $<$<NOT:$<CONFIG:Debug>>:VOLKENGINE_DEBUG_BUILD=0>
         $<$<BOOL:${VOLKENGINE_ENABLE_IMGUI}>:VOLKENGINE_ENABLE_IMGUI=1>
+
         $<$<NOT:$<BOOL:${VOLKENGINE_ENABLE_IMGUI}>>:VOLKENGINE_ENABLE_IMGUI=0>)
+
+if(VOLKENGINE_ENABLE_EDITOR)
+    add_library(VolkEngineEditorCore STATIC
+        engine/editor/AuthoringCooker.cpp
+        engine/editor/EditorSession.cpp
+        engine/editor/AuthoringDocument.cpp)
+    target_include_directories(VolkEngineEditorCore
+        PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+    target_link_libraries(VolkEngineEditorCore
+        PUBLIC
+            VolkEngine)
+    target_compile_definitions(VolkEngineEditorCore
+        PUBLIC
+            VOLKENGINE_ENABLE_EDITOR=1)
+    add_dependencies(VolkEngineEditorCore VolkEngineSceneSchema)
+    volkengine_target_warnings(VolkEngineEditorCore)
+
+if(VOLKENGINE_ENABLE_EDITOR AND VOLKENGINE_ENABLE_IMGUI)
+    add_library(VolkEngineEditorUi STATIC
+        engine/editor/EditorShell.cpp)
+    target_include_directories(VolkEngineEditorUi
+        PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+    target_link_libraries(VolkEngineEditorUi
+        PUBLIC
+            VolkEngineEditorCore
+        PRIVATE
+            VolkEngineImGui)
+    volkengine_target_warnings(VolkEngineEditorUi)
+
+    add_executable(VolkEngineEditor
+        samples/editor/main.cpp)
+    target_link_libraries(VolkEngineEditor
+        PRIVATE
+            VolkEngineEditorUi)
+    volkengine_target_warnings(VolkEngineEditor)
+endif()
+endif()
 
 volkengine_target_warnings(VolkEngine)
 
@@ -318,11 +385,22 @@ add_dependencies(VolkEngineRuntimeShaders VolkEngineShaders)
 add_dependencies(VolkEngineRuntimeShaders VolkEngineAssets)
 add_dependencies(VolkEngineSandbox VolkEngineRuntimeShaders)
 add_dependencies(VolkEngineSandbox VolkEngineRuntimeAssets)
+if(TARGET VolkEngineEditor)
+    add_dependencies(VolkEngineEditor
+        VolkEngineRuntimeShaders
+        VolkEngineRuntimeAssets)
+endif()
 volkengine_target_warnings(VolkEngineSandbox)
 
 enable_testing()
 add_test(NAME SandboxHelp
     COMMAND VolkEngineSandbox --help --width 0 --unknown)
+if(TARGET VolkEngineEditor)
+    add_test(NAME EditorHelp
+        COMMAND VolkEngineEditor --help)
+    set_tests_properties(EditorHelp PROPERTIES
+        PASS_REGULAR_EXPRESSION "^Usage: VolkEngineEditor")
+endif()
 set_tests_properties(SandboxHelp PROPERTIES
     PASS_REGULAR_EXPRESSION "^Usage: VolkEngineSandbox")
 
@@ -640,3 +718,18 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 add_test(NAME WorldCpu
     COMMAND VolkEngineWorldCpuTest)
+
+if(VOLKENGINE_ENABLE_EDITOR)
+    add_executable(VolkEngineAuthoringCpuTest
+        tests/AuthoringCpuTests.cpp)
+    target_link_libraries(VolkEngineAuthoringCpuTest
+        PRIVATE
+            VolkEngineEditorCore)
+    target_compile_definitions(VolkEngineAuthoringCpuTest
+        PRIVATE
+            VOLKENGINE_TEST_ASSET_DIR="${VOLKENGINE_ASSET_SOURCE_DIR}"
+            VOLKENGINE_TEST_SCENE_SCHEMA="${CMAKE_CURRENT_SOURCE_DIR}/schemas/scene-components.schema")
+    volkengine_target_warnings(VolkEngineAuthoringCpuTest)
+    add_test(NAME AuthoringCpu
+        COMMAND VolkEngineAuthoringCpuTest)
+endif()
