@@ -1,120 +1,58 @@
 # Shaders and assets
 
-This page covers runtime file flow. Current ownership is split across these backend units:
+## Shader build
 
-- `SceneImporter.cpp`, `GltfImporter.cpp`, and `TextureArtifact.cpp` — importer dispatch, authored-scene conversion, and engine-native texture validation/serialization.
-- `ReferenceAssetPipeline.cpp`, `AssetDatabase.cpp`, and `DerivedDataCache.cpp` — dependency records, deterministic cooking, cache publication, and transactional reload.
-- `Landscape.cpp` — deterministic field/brush queries, terrain and water mesh
-  cooking, biome foliage scatter, and reusable vegetation meshes.
-- `VulkanRenderer.Pipelines.cpp` — SPIR-V validation/loading, pipeline set construction, pipeline cache load/save, and hot-reload rebuild/retire.
-- `VulkanRenderer.Lighting.cpp` — Forward+ descriptors, bounded tile/light uploads, and directional/local shadow camera preparation.
-- `VulkanRenderer.Resources.cpp` — texture asset upload/sampler/descriptor setup, per-role fallback binding for untextured generated materials, and texture resource lifetime.
-- `VulkanRenderer.Meshes.cpp` — procedural geometry, imported OBJ mesh loading, mesh upload, and shared vertex/index buffer ownership.
-- `VulkanRenderer.Screenshot.cpp` — screenshot path and file-publish behavior.
+CMake compiles root `engine/shaders/*.vert`, `*.frag`, and `*.comp` files with `glslc --target-env=vulkan1.3`. Depfiles track includes under `engine/shaders/common/`.
 
-Renderer behavior is in [Renderer pipeline](renderer-pipeline.md).
+- `VolkEngineShaders` builds SPIR-V under the build tree.
+- `VolkEngineRuntimeShaders` copies SPIR-V beside the sandbox.
+- `VolkEngineAssets` stages source assets.
+- `VolkEngineRuntimeAssets` copies assets beside the sandbox.
 
-## Shader build flow
+At runtime, shader bytecode must contain a complete SPIR-V header, have a 32-bit-aligned size, use native byte order, and begin with magic `0x07230203`. Files load directly into aligned word storage.
 
-CMake finds `glslc` and compiles root shader files under `engine/shaders/`:
+## Pipeline reload and cache
 
-- `*.vert`
-- `*.frag`
-- `*.comp`
-Outputs are written to `${binaryDir}/shaders/*.spv` with `--target-env=vulkan1.3`. Compiler depfiles track includes under `engine/shaders/common/`, so editing shared GLSL triggers the correct recompiles.
+With `--hot-reload-shaders`, changed files build a complete replacement pipeline set. Publication occurs only if every shader module, layout, and pipeline succeeds. The old set retires after relevant frame fences; failed inputs remain pending for retry with a 0.5–4 second backoff.
 
-Important targets:
-- `VolkEngineShaders` — SPIR-V outputs in the build tree.
-- `VolkEngineRuntimeShaders` — copies compiled SPIR-V beside `VolkEngineSandbox`.
-- `VolkEngineAssets` — stages source assets into the build tree.
-- `VolkEngineRuntimeAssets` — copies assets beside `VolkEngineSandbox`, matching `EngineConfig::assetDirectory`.
+The cache at `${binaryDir}/cache/pipeline_cache.bin` loads only when vendor ID, device ID, and pipeline-cache UUID match. Save writes and validates a temporary sibling before replacement, preserving the previous cache on failure.
 
-## Runtime shader validation
+## Shader data
 
-`VulkanRenderer.Pipelines.cpp` loads copied SPIR-V bytecode from `EngineConfig::shaderDirectory` and rejects payloads that are:
+`scene.vert` reads packed instance/material data from the scene storage buffer. `scene.frag` consumes Forward+ tile lists, directional and local lights, shadow views, environment lighting, and reflection probes.
 
-- smaller than a SPIR-V header.
-- not a 32-bit word multiple.
-- byte-swapped.
-- missing magic `0x07230203`.
+Material classes share one packed ABI and pipeline layout. Masked camera, depth, and shadow paths use the same alpha cutoff. Normal mapping orthonormalizes the tangent against the geometric normal and preserves handedness. Foliage wind is shared by camera, depth, and shadow vertex paths so silhouettes agree.
 
-Valid SPIR-V is read directly into aligned `std::uint32_t` storage before `vkCreateShaderModule`, avoiding a byte-vector load plus copy on startup and hot reload.
+`light_assign.comp` assigns up to 256 local lights into fixed 16×16 tile partitions. `depth_pyramid.comp` builds the temporal reverse-Z pyramid. `atmosphere.frag` writes the analytic sky before scene geometry.
 
-## Scene shader data flow
+## Authored asset path
 
-`scene.vert` reads packed instance material constants and texture indices from the scene SSBO and emits material values as flat fragment inputs while position, normal, UV, and tangent remain interpolated. `common/foliage_wind.glsl` applies the same camera-relative, elapsed-time displacement in camera, depth, and shadow vertex paths. `scene.frag` consumes the per-frame Forward+ tile lists, directional/local light records, shadow views/atlas, environment map, and bounded reflection-probe array through the shared lighting descriptor set.
+1. `SceneImporterRegistry` chooses a versioned importer by normalized extension.
+2. The glTF importer produces scene, mesh, material, texture, and animation-metadata records.
+3. Artifact content and dependencies produce derived-data keys.
+4. `DerivedDataCache` validates and atomically publishes versioned artifacts.
+5. The renderer resolves cooked handles and uploads a complete asset bundle.
+6. Hot reload swaps the bundle at a main-thread frame boundary; any cook or upload failure retains the old bundle.
 
-The fragment path applies GGX/Smith/Schlick direct light, inverse-square/range-window point and spot attenuation, stable directional cascade selection, local spot-shadow lookup, roughness-dependent environment LOD, diffuse environment irradiance approximation, probe blending, and ambient occlusion in linear HDR. Standard, masked, clear-coat, foliage, skin, hair, cloth, emissive, landscape, and water responses share one material-class ABI and pipeline layout. Landscape derives bounded altitude/slope/moisture variation without a new descriptor; water adds Fresnel/reflection response. Base-color alpha discard is legal because device selection explicitly requires/enables Vulkan 1.3 `shaderDemoteToHelperInvocation`.
+The glTF path supports hierarchy, local transforms, metallic-roughness materials, texture roles/color spaces, bounds, and validated animation clip/channel metadata. Animation samples and playback are not implemented.
 
-Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis. Material availability comes from separately packed texture-mask bits; `RenderMaterial::flags.x/y/z/w` carry feature/cutoff bits, class, class strength, and normal strength.
+Texture artifacts support decoded RGBA8, finite linear RGBA32F HDR, and non-supercompressed KTX2 BC1/BC3/BC7. BasisLZ, Zstd, and unsupported block formats fail before publication. The Vulkan upload path currently consumes RGBA8 artifacts; HDR and BC upload remains future work.
 
-`light_assign.comp` uses one workgroup per 16×16 tile. It derives a conservative tile frustum, tests a bounded 256-light array, and writes each tile's fixed 64-index partition plus an exact overflow counter. `depth_pyramid.comp` remains the temporal reverse-Z reduction path.
+Relative asset paths are normalized under `EngineConfig::assetDirectory` and may not escape it. Absolute paths are explicit overrides.
 
-Camera depth uses `scene_depth.vert`; opaque casters omit a fragment stage, while masked casters add `shadow.frag` so the prepass preserves authored alpha cutoff. Shadow atlas rendering uses `shadow.vert` for both caster classes and adds `shadow.frag` only for masked geometry; push constants select the shadow-view matrix and packed atlas scale/bias.
+## Texture upload
 
-`atmosphere.frag` reconstructs a world ray from the uploaded camera basis, evaluates a bounded analytic horizon/zenith/sun response, and initializes HDR before scene geometry. It uses no textures or extra frame-graph resources.
+- Albedo uses sRGB format and gamma-correct mip handling where CPU generation is required.
+- Normal maps use linear format and vector-renormalized CPU mips.
+- ORM maps use linear format and straight channel averages.
+- Albedo, normal, and ORM payloads share one startup staging submission.
+- Decoded CPU mip data is released after staging.
+- Bindless-capable devices use stable texture indices; other devices use fixed material descriptor sets.
 
-## Shader hot reload
+## Geometry upload
 
-`VulkanRenderer.Pipelines.cpp` owns `--hot-reload-shaders` polling. On change:
+The authored glTF path and generated landscape path feed the same imported mesh arrays. The OBJ override path additionally supports positive/negative indices, polygon fan triangulation, generated normals, tangent generation, finite-value validation, and malformed-input rejection.
 
-1. Build a full replacement pipeline set into local handles.
-2. Swap the replacement set into use only after every pipeline/layout succeeds.
-3. Retire the previous set after frame fences that could reference it signal.
-4. Keep current pipelines live on rebuild failure.
-5. Leave failed shader timestamps unacknowledged so a corrected file is retried; retries back off from 0.5 to 4 seconds to avoid rebuilding continuously while an editor writes an invalid intermediate file.
+CPU vertices retain full precision through import and tangent generation. Upload packs normal/tangent values to SNORM16, reorders indices for post-transform locality, remaps vertices for fetch locality, and writes all startup meshes into one shared staging buffer.
 
-## Pipeline cache
-
-`VulkanRenderer.Pipelines.cpp` stores the Vulkan pipeline cache at `${binaryDir}/cache/pipeline_cache.bin`.
-
-- Loads only when the cache header matches vendor, device, and pipeline-cache UUID.
-- Saves to a unique temp sibling first.
-- Publishes only after a complete cache payload is read back and validated.
-- Avoids truncating a prior cache on failed writes.
-
-## Assets
-
-Runtime assets are copied from `assets/` to `EngineConfig::assetDirectory`.
-The reference authored-scene path runs through `ReferenceAssetPipeline` before renderer upload:
-
-- `AssetId` supplies stable 128-bit identities; the transactional asset database records source/importer/settings hashes, dependencies, artifact keys, target, state, and diagnostics.
-- `SceneImporterRegistry` owns importer identity, version, normalized extensions, and the import function. Registration and lookup are deterministic; duplicate IDs/extensions and unknown source extensions fail before source mutation. The built-in cgltf importer handles `.gltf` and `.glb`.
-- `GltfImporter` imports glTF 2.0 mesh primitives, hierarchy/local transforms, metallic-roughness materials, texture roles/color spaces, bounds, and animation clip/channel metadata. Animation metadata validates target nodes, interpolation, accessor shape, finite output values, strictly increasing non-negative keyframe times, and configured size limits; sample payloads and playback remain future work.
-- Mesh, material, scene, and texture artifacts have independent schema versions. Derived-data keys use serialized artifact content plus dependency keys, so animation-only edits rebuild only the scene and source-byte changes that decode identically reuse the existing texture/dependent artifacts.
-- `TextureArtifact` decodes ordinary sources to RGBA8, preserves Radiance HDR as finite linear RGBA32F, and validates non-supercompressed KTX2 BC1/BC3/BC7 dimensions, color space, mip sizes, ranges, and non-overlap. BasisLZ/Zstd KTX2 and unsupported GPU block formats fail actionably rather than publishing partial cache state.
-- `DerivedDataCache` verifies headers, schema, payload sizes, and content hashes and publishes through atomic temporary files. `ReferenceAssetCookTask` submits the complete cook as an Asset-category job; unique texture sources become IO read jobs followed by dependency-linked Asset decode/import jobs. Worker-side cooperative waits preserve progress even with one worker, and the same source byte vector supplies both the content hash and decoder instead of reading each texture twice.
-- `--hot-reload-assets` keeps one pollable cook in flight without waiting in the normal frame loop. A changed manifest crosses a main-thread safe point into `VulkanRenderer::reloadReferenceAssets`, which builds replacement geometry, cluster buffers, textures, descriptor bindings, and authored draw mappings before retiring the old set. Import/upload/publication failure logs the diagnostic and leaves the previous CPU/GPU bundle active.
-- The sandbox resolves the cooked reference scene and RGBA8 texture artifacts through this path; startup and reload no longer decode source image bytes on the render thread. Cache/rebuild counts and cook latency remain renderer metrics, while run-summary schema v6 adds bounded job statistics and optional residency/partition identities, pressure, failures, aggregates, and per-frame traversal samples. HDR and BC artifacts remain available for a future capability-aware Vulkan upload path.
-
-The direct `EngineConfig` texture and OBJ settings remain explicit fallback/override paths.
-
-Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNormalTexture`, and `groundOrmTexture`) resolve relative to `EngineConfig::assetDirectory`; relative paths are normalized and rejected when they escape the asset root, while absolute paths remain accepted as direct overrides:
-
-- defaults load `textures/ground_albedo.png`, `textures/ground_normal.png`, and `textures/ground_orm.png` through `loadImageRgba8()`.
-- startup validates that each configured role path is non-empty and names a regular file before allocating upload resources.
-- uses stb_image for non-PPM image formats and keeps `loadPpmRgba8()` for PPM fixtures/compatibility.
-- decodes source images to RGBA8 CPU pixels while preserving source alpha.
-- uploads albedo as `VK_FORMAT_R8G8B8A8_SRGB`.
-- uploads normal maps as linear `VK_FORMAT_R8G8B8A8_UNORM`; shader code remaps sampled normals from `[0, 1]` to `[-1, 1]` before TBN transform.
-- uploads packed ORM material maps as linear `VK_FORMAT_R8G8B8A8_UNORM`; `scene.frag` reads R as ambient occlusion, G as roughness multiplier, and B as metallic multiplier.
-- uses explicit mip policies: albedo may use GPU blit mips for opaque textures and falls back to gamma-correct alpha-weighted CPU mips when alpha coverage or sRGB blit support requires it; packed linear scalar maps such as ORM use straight RGBA averaging for CPU fallback so scalar RGB channels never get alpha-weighted; normal maps always use CPU vector-renormalized mips.
-- builds normal-map mip chains on the CPU by decoding each proportional source footprint to tangent-space vectors, averaging, renormalizing, preserving averaged alpha, and uploading explicit mip copy regions; this avoids color-style byte averaging that flattens high-frequency normals and covers odd-size edge texels.
-- records albedo, normal, and ORM texture copies/mip generation from one shared staging buffer into one startup graphics upload command buffer and one submit, then binds them through one fixed material texture descriptor array.
-- uses separate descriptor samplers for color/scalar maps and normal maps: albedo/ORM can enable device anisotropy and use generated material mip ranges, while normal maps use their explicit CPU-renormalized mip range with anisotropy disabled.
-
-Current geometry path (`VulkanRenderer.Meshes.cpp`):
-- imports deterministic M2 terrain patches and reusable grass/shrub/tree/water
-  meshes through the same `ImportedMeshPrimitive` and startup upload arrays;
-  stable generated IDs remain ordinary runtime handles.
-- creates procedural cube/sphere/plane meshes in memory.
-
-- resolves `EngineConfig::importedModelPath` relative to `EngineConfig::assetDirectory`, normalizes it, and rejects relative paths that escape the asset root; absolute overrides are accepted.
-- validates the resolved model path is a regular file before mesh allocation, then loads it through `loadObjMesh()`.
-- supports Wavefront OBJ `v`, `vt`, `vn`, and `f` records, positive/negative face indices, `v`, `v/vt`, `v//vn`, `v/vt/vn` tuples, polygon fan triangulation, deduped vertex tuples, generated normals when faces omit normals, and generated-normal fallback when explicit OBJ normals are degenerate or cannot be safely normalized; all OBJ numeric attributes must be finite, and malformed/non-finite values are rejected before mesh bounds, tangent generation, or GPU upload.
-- computes `MeshData::bounds` from vertex positions with double-precision intermediates, rejecting finite coordinates whose derived center/radius cannot be represented as a finite float; only then computes `Vertex::tangent` as `vec4(xyz, handedness)` for normal-map TBN shading. Missing/degenerate UVs get deterministic fallback tangents.
-- packs per-instance normal matrices as three `vec4` columns so shaders transform normals with inverse-transpose data while tangents still use the model linear transform and `tangent.w * sign(det(model3x3))`.
-- converts triangle-list CPU `MeshData` vertices into a compact Vulkan `GpuVertex` stream: full-float position/UV plus `R16G16B16A16_SNORM` normal and tangent attributes; uploaded indices are reordered for post-transform vertex-cache locality, then vertices are remapped to first-use order for vertex-fetch locality.
-- writes all startup mesh vertex/index payloads directly into one mapped staging buffer, then submits one transfer/graphics upload command during startup.
-
-The source path accepts common stb_image-backed formats, Radiance HDR, and bounded non-supercompressed KTX2 BC1/BC3/BC7 artifacts. Material libraries, BasisLZ/Zstd transcoding, runtime HDR/BC upload, and GPU-native texture/page streaming remain future work.
+See [Renderer pipeline](renderer-pipeline.md) for frame use and [Scene API](../api/scene.md) for runtime records.

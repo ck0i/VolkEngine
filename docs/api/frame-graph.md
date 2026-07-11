@@ -2,166 +2,63 @@
 
 Header: `engine/renderer/FrameGraph.hpp`.
 
-`FrameGraph` is the backend-neutral execution, hazard-validation, logical-lifetime, and transient-allocation planner. It compiles declared pass/resource intent into a deterministic execution order, barrier intents, resource activation/retirement points, and alias-compatible allocation slots. A backend supplies callbacks that realize those contracts; Vulkan handles and VMA allocations do not leak into this API.
+`FrameGraph` compiles declared pass/resource access into execution order, barriers, logical lifetimes, and compatible transient slots. Native Vulkan allocation and command emission remain backend responsibilities.
 
-Backend integration points:
+## Model
 
-- `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — constructs and compiles the cached graph variants and records compile/allocation diagnostics.
-- `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — executes the selected graph, translates barrier intents, dispatches dynamic-rendering passes, and binds logical resources to Vulkan objects.
-- `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — maps graph access/usage states to Vulkan image and buffer synchronization.
-- `engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp` — realizes graph-owned depth/HDR resources transactionally and recreates them with the swapchain.
+- `ResourceHandle` and `PassHandle` are opaque indices.
+- Resources are image or buffer, imported or transient.
+- Pass edges declare read or write access plus a usage.
+- Optional final usage describes state required after the last pass.
+- Non-imported resources carry a transient byte estimate, alignment, and alias class.
 
-## Scale and handles
+Image usages include sampled, storage, color/depth attachment, present, and transfer. Buffer usages include storage, uniform, indirect, host-read, and transfer. Consult `FrameGraphUsage` for the complete set.
 
-- Pass/resource handles use wide opaque indices with `kInvalidIndex = 0xffffffff`.
-- Pass, resource, and edge records are vector-backed; there is no fixed small graph cap.
-- Handles remain stable because records are appended and never erased.
-- Adding records throws only if the handle index range is exhausted or allocation fails.
-
-Compilation indexes edges by pass and resource, so dependency construction scales with declared edges rather than rescanning the full edge list for every pass/resource pair.
-
-## Enums
-
-`FrameGraphResourceKind`:
-
-- `Image`
-- `Buffer`
-
-`FrameGraphAccess`:
-
-- `Read`
-- `Write`
-
-`FrameGraphUsage`:
-
-- `ColorAttachment`
-- `DepthAttachment`
-- `SampledImage`
-- `TransferSource`
-- `Present`
-- `UniformBuffer`
-- `StorageBuffer`
-- `IndirectBuffer`
-- `TransferDestination`
-- `HostRead`
-
-## Handles
-
-- `ResourceHandle`
-- `PassHandle`
-
-Each stores an internal index and has `valid()`. Passing an invalid or out-of-range handle throws.
-
-## Descriptors
-
-`ResourceDesc`:
-
-- `name`
-- `kind`
-- `imported`
-- `transientBytes`
-- `transientAlignment`
-- `aliasClass`
-- `hasFinalUsage`
-- `finalUsage`
-
-`PassDesc`:
-
-- `name`
-- `debugColor`
-
-`Edge`:
-
-- `pass`
-- `resource`
-- `access`
-- `usage`
-- `attachment`
-- `load`
-- `store`
-
-## Building a graph
+## Build
 
 ```cpp
 ve::FrameGraph graph;
-auto depth = graph.addResource({
-    .name = "Depth",
+auto hdr = graph.addResource({
+    .name = "hdr",
     .kind = ve::FrameGraphResourceKind::Image,
-    .transientBytes = depthAllocationBytes,
-    .transientAlignment = depthAlignment,
-    .aliasClass = depthAliasClass});
-auto scene = graph.addPass({.name = "HDR Scene"});
-graph.writeAttachment(
-    scene, depth, ve::FrameGraphUsage::DepthAttachment,
-    ve::FrameGraphAttachmentLoad::Clear,
-    ve::FrameGraphAttachmentStore::Discard);
+    .transientBytes = hdrBytes,
+    .aliasClass = 1,
+});
+
+auto scene = graph.addPass({.name = "scene"});
+graph.writeAttachment(scene, hdr, ve::FrameGraphUsage::ColorAttachment,
+                      ve::FrameGraphAttachmentLoad::Clear,
+                      ve::FrameGraphAttachmentStore::Store);
+graph.setFinalUsage(hdr, ve::FrameGraphUsage::SampledImage);
 graph.compile();
 ```
 
-Operations:
+Graph mutation invalidates the compiled plan. `execute` and compiled queries require a successful compile.
 
-- `addResource(ResourceDesc) -> ResourceHandle`
-- `addPass(PassDesc) -> PassHandle`
-- `read(pass, resource, usage)`
-- `write(pass, resource, usage)`
-- `readAttachment(pass, resource, usage, load, store)`
-- `writeAttachment(pass, resource, usage, load, store)`
-- `setFinalUsage(resource, usage)`
+## Compile validation
 
-- Adding the same `(pass, resource, access, usage)` edge twice throws immediately. A pass may declare at most one access state for a given resource; a second edge with different access or usage also throws. Split the work into separate passes to model ordering and synchronization.
+Compilation rejects:
 
-## Validation on `compile()`
+- invalid handles or duplicate declarations;
+- unsupported usage for the resource kind;
+- read-only/write-only access mismatches;
+- reads with no imported or prior written state;
+- cycles and contradictory pass ordering;
+- invalid final usage;
+- incompatible alias metadata.
 
-`compile()` checks:
+RAW, WAR, and WAW hazards produce dependencies. Declaration order breaks ties between otherwise independent passes. Each used resource receives first/last use, activation and retirement points, and barrier intents.
 
-- every pass has at least one resource edge.
-- non-imported resources are written before any pass reads them.
-- every non-imported resource has a nonzero byte size and power-of-two alignment.
-- image/buffer usages match the resource kind and read-only/write-only usage rules.
-Compilation derives RAW, WAR, and WAW hazard dependencies and exposes a stable topological pass order. The declaration index breaks ties, so independent passes remain deterministic.
-For every used resource, compilation records first/last use, activation/retirement points, and barrier intents. Non-imported resources receive deterministic transient slots; non-overlapping resources alias only when their kind and nonzero alias class match. `TransientStats` reports logical requested bytes, physical slot bytes, aliased bytes, and slot count.
-The graph owns these logical contracts, not native memory. Backend lifecycle callbacks bind or realize physical resources transactionally and must retire active resources on both success and failure.
-
-## Querying
-
-- `hasEdge(pass, resource, access, usage)`
-- `hasFinalUsage(resource)`
-- `finalUsage(resource)` — throws if none is set.
-- `pass(handle)`
-- `resource(handle)`
-- `passCount()`
-- `resourceCount()`
-- `edgeCount()`
-- `compiled()`
-- `executionOrder() -> const std::vector<PassHandle>&` — compiled stable pass order; empty while invalidated.
-- `lifetime(resource) -> const ResourceLifetime&` — first/last compiled pass and `used`; throws while the graph is invalidated.
-- `barrierPlan() -> const std::vector<BarrierIntent>&` — available after compilation and may be empty; pass-associated intents follow execution order and final transitions follow them. It is cleared when the graph is invalidated.
-- `finalBarrierIntent(resource) -> const BarrierIntent&` — O(1) lookup of the unique final transition; throws if the graph is uncompiled or no final transition exists.
-- `barrierIntent(pass, resource, access, usage) -> const BarrierIntent&` — exact pass/resource state-change intent; throws if the selected tuple is absent or ambiguous.
-- `transientAllocation(resource) -> const TransientAllocation&` — physical slot, slot capacity/alignment, and whether that slot aliases multiple logical resources.
-- `transientStats() -> const TransientStats&` — requested, allocated, and aliased bytes plus physical slot count.
+Transient resources may share a slot only when lifetimes do not overlap and kind plus nonzero alias class match. `TransientStats` reports requested bytes, physical slot bytes, aliased bytes, and slot count. This is a logical plan; it does not imply Vulkan memory aliasing unless the backend realizes it.
 
 ## Execution
 
-`execute(callbacks, state)` walks the compiled plan without allocating in the steady state:
+`execute(callbacks, state)` walks the compiled plan and reuses `ExecutionState` storage after capacity is established. Lifecycle, transition, and pass callbacks are `noexcept` and report failure with `false`. Execution returns the failing phase/handle and retires active resources in reverse creation order.
 
-1. activate non-imported resources at first use;
-2. apply the pass's ordered barrier intents;
-3. invoke the pass with a `PassResources` view containing only its declared edges;
-4. retire resources after last use, or after a required final transition.
+The backend must make lifecycle callbacks transactional: activation failure must not publish a half-created binding, and retirement must tolerate failure unwind.
 
-`ExecutionResult` identifies create, transition, pass, or retirement failure and reports completed work. On failure, active resources are unwound in reverse creation order. `ExecutionState` is caller-owned reusable storage; imported resources never invoke lifecycle callbacks.
+## Renderer use
 
-## Current renderer use
+The Vulkan backend caches graph variants for depth-prepass and screenshot combinations. Imported resources include swapchain images, temporal depth, and readback buffers. Graph order covers Forward+ assignment, visibility, shadow atlas, optional depth, HDR, depth-pyramid, tone-map/UI, readback, and final presentation/host-read transitions.
 
-The Vulkan backend caches separate graph topologies at startup:
-
-- depth-prepass-on versus depth-prepass-off are constructed separately, so the no-prepass variant omits the HDR depth-read edge instead of filtering only the prepass node.
-- screenshot-enabled versus screenshot-disabled are independent variant bits.
-- `Auto` caches four combinations; `ForceOn` and `ForceOff` cache only the valid depth combinations.
-
-Each frame selects the matching cached topology and calls `FrameGraph::execute`. When GPU-generated submission is active, callbacks record one Forward+ light-assignment dispatch, temporal visibility cull/command generation, a shadow-atlas pass, optional depth prepass, HDR scene, current-depth pyramid build, tonemap/ImGui, and optional screenshot copy; no parallel manual pass path remains. Transition callbacks consume the graph barrier plan and tracked live Vulkan state to emit image/buffer barriers, including compute-to-fragment light-list visibility, shadow-atlas depth-write-to-sampled visibility, final present, and host-read transitions.
-
-Depth/HDR and the shadow atlas are graph-owned logical images realized transactionally at their swapchain/renderer ownership boundaries. GPU light-list/cull buffers, the environment map, and the half-resolution depth pyramid are imported backend allocations. Cull reads the previous completed pyramid before current rendering, and the later pyramid pass replaces it for the next same-queue submission. Imported read-before-write ordering is covered by the graph's WAR plan. Per-pass GPU timestamps distinguish light assignment, cull, shadows, depth, HDR, pyramid, and final work; graph structure/barrier/allocation diagnostics plus lighting pressure are published through `RenderStats`, ImGui, and run-summary schema v4.
-
-Swapchain images and screenshot readback buffers are imported. Acquired swapchain state explicitly chains the image-available semaphore wait into the first graph transition; read-only attachments use `VK_ATTACHMENT_STORE_OP_NONE` so discard policy does not introduce a hidden write. Post-acquire failures restore tracked state and recreate the swapchain before semaphore reuse.
+See [Renderer pipeline](../topics/renderer-pipeline.md) for native synchronization behavior.
