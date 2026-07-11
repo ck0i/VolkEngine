@@ -11,7 +11,7 @@
 namespace ve {
 
 struct RunSummary {
-    static constexpr std::uint32_t kSchemaVersion = 3;
+    static constexpr std::uint32_t kSchemaVersion = 4;
 
     EngineConfig config;
     RunOptions options;

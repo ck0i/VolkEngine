@@ -123,6 +123,25 @@ add_custom_command(
     COMMENT "Compiling bindless scene fragment shader"
     VERBATIM)
 list(APPEND VOLKENGINE_SHADER_OUTPUTS "${VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT}")
+set(VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_OUTPUT
+    "${VOLKENGINE_SHADER_OUTPUT_DIR}/shadow_bindless.frag.spv")
+set(VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_DEPFILE
+    "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_OUTPUT}.d")
+add_custom_command(
+    OUTPUT "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_OUTPUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${VOLKENGINE_SHADER_OUTPUT_DIR}"
+    COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3
+            -DVE_BINDLESS=1 -I "${VOLKENGINE_SHADER_SOURCE_DIR}"
+            -MD -MF "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_DEPFILE}"
+            -MT "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_OUTPUT}"
+            "${VOLKENGINE_SHADER_SOURCE_DIR}/shadow.frag"
+            -o "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_OUTPUT}"
+    DEPENDS "${VOLKENGINE_SHADER_SOURCE_DIR}/shadow.frag"
+    DEPFILE "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_DEPFILE}"
+    COMMENT "Compiling bindless shadow fragment shader"
+    VERBATIM)
+list(APPEND VOLKENGINE_SHADER_OUTPUTS
+    "${VOLKENGINE_BINDLESS_SHADOW_FRAGMENT_OUTPUT}")
 set(VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT
     "${VOLKENGINE_SHADER_OUTPUT_DIR}/scene_gpu.vert.spv")
 set(VOLKENGINE_GPU_SCENE_VERTEX_DEPFILE
@@ -211,6 +230,7 @@ add_library(VolkEngine STATIC
     engine/renderer/GreedyMesher.cpp
     engine/renderer/ImageLoader.cpp
     engine/renderer/StbImageUsage.cpp
+    engine/renderer/Lighting.cpp
     engine/renderer/SceneRenderer.cpp
     engine/renderer/vulkan/VmaUsage.cpp
     engine/renderer/vulkan/VulkanRenderer.cpp
@@ -218,6 +238,7 @@ add_library(VolkEngine STATIC
     engine/renderer/vulkan/VulkanRenderer.Frame.cpp
     engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp
     engine/renderer/vulkan/VulkanRenderer.ImGui.cpp
+    engine/renderer/vulkan/VulkanRenderer.Lighting.cpp
     engine/renderer/vulkan/VulkanRenderer.Lifecycle.cpp
     engine/renderer/vulkan/VulkanRenderer.Meshes.cpp
     engine/renderer/vulkan/VulkanRenderer.Pipelines.cpp
@@ -356,6 +377,7 @@ add_test(NAME AssetPipelineCpu
 
 add_executable(VolkEngineSceneRendererTest
     tests/SceneRendererCpuTests.cpp
+    engine/renderer/Lighting.cpp
     engine/renderer/SceneRenderer.cpp)
 target_include_directories(VolkEngineSceneRendererTest
     PRIVATE
@@ -366,6 +388,7 @@ add_test(NAME SceneRendererCpu
 
 add_executable(VolkEngineWorldSceneCpuTest
     tests/WorldSceneCpuTests.cpp
+    engine/renderer/Lighting.cpp
     engine/renderer/SceneRenderer.cpp)
 target_include_directories(VolkEngineWorldSceneCpuTest
     PRIVATE
@@ -377,6 +400,7 @@ add_test(NAME WorldSceneCpu
 add_executable(VolkEngineScenePersistenceCpuTest
     tests/ScenePersistenceCpuTests.cpp
     engine/core/FileSystem.cpp
+    engine/renderer/Lighting.cpp
     engine/renderer/SceneRenderer.cpp
     engine/scene/ScenePersistence.cpp)
 target_include_directories(VolkEngineScenePersistenceCpuTest
@@ -556,6 +580,16 @@ target_include_directories(VolkEngineTimeCpuTest
 volkengine_target_warnings(VolkEngineTimeCpuTest)
 add_test(NAME TimeCpu
     COMMAND VolkEngineTimeCpuTest)
+
+add_executable(VolkEngineLightingCpuTest
+    tests/LightingCpuTests.cpp
+    engine/renderer/Lighting.cpp)
+target_include_directories(VolkEngineLightingCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineLightingCpuTest)
+add_test(NAME LightingCpu
+    COMMAND VolkEngineLightingCpuTest)
 
 add_executable(VolkEngineWorldCpuTest
     tests/WorldCpuTests.cpp)

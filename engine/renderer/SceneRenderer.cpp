@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -281,7 +282,33 @@ void SceneRenderList::clear() noexcept {
     items_.clear();
     materialGridRange_ = {};
     invalidateMaterialGridTiles();
+    localLights_.clear();
+    reflectionProbes_.clear();
+    directionalLight_ = {};
+    environment_ = {};
 }
+
+void SceneRenderList::setLocalLights(std::vector<RenderLocalLight> lights) {
+    validateLocalLights(lights);
+    localLights_ = std::move(lights);
+}
+
+void SceneRenderList::setDirectionalLight(
+    const RenderDirectionalLight& light) {
+    validateDirectionalLight(light);
+    directionalLight_ = light;
+}
+
+void SceneRenderList::setEnvironment(const RenderEnvironment& environment) {
+    validateEnvironment(environment);
+    environment_ = environment;
+}
+void SceneRenderList::setReflectionProbes(
+    std::vector<RenderReflectionProbe> probes) {
+    validateReflectionProbes(probes);
+    reflectionProbes_ = std::move(probes);
+}
+
 
 void SceneRenderList::push(const SceneRenderItem& item) {
     const std::size_t itemIndex = items_.size();
@@ -674,11 +701,20 @@ void DemoSceneRenderer::setAuthoredSceneItems(std::vector<SceneRenderItem> items
             return std::isfinite(value.x) && std::isfinite(value.y) &&
                    std::isfinite(value.z) && std::isfinite(value.w);
         };
+        const float materialClass = item.material.flags.y;
+        const bool validMaterialClass =
+            materialClass >= static_cast<float>(
+                                 RenderMaterialClass::Standard) &&
+            materialClass <= static_cast<float>(
+                                 RenderMaterialClass::Emissive) &&
+            std::round(materialClass) == materialClass;
         if (!item.mesh.valid() || !finite(item.boundsCenter) ||
             !std::isfinite(item.boundsRadius) || item.boundsRadius < 0.0f ||
             !finiteModel || !finiteVec4(item.material.albedoRoughness) ||
             !finiteVec4(item.material.emissiveMetallic) ||
-            !finiteVec4(item.material.flags)) {
+            !finiteVec4(item.material.flags) || !validMaterialClass ||
+            item.material.flags.z < 0.0F ||
+            item.material.flags.w < 0.0F) {
             throw std::invalid_argument("Authored scene contains an invalid render item");
         }
     }
@@ -723,6 +759,48 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
     }
 
     renderList_.clear();
+    const std::uint64_t requestedLocalLights =
+        (static_cast<std::uint64_t>(materialGridRows) *
+             materialGridColumns +
+         31U) /
+        32U;
+    const std::uint32_t localLightCount = static_cast<std::uint32_t>(
+        std::clamp<std::uint64_t>(requestedLocalLights, 16U, 64U));
+    std::vector<RenderLocalLight> localLights;
+    localLights.reserve(localLightCount);
+    constexpr std::array<Vec3, 6> lightColors{{
+        {1.0F, 0.18F, 0.08F}, {0.08F, 0.35F, 1.0F},
+        {0.16F, 1.0F, 0.32F}, {1.0F, 0.65F, 0.12F},
+        {0.72F, 0.14F, 1.0F}, {0.08F, 0.90F, 1.0F},
+    }};
+    for (std::uint32_t index = 0; index < localLightCount; ++index) {
+        const std::uint32_t column = index % 8U;
+        const std::uint32_t row = index / 8U;
+        const float x = (static_cast<float>(column) - 3.5F) * 3.5F;
+        const float z = -5.5F - static_cast<float>(row) * 7.0F;
+        const bool spot = (index % 4U) == 0U;
+        const Vec3 color = lightColors[index % lightColors.size()];
+        RenderLocalLight light;
+        light.positionRange = {x, spot ? 5.5F : 2.2F, z, 8.5F};
+        light.colorIntensity = {color.x, color.y, color.z,
+                                spot ? 95.0F : 55.0F};
+        light.directionOuterCone = {
+            0.0F, -1.0F, 0.0F,
+            spot ? std::cos(radians(34.0F)) : 0.0F};
+        light.parameters = {
+            static_cast<std::uint32_t>(
+                spot ? LocalLightType::Spot : LocalLightType::Point),
+            spot && (index % 8U) == 0U ? 1U : 0U,
+            packUnitFloat(spot ? std::cos(radians(22.0F)) : 1.0F), 0U};
+        localLights.push_back(light);
+    }
+    renderList_.setLocalLights(std::move(localLights));
+    renderList_.setReflectionProbes({
+        {{-7.0F, 1.5F, -12.0F, 11.0F},
+         {0.35F, 0.55F, 1.0F, 0.55F}},
+        {{8.0F, 1.0F, -22.0F, 13.0F},
+         {1.0F, 0.38F, 0.16F, 0.45F}},
+    });
     renderList_.reserve(actualRequiredItems);
     for (std::size_t itemIndex = 0; itemIndex < kAnimatedItemCount; ++itemIndex) {
         renderList_.push(SceneRenderItem{});
@@ -735,14 +813,32 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
             const float z = -4.4f - static_cast<float>(row) * 1.25f;
             const float roughness = materialGridRows > 1U ? 0.18f + (static_cast<float>(row) / static_cast<float>(materialGridRows - 1U)) * 0.60f : 0.48f;
             const float metallic = materialGridColumns > 1U ? static_cast<float>(column) / static_cast<float>(materialGridColumns - 1U) : 0.0f;
+            constexpr std::array<RenderMaterialClass, 7> materialClasses{
+                RenderMaterialClass::Standard,
+                RenderMaterialClass::ClearCoat,
+                RenderMaterialClass::Foliage,
+                RenderMaterialClass::Skin,
+                RenderMaterialClass::Hair,
+                RenderMaterialClass::Cloth,
+                RenderMaterialClass::Emissive};
+            const RenderMaterialClass materialClass =
+                materialClasses[(static_cast<std::size_t>(row) *
+                                 materialGridColumns + column) %
+                                materialClasses.size()];
+            const float classStrength =
+                materialClass == RenderMaterialClass::Standard ? 0.0F : 0.72F;
+            const Vec3 emissive =
+                materialClass == RenderMaterialClass::Emissive
+                    ? Vec3{0.35F, 0.08F, 0.02F}
+                    : Vec3{};
             const Vec3 center{x, 0.28f, z};
             renderList_.push(SceneRenderItem{center,
                                              0.32f,
                                              builtin_assets::kSphere,
                                              translate(center) * scale({0.28f, 0.28f, 0.28f}),
                                              {{0.38f + 0.11f * metallic * 4.0f, 0.42f + 0.08f * roughness * 3.0f, 0.82f - 0.08f * metallic * 4.0f, roughness},
-                                              {0.0f, 0.0f, 0.0f, metallic},
-                                              {0.0f, 0.0f, 0.0f, 0.0f}}});
+                                              {emissive.x, emissive.y, emissive.z, metallic},
+                                              {0.0f, static_cast<float>(materialClass), classStrength, 1.0f}}});
         }
     }
     renderList_.setMaterialGridRange(kAnimatedItemCount, materialGridRows, materialGridColumns);
@@ -751,7 +847,7 @@ void DemoSceneRenderer::ensureStaticSceneLayout(const std::uint32_t materialGrid
                                      17.0f,
                                      builtin_assets::kGroundPlane,
                                      Mat4::identity(),
-                                     {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.55f}}});
+                                     {{0.34f, 0.36f, 0.38f, 0.82f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 0.55f}}});
     for (const SceneRenderItem& item : authoredSceneItems_) {
         renderList_.push(item);
     }

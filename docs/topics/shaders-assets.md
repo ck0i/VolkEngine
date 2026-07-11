@@ -5,6 +5,7 @@ This page covers runtime file flow. Current ownership is split across these back
 - `SceneImporter.cpp`, `GltfImporter.cpp`, and `TextureArtifact.cpp` — importer dispatch, authored-scene conversion, and engine-native texture validation/serialization.
 - `ReferenceAssetPipeline.cpp`, `AssetDatabase.cpp`, and `DerivedDataCache.cpp` — dependency records, deterministic cooking, cache publication, and transactional reload.
 - `VulkanRenderer.Pipelines.cpp` — SPIR-V validation/loading, pipeline set construction, pipeline cache load/save, and hot-reload rebuild/retire.
+- `VulkanRenderer.Lighting.cpp` — Forward+ descriptors, bounded tile/light uploads, and directional/local shadow camera preparation.
 - `VulkanRenderer.Resources.cpp` — texture asset upload/sampler/descriptor setup and texture resource lifetime.
 - `VulkanRenderer.Meshes.cpp` — procedural geometry, imported OBJ mesh loading, mesh upload, and shared vertex/index buffer ownership.
 - `VulkanRenderer.Screenshot.cpp` — screenshot path and file-publish behavior.
@@ -17,7 +18,7 @@ CMake finds `glslc` and compiles root shader files under `engine/shaders/`:
 
 - `*.vert`
 - `*.frag`
-
+- `*.comp`
 Outputs are written to `${binaryDir}/shaders/*.spv` with `--target-env=vulkan1.3`. Compiler depfiles track includes under `engine/shaders/common/`, so editing shared GLSL triggers the correct recompiles.
 
 Important targets:
@@ -39,11 +40,15 @@ Valid SPIR-V is read directly into aligned `std::uint32_t` storage before `vkCre
 
 ## Scene shader data flow
 
-`scene.vert` reads per-instance material constants from the scene instance SSBO and emits them as `flat` fragment inputs, so albedo/roughness, emissive/metallic, and material flags are not perspective-interpolated per fragment. Position, normal, UV, and tangent remain interpolated vertex attributes.
+`scene.vert` reads packed instance material constants and texture indices from the scene SSBO and emits material values as flat fragment inputs while position, normal, UV, and tangent remain interpolated. `scene.frag` consumes the per-frame Forward+ tile lists, directional/local light records, shadow views/atlas, environment map, and bounded reflection-probe array through the shared lighting descriptor set.
 
-`scene.frag` keeps direct-light Fresnel from the GGX half vector, but evaluates ambient diffuse/specular Fresnel from `N·V` with roughness-aware grazing reflectance so the image-based approximation does not change with sun direction. Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis instead of reconstructing an equivalent normal with another cross/normalize pair. `VulkanRenderer.FrameResources.cpp::updateUniforms()` uploads a unit-length light direction, so `scene.frag` consumes it directly instead of normalizing per fragment.
+The fragment path applies GGX/Smith/Schlick direct light, inverse-square/range-window point and spot attenuation, stable directional cascade selection, local spot-shadow lookup, roughness-dependent environment LOD, diffuse environment irradiance approximation, probe blending, and ambient occlusion in linear HDR. Standard, masked, clear-coat, foliage, skin, hair, cloth, and emissive responses share one material-class ABI and pipeline layout. Base-color alpha discard is legal because device selection explicitly requires/enables Vulkan 1.3 `shaderDemoteToHelperInvocation`.
 
-The depth prepass uses `scene_depth.vert`, which keeps the same model/view-projection transform but declares only the position attribute and emits only `gl_Position`.
+Normal-mapped fragments orthonormalize the tangent against the interpolated normal, derive bitangent handedness from `vWorldTangent.w`, and reuse the normalized geometric normal as the TBN matrix's third axis. Material availability comes from separately packed texture-mask bits; `RenderMaterial::flags.y/z/w` carry class, class strength or alpha cutoff, and normal strength.
+
+`light_assign.comp` uses one workgroup per 16×16 tile. It derives a conservative tile frustum, tests a bounded 256-light array, and writes each tile's fixed 64-index partition plus an exact overflow counter. `depth_pyramid.comp` remains the temporal reverse-Z reduction path.
+
+Camera depth uses `scene_depth.vert`; opaque casters omit a fragment stage, while masked casters add `shadow.frag` so the prepass preserves authored alpha cutoff. Shadow atlas rendering uses `shadow.vert` for both caster classes and adds `shadow.frag` only for masked geometry; push constants select the shadow-view matrix and packed atlas scale/bias.
 
 ## Shader hot reload
 

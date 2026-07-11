@@ -152,8 +152,9 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
                     stats_.cpuSceneBuildMs, stats_.cpuPrepareMs, stats_.cpuCommandRecordMs, stats_.cpuQueueSubmitMs);
         if (stats_.gpuTimestampsValid) {
             ImGui::Text(
-                "GPU frame: %.3f ms (cull %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
-                stats_.gpuFrameMs, stats_.gpuCullMs,
+                "GPU frame: %.3f ms (lights %.3f / cull %.3f / shadows %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
+                stats_.gpuFrameMs, stats_.gpuLightAssignmentMs,
+                stats_.gpuCullMs, stats_.gpuShadowMs,
                 stats_.gpuDepthPrepassMs, stats_.gpuHdrSceneMs,
                 stats_.gpuDepthPyramidMs, stats_.gpuFinalPassMs);
         } else {
@@ -167,7 +168,23 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
         ImGui::Text("Triangles: %llu scene / %llu submitted", static_cast<unsigned long long>(stats_.sceneTriangleCount), static_cast<unsigned long long>(stats_.triangleCount));
         ImGui::Text("Sphere LOD instances: %u high / %u medium / %u low",
                     stats_.sphereLodHighCount, stats_.sphereLodMediumCount, stats_.sphereLodLowCount);
-        ImGui::Text("Exposure: %.2f  VSync: %s  Depth prepass: %s (%s)", config_.exposure, config_.vsync ? "on" : "off", stats_.depthPrepassEnabled ? "on" : "off", depthPrepassModeName(config_.depthPrepassMode));
+        ImGui::Text("Exposure: %.2f effective  VSync: %s  Depth prepass: %s (%s)", stats_.effectiveExposure, config_.vsync ? "on" : "off", stats_.depthPrepassEnabled ? "on" : "off", depthPrepassModeName(config_.depthPrepassMode));
+        ImGui::Text(
+            "Lighting: %u local, %u tile overflow, %u probes, HDR env %s",
+            stats_.localLightCount, stats_.lightListOverflowCount,
+            stats_.reflectionProbeCount,
+            stats_.environmentMapEnabled ? "on" : "off");
+        ImGui::Text(
+            "Shadows: %s, %u/%u atlas views, %u overflow",
+            stats_.shadowsEnabled ? "on" : "off",
+            stats_.shadowViewCount, stats_.shadowAtlasCapacity,
+            stats_.shadowAtlasOverflowCount);
+        ImGui::Text(
+            "Materials std/mask/coat/foliage/skin/hair/cloth/emissive: %u/%u/%u/%u/%u/%u/%u/%u",
+            stats_.materialClassCounts[0], stats_.materialClassCounts[1],
+            stats_.materialClassCounts[2], stats_.materialClassCounts[3],
+            stats_.materialClassCounts[4], stats_.materialClassCounts[5],
+            stats_.materialClassCounts[6], stats_.materialClassCounts[7]);
         ImGui::Text("Scene: %u items, %u visible, %u mesh batches, %u scene passes, %s",
                     stats_.sceneItemCount, stats_.visibleItemCount, stats_.meshBatchCount, stats_.scenePassCount,
                     stats_.indirectSceneDraws

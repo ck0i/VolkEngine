@@ -295,9 +295,11 @@ void VulkanRenderer::Impl::updateDepthPyramidDescriptors() const {
                                static_cast<std::uint32_t>(writes.size()),
                                writes.data(), 0, nullptr);
     }
-    for (std::size_t frameIndex = 0; frameIndex < kMaxFramesInFlight;
-         ++frameIndex) {
-        updateFrameCullDescriptors(frameIndex);
+    if (indirectSceneDrawsEnabled_) {
+        for (std::size_t frameIndex = 0;
+             frameIndex < kMaxFramesInFlight; ++frameIndex) {
+            updateFrameCullDescriptors(frameIndex);
+        }
     }
 }
 
@@ -348,6 +350,18 @@ void VulkanRenderer::Impl::createFrameResources() {
                 deviceOwner_.device, &cullAllocInfo,
                 resourceOwner_.cullDescriptorSets.data()),
             "vkAllocateDescriptorSets scene cull");
+    std::array<VkDescriptorSetLayout, kMaxFramesInFlight> lightingLayouts{};
+    lightingLayouts.fill(resourceOwner_.lightingSetLayout);
+    VkDescriptorSetAllocateInfo lightingAllocInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    lightingAllocInfo.descriptorPool = resourceOwner_.descriptorPool;
+    lightingAllocInfo.descriptorSetCount =
+        static_cast<std::uint32_t>(lightingLayouts.size());
+    lightingAllocInfo.pSetLayouts = lightingLayouts.data();
+    checkVk(vkAllocateDescriptorSets(
+                deviceOwner_.device, &lightingAllocInfo,
+                resourceOwner_.lightingDescriptorSets.data()),
+            "vkAllocateDescriptorSets lighting");
     const auto samplerForRole = [&](const TextureRole role) {
         switch (role) {
         case TextureRole::Normal: return resourceOwner_.normalTextureSampler;
@@ -390,6 +404,9 @@ void VulkanRenderer::Impl::createFrameResources() {
         setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET,
                       handleToUint64(resourceOwner_.cullDescriptorSets[i]),
                       frameName + " Scene Cull Descriptor Set");
+        setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET,
+                      handleToUint64(resourceOwner_.lightingDescriptorSets[i]),
+                      frameName + " Lighting Descriptor Set");
 
         VkCommandPoolCreateInfo framePoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         framePoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -410,6 +427,81 @@ void VulkanRenderer::Impl::createFrameResources() {
         vmaSetAllocationName(deviceOwner_.allocator, frame.sceneUniforms.allocation, uniformAllocationName.c_str());
         frame.sceneUniforms.resourceId = resourceOwner_.registry.registerResource(GpuResourceKind::Buffer, uniformAllocationName, frame.sceneUniforms.size);
         checkVk(vmaMapMemory(deviceOwner_.allocator, frame.sceneUniforms.allocation, &frame.sceneUniforms.mapped), "vmaMapMemory scene uniforms");
+        const auto createLightingBuffer =
+            [&](Buffer& buffer, const VkDeviceSize size,
+                const VkBufferUsageFlags usage,
+                const VkMemoryPropertyFlags properties,
+                const std::string& name, const bool map) {
+                buffer = createBuffer(size, usage, properties);
+                setObjectName(VK_OBJECT_TYPE_BUFFER,
+                              handleToUint64(buffer.buffer), name);
+                const std::string allocationName = name + " Allocation";
+                vmaSetAllocationName(deviceOwner_.allocator, buffer.allocation,
+                                     allocationName.c_str());
+                buffer.resourceId = resourceOwner_.registry.registerResource(
+                    GpuResourceKind::Buffer, name, buffer.size);
+                if (map) {
+                    checkVk(vmaMapMemory(deviceOwner_.allocator,
+                                         buffer.allocation, &buffer.mapped),
+                            ("vmaMapMemory " + name).c_str());
+                }
+            };
+        createLightingBuffer(
+            frame.localLights,
+            sizeof(RenderLocalLight) * kMaximumLocalLights,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            frameName + " Local Light Buffer", true);
+        createLightingBuffer(
+            frame.lightingUniforms, sizeof(GpuLightingUniforms),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            frameName + " Lighting Uniform Buffer", true);
+        const std::size_t initialLightTileColumns =
+            (swapchainOwner_.extent.width + kLightTileSize - 1U) /
+            kLightTileSize;
+        const std::size_t initialLightTileRows =
+            (swapchainOwner_.extent.height + kLightTileSize - 1U) /
+            kLightTileSize;
+        frame.lightTileCapacity =
+            initialLightTileColumns * initialLightTileRows;
+        createLightingBuffer(
+            frame.lightTileHeaders,
+            sizeof(LightTileHeader) * frame.lightTileCapacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            frameName + " Light Tile Header Buffer", false);
+        createLightingBuffer(
+            frame.lightTileIndices,
+            sizeof(std::uint32_t) * kMaximumLightsPerTile *
+                frame.lightTileCapacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            frameName + " Light Tile Index Buffer", false);
+        createLightingBuffer(
+            frame.lightListCounters, sizeof(GpuLightListCounters),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            frameName + " Light List Counter Buffer", true);
+        frame.shadowInstanceIndexCapacity = initialInstanceCapacity;
+        createLightingBuffer(
+            frame.shadowInstanceIndices,
+            sizeof(std::uint32_t) * initialInstanceCapacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            frameName + " Shadow Instance Index Buffer", true);
+        createLightingBuffer(
+            frame.shadowIndirectCommands,
+            sizeof(VkDrawIndexedIndirectCommand) *
+                resourceOwner_.sceneMeshes.size(),
+            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            frameName + " Shadow Indirect Command Buffer", true);
 
         frame.visibleInstanceIndices = createBuffer(
             sizeof(std::uint32_t) * initialInstanceCapacity,
@@ -536,6 +628,7 @@ void VulkanRenderer::Impl::createFrameResources() {
         if (indirectSceneDrawsEnabled_) {
             updateFrameCullDescriptors(i);
         }
+        updateFrameLightingDescriptors(i);
 
         replaceFrameImageAvailableSemaphore(frame, i);
 
@@ -600,6 +693,35 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
         FrameGraph::ResourceHandle clusterData{};
         FrameGraph::ResourceHandle meshClusterRanges{};
         FrameGraph::PassHandle cullPass{};
+        const FrameGraph::ResourceHandle localLights = graph.addResource({
+            "Local Lights", FrameGraphResourceKind::Buffer, true});
+        const FrameGraph::ResourceHandle lightingUniforms = graph.addResource({
+            "Lighting Uniforms", FrameGraphResourceKind::Buffer, true});
+        const FrameGraph::ResourceHandle lightTileHeaders = graph.addResource({
+            "Light Tile Headers", FrameGraphResourceKind::Buffer, true});
+        const FrameGraph::ResourceHandle lightTileIndices = graph.addResource({
+            "Light Tile Indices", FrameGraphResourceKind::Buffer, true});
+        const FrameGraph::ResourceHandle lightListCounters = graph.addResource({
+            "Light List Counters", FrameGraphResourceKind::Buffer, true});
+        const FrameGraph::PassHandle lightAssignmentPass = graph.addPass({
+            "Forward+ Light Assignment", {0.98F, 0.75F, 0.18F, 1.0F}});
+        graph.read(lightAssignmentPass, localLights,
+                   FrameGraphUsage::StorageBuffer);
+        graph.read(lightAssignmentPass, lightingUniforms,
+                   FrameGraphUsage::UniformBuffer);
+        graph.write(lightAssignmentPass, lightTileHeaders,
+                    FrameGraphUsage::StorageBuffer);
+        graph.write(lightAssignmentPass, lightTileIndices,
+                    FrameGraphUsage::StorageBuffer);
+        graph.write(lightAssignmentPass, lightListCounters,
+                    FrameGraphUsage::StorageBuffer);
+        graph.setFinalUsage(lightListCounters, FrameGraphUsage::HostRead);
+        const FrameGraph::ResourceHandle shadowAtlas = graph.addResource({
+            "Shadow Atlas", FrameGraphResourceKind::Image, true});
+        const FrameGraph::ResourceHandle shadowInstances = graph.addResource({
+            "Shadow Instance Indices", FrameGraphResourceKind::Buffer, true});
+        const FrameGraph::ResourceHandle shadowCommands = graph.addResource({
+            "Shadow Indirect Commands", FrameGraphResourceKind::Buffer, true});
         if (indirectSceneDrawsEnabled_) {
             depthPyramid = graph.addResource({
                 "Depth Pyramid", FrameGraphResourceKind::Image, true});
@@ -638,6 +760,21 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
                         FrameGraphUsage::StorageBuffer);
             graph.setFinalUsage(cullCounters, FrameGraphUsage::HostRead);
         }
+        const FrameGraph::PassHandle shadowPass = graph.addPass({
+            "Shadow Atlas", {0.32F, 0.30F, 0.28F, 1.0F}});
+        graph.writeAttachment(
+            shadowPass, shadowAtlas, FrameGraphUsage::DepthAttachment,
+            FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Store);
+        graph.read(shadowPass, lightingUniforms,
+                   FrameGraphUsage::UniformBuffer);
+        if (indirectSceneDrawsEnabled_) {
+            graph.read(shadowPass, sceneInstances,
+                       FrameGraphUsage::StorageBuffer);
+            graph.read(shadowPass, shadowInstances,
+                       FrameGraphUsage::StorageBuffer);
+            graph.read(shadowPass, shadowCommands,
+                       FrameGraphUsage::IndirectBuffer);
+        }
 
         FrameGraph::PassHandle depthPass{};
         if (depthPrepass) {
@@ -672,6 +809,11 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
             graph.read(hdrPass, indirectCommands,
                        FrameGraphUsage::IndirectBuffer);
         }
+        graph.read(hdrPass, localLights, FrameGraphUsage::StorageBuffer);
+        graph.read(hdrPass, lightingUniforms, FrameGraphUsage::UniformBuffer);
+        graph.read(hdrPass, lightTileHeaders, FrameGraphUsage::StorageBuffer);
+        graph.read(hdrPass, lightTileIndices, FrameGraphUsage::StorageBuffer);
+        graph.read(hdrPass, shadowAtlas, FrameGraphUsage::SampledImage);
         FrameGraph::PassHandle depthPyramidPass{};
         if (indirectSceneDrawsEnabled_) {
             depthPyramidPass = graph.addPass({
@@ -730,11 +872,21 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
         variant.resources.meshClusterRanges = meshClusterRanges;
         variant.resources.depthPyramid = depthPyramid;
         variant.resources.screenshotReadback = screenshotReadback;
+        variant.resources.localLights = localLights;
+        variant.resources.lightingUniforms = lightingUniforms;
+        variant.resources.lightTileHeaders = lightTileHeaders;
+        variant.resources.lightTileIndices = lightTileIndices;
+        variant.resources.lightListCounters = lightListCounters;
+        variant.resources.shadowAtlas = shadowAtlas;
+        variant.resources.shadowInstances = shadowInstances;
+        variant.resources.shadowCommands = shadowCommands;
         variant.passes.depthPrepass = depthPass;
         variant.passes.hdrScene = hdrPass;
         variant.passes.tonemap = tonemapPass;
         variant.passes.gpuCull = cullPass;
         variant.passes.depthPyramid = depthPyramidPass;
+        variant.passes.shadows = shadowPass;
+        variant.passes.lightAssignment = lightAssignmentPass;
         variant.passes.screenshotReadback = screenshotPass;
         return variant;
     };
@@ -830,16 +982,33 @@ void VulkanRenderer::Impl::readBackGpuTimestamp(const std::uint32_t frameIndex) 
             return ((end & mask) - (begin & mask)) & mask;
         };
         const double tickToMs = static_cast<double>(deviceOwner_.physicalDeviceProperties.limits.timestampPeriod) / 1'000'000.0;
-        stats_.gpuCullMs = static_cast<double>(
+        stats_.gpuLightAssignmentMs = static_cast<double>(
             deltaTicks(timestamps[kTimestampFrameStart],
+                       timestamps[kTimestampLightAssignmentEnd])) *
+            tickToMs;
+        stats_.gpuCullMs = static_cast<double>(
+            deltaTicks(timestamps[kTimestampLightAssignmentEnd],
                        timestamps[kTimestampCullEnd])) *
             tickToMs;
+        stats_.gpuShadowMs = static_cast<double>(
+            deltaTicks(timestamps[kTimestampCullEnd],
+                       timestamps[kTimestampShadowEnd])) *
+            tickToMs;
         if (frameOwner_.frames[frameIndex].submittedDepthPrepass) {
-            stats_.gpuDepthPrepassMs = static_cast<double>(deltaTicks(timestamps[kTimestampCullEnd], timestamps[kTimestampDepthEnd])) * tickToMs;
-            stats_.gpuHdrSceneMs = static_cast<double>(deltaTicks(timestamps[kTimestampDepthEnd], timestamps[kTimestampHdrEnd])) * tickToMs;
+            stats_.gpuDepthPrepassMs = static_cast<double>(
+                deltaTicks(timestamps[kTimestampShadowEnd],
+                           timestamps[kTimestampDepthEnd])) *
+                tickToMs;
+            stats_.gpuHdrSceneMs = static_cast<double>(
+                deltaTicks(timestamps[kTimestampDepthEnd],
+                           timestamps[kTimestampHdrEnd])) *
+                tickToMs;
         } else {
             stats_.gpuDepthPrepassMs = 0.0;
-            stats_.gpuHdrSceneMs = static_cast<double>(deltaTicks(timestamps[kTimestampCullEnd], timestamps[kTimestampHdrEnd])) * tickToMs;
+            stats_.gpuHdrSceneMs = static_cast<double>(
+                deltaTicks(timestamps[kTimestampShadowEnd],
+                           timestamps[kTimestampHdrEnd])) *
+                tickToMs;
         }
         stats_.gpuDepthPyramidMs = static_cast<double>(
             deltaTicks(timestamps[kTimestampHdrEnd],

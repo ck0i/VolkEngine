@@ -64,19 +64,21 @@ Implemented:
 
 - Vulkan 1.3 dynamic rendering with Vulkan Memory Allocator and two frames in flight.
 - HDR rendering, ACES tone mapping, reverse-Z, and an adaptive depth prepass.
-- Fixed albedo/normal/ORM PBR materials and one directional light.
+- Forward+ tiled local-light assignment for bounded point and spot lights, one directional light, deterministic light-list overflow, and one compute dispatch per frame.
+- A fixed 2048² depth atlas provides three directional cascades plus deterministic local spot-shadow slots, slope-scaled receiver bias, stable cascade fitting, guarded projected-depth sampling, and explicit atlas-pressure telemetry.
+- HDR image-based diffuse/specular lighting uses a mipmapped linear environment map, bounded spherical reflection probes, exposure compensation, and ACES output.
+- The packed PBR path covers standard, masked, clear-coat, foliage, skin, hair, cloth, and emissive classes without per-material descriptor growth; bindless sampled images remain capability-gated with fixed descriptors as fallback.
 - CPU fallback visibility plus capability-gated GPU cluster frustum/LOD/temporal-occlusion culling, visible-instance compaction, and generated multi-draw indirect submission.
-- Capability-gated bindless sampled-image descriptors with stable material texture indices; fixed material sets remain the unsupported-device fallback.
-- Upload synchronization, pipeline caching, shader hot reload, cull/depth/HDR/Hi-Z/final GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
-- Executable frame-graph variants drive cull, depth, HDR, temporal depth-pyramid, tone-map, and screenshot work with explicit synchronization/lifetime contracts and machine-readable diagnostics.
+- Upload synchronization, pipeline caching, shader hot reload, per-pass GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
+- Executable frame-graph variants drive Forward+ assignment, cull, shadow atlas, depth, HDR, temporal depth-pyramid, tone-map, and screenshot work with explicit synchronization/lifetime contracts and machine-readable diagnostics.
 
 Current limits:
 
-- The renderer is single-view and forward-oriented, without scalable local lights, production shadows, image-based lighting, transparency, temporal antialiasing, upscaling, post effects, or robust device-loss policy.
+- The renderer is single-view and forward-oriented; local-light assignment is bounded rather than clustered in depth, reflection probes share the current environment texture, and transparency, temporal antialiasing, upscaling, post effects, hardware ray tracing, production global illumination, and robust device-loss policy remain absent.
 - GPU submission currently uses a flat bounded-cluster list; it does not yet traverse a cluster hierarchy or provide fine-grained mesh/cluster LOD beyond the existing sphere mesh tiers.
 - The temporal Hi-Z implementation is correctness-proven on one integrated Vulkan driver, but representative cross-driver crossover gates are not yet established.
 - The frame graph does not schedule multiple queues or physically alias Vulkan memory yet; current depth/HDR logical transients intentionally use separate allocation classes and are realized at swapchain scope.
-- There is no compressed/virtual texture pipeline, asynchronous residency system, scalable world renderer, hardware ray tracing, or production global illumination path.
+- There is no virtual texture pipeline, asynchronous residency system, scalable world renderer, hardware ray tracing, or production global illumination path.
 
 ### Assets, tools, and delivery
 
@@ -87,7 +89,7 @@ Implemented:
 - Incremental reference-asset cooking and transactional reload; artifact-content keys avoid rebuilding byte-identical outputs and propagate only real dependency changes.
 - Versioned texture artifacts validate and preserve decoded RGBA8, linear RGBA32F HDR, and non-supercompressed KTX2 BC1/BC3/BC7 payloads with explicit role, color-space, dimensions, and mip metadata.
 - OBJ/procedural geometry and direct stb_image-backed texture overrides remain available alongside the authored glTF path.
-- Twenty-two CPU test executables plus the sandbox help test.
+- Twenty-three CPU test executables plus the sandbox help test.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
 Current limits:
@@ -99,14 +101,15 @@ Current limits:
 ### Verified baseline
 
 Current local baseline (11 July 2026):
-- `ctest --preset linux-debug` passed all 23 registered tests.
+- `ctest --preset linux-debug` passed all 24 registered tests.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
 - A validated 24-frame dense-scene smoke at the odd extent 1281×721 executed GPU cluster culling and temporal Hi-Z, rejected 6,350 of 22,921 tested cluster instances in its captured completed frame, rendered a screenshot, and emitted explicit cull/Hi-Z timings and descriptor pressure without validation errors. A matching no-occlusion GPU capture was pixel-identical.
 - On the same Intel RPL-S driver, a final paired 110-sample schema-v3 release run at 65,544 instances established the first controlled crossover: default capability-gated subgroup-reserved mesh-command generation plus temporal Hi-Z measured 23.935 ms median GPU frame time versus 27.629 ms for CPU grid culling/direct submission, a 13.4% reduction. The GPU path submitted 15,673,889 triangles instead of 23,992,353 and three draw calls instead of 15. Its CPU-frame median remained higher (3.002 ms versus 1.726 ms) and GPU p95 remained worse (30.526 ms versus 28.128 ms), so this is a bounded crossover result rather than a universal policy claim.
+- The S4 gate passed all 24 registered debug tests and a strict 120-frame Vulkan run on Intel RPL-S graphics. The run required Khronos and synchronization validation, exercised 32 local lights, seven active shadow views, two reflection probes, the seven non-masked material classes, the HDR environment, GPU visibility validation, depth-prepass rendering, two resize/recompile events, and screenshot readback without validation errors; focused CPU contracts and shader compilation cover the eighth, masked class. Schema-v4 telemetry reported zero tile/atlas overflow, 0.045 ms light assignment, 2.432 ms shadow rendering, a 14.734 ms median GPU frame, and a 0.712 ms median CPU render-submit frame across 90 post-warmup samples. A separate strict `--no-shadows` run reported zero shadow views and an unavailable shadow timing with reason `pass disabled`.
 
-This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, and S3's validated GPU-generated visibility and measured crossover foundation on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness or cross-hardware correctness.
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, and S4's Forward+/shadow/HDR material baseline on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -214,7 +217,7 @@ Current evidence:
 - Khronos validation plus synchronization validation passes the generated mesh-command path; CPU-reference validation covers command partitions, visible counts, sphere LOD counts, and submitted triangle accounting.
 - Dense material-grid instances carry independently varied metallic/roughness parameters without per-material descriptor rebinding or CPU draw enumeration; generated submission reduces the captured scene to one indirect call per scene pass.
 
-## S4. Forward+ lighting, shadows, and production PBR baseline — **Next**
+## S4. Forward+ lighting, shadows, and production PBR baseline — **Current**
 
 Create the first visibly modern lighting path on top of S1–S3.
 
@@ -232,6 +235,14 @@ Exit criteria:
 - The imported reference scene supports many local lights, directional/local shadows, environment lighting, and multiple production material classes within published frame and memory budgets.
 - Light-list overflow, shadow-atlas pressure, shader compilation failure, and unsupported material features are observable and deterministic.
 - Visual regression scenes cover light boundaries, shadow stability, normal/roughness/metalness response, exposure, and color-space handling.
+
+Implemented:
+
+- A CPU-planned, GPU-consumed 16×16 Forward+ tile grid assigns up to 256 point/spot lights with 64 entries per tile and deterministic overflow accounting.
+- Three practical-split directional cascades and packed local spot-shadow views render into a deterministic 2048² atlas. Frame-graph ordering, dynamic depth rendering, receiver bias, atlas sampling bounds, and shadow/no-shadow fallback are validation-clean.
+- A generated linear HDR equirectangular map with radiance-preserving mips drives roughness-dependent specular and diffuse environment lighting. Four bounded spherical probes blend deterministic tint/intensity overrides without allocating per probe.
+- Standard, masked, clear-coat, foliage, skin, hair, cloth, and emissive classes share one ABI and one Forward+ shader path. Masked depth/shadow variants preserve authored alpha cutoff; all class counts are observable.
+- Renderer diagnostics publish local-light count, tile overflow, shadow views/capacity/overflow, reflection-probe count, material-class coverage, environment/exposure state, and independent light-assignment/shadow GPU intervals through ImGui, the terminal summary, and run-summary schema v4.
 
 ## S5. Job system, asynchronous IO, and profiling spine — **Next**
 

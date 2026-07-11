@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Camera.hpp"
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -42,6 +43,7 @@ struct RenderDeviceInfo {
     bool samplerAnisotropy = false;
     bool samplerFilterMinmax = false;
     bool computeSubgroupBallot = false;
+    bool shaderDemoteToHelperInvocation = false;
     float maxSamplerAnisotropy = 1.0f;
     TransferUploadSyncMode transferUploadSync = TransferUploadSyncMode::SameQueueBarrier;
     bool indirectSceneDraws = false;
@@ -54,7 +56,9 @@ struct RenderStats {
     double cpuQueueSubmitMs = 0.0;
     double frameDeltaMs = 0.0;
     double gpuFrameMs = 0.0;
+    double gpuLightAssignmentMs = 0.0;
     double gpuCullMs = 0.0;
+    double gpuShadowMs = 0.0;
     double gpuDepthPrepassMs = 0.0;
     double gpuHdrSceneMs = 0.0;
     double gpuDepthPyramidMs = 0.0;
@@ -76,6 +80,16 @@ struct RenderStats {
     unsigned materialDescriptorCount = 0;
     unsigned materialDescriptorCapacity = 0;
     bool depthPyramidBuildEnabled = false;
+    unsigned localLightCount = 0;
+    unsigned lightListOverflowCount = 0;
+    unsigned shadowViewCount = 0;
+    unsigned shadowAtlasCapacity = 0;
+    unsigned shadowAtlasOverflowCount = 0;
+    unsigned reflectionProbeCount = 0;
+    std::array<unsigned, 8> materialClassCounts{};
+    bool shadowsEnabled = false;
+    bool environmentMapEnabled = false;
+    double effectiveExposure = 1.0;
     bool depthPyramidOcclusion = false;
     bool gpuDrivenVisibility = false;
     bool gpuVisibilityValidated = false;

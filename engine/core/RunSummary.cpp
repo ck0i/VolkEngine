@@ -117,7 +117,7 @@ void appendDistribution(std::ostringstream& output, const char* name,
 
 std::string serializeRunSummary(const RunSummary& summary) {
     std::ostringstream output;
-    output << std::setprecision(9);
+    output << std::boolalpha << std::setprecision(9);
     output << "{\n  \"schema\":\"volkengine.run-summary\",\n  \"schema_version\":"
            << RunSummary::kSchemaVersion << ",\n  \"revision\":";
     appendEscaped(output, environmentOrUnavailable("GITHUB_SHA"));
@@ -133,7 +133,9 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << ",\"device_id\":" << summary.device.deviceId
            << ",\"driver_version\":" << summary.device.driverVersion
            << ",\"vulkan_api\":\"" << summary.device.apiVersionMajor << '.'
-           << summary.device.apiVersionMinor << '.' << summary.device.apiVersionPatch << "\"},\n"
+           << summary.device.apiVersionMinor << '.' << summary.device.apiVersionPatch
+           << "\",\"shader_demote_to_helper_invocation\":"
+           << summary.device.shaderDemoteToHelperInvocation << "},\n"
            << "  \"validation\":{\"requested\":" << std::boolalpha << summary.config.validation
            << ",\"required\":" << summary.config.requireValidation
            << ",\"enabled\":" << summary.device.validationEnabled
@@ -148,6 +150,7 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << ",\"height\":" << summary.config.initialHeight << "},\"variants\":{\"depth_prepass\":";
     appendEscaped(output, depthModeName(summary.config.depthPrepassMode));
     output << ",\"indirect_draws\":" << summary.config.indirectSceneDraws
+           << ",\"shadows\":" << summary.config.shadows
            << ",\"gpu_visibility_validation\":"
            << summary.config.gpuVisibilityValidation
            << ",\"hiz_occlusion\":"
@@ -181,6 +184,26 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << summary.stats.materialDescriptorCount
            << ",\"material_descriptor_capacity\":"
            << summary.stats.materialDescriptorCapacity << "},\n"
+           << "  \"lighting\":{\"local_lights\":"
+           << summary.stats.localLightCount
+           << ",\"tile_overflow\":" << summary.stats.lightListOverflowCount
+           << ",\"reflection_probes\":" << summary.stats.reflectionProbeCount
+           << ",\"environment_map\":" << summary.stats.environmentMapEnabled
+           << ",\"effective_exposure\":" << summary.stats.effectiveExposure
+           << ",\"shadows\":{\"enabled\":" << summary.stats.shadowsEnabled
+           << ",\"views\":" << summary.stats.shadowViewCount
+           << ",\"capacity\":" << summary.stats.shadowAtlasCapacity
+           << ",\"overflow\":" << summary.stats.shadowAtlasOverflowCount
+           << "},\"material_classes\":{\"standard\":"
+           << summary.stats.materialClassCounts[0]
+           << ",\"masked\":" << summary.stats.materialClassCounts[1]
+           << ",\"clear_coat\":" << summary.stats.materialClassCounts[2]
+           << ",\"foliage\":" << summary.stats.materialClassCounts[3]
+           << ",\"skin\":" << summary.stats.materialClassCounts[4]
+           << ",\"hair\":" << summary.stats.materialClassCounts[5]
+           << ",\"cloth\":" << summary.stats.materialClassCounts[6]
+           << ",\"emissive\":" << summary.stats.materialClassCounts[7]
+           << "}},\n"
            << "  \"frame_graph\":{\"passes\":" << summary.stats.graphPassCount
            << ",\"logical_resources\":" << summary.stats.graphResourceCount
            << ",\"barriers\":" << summary.stats.graphBarrierCount
@@ -211,6 +234,18 @@ std::string serializeRunSummary(const RunSummary& summary) {
     output << ',';
     appendMetric(output, "gpu_frame", summary.stats.gpuFrameMs, "ms", summary.stats.gpuTimestampsValid,
                  "GPU timestamp result unavailable");
+    output << ',';
+    appendMetric(output, "gpu_light_assignment",
+                 summary.stats.gpuLightAssignmentMs, "ms",
+                 summary.stats.gpuTimestampsValid,
+                 "GPU timestamp result unavailable");
+    output << ',';
+    appendMetric(output, "gpu_shadows", summary.stats.gpuShadowMs, "ms",
+                 summary.stats.gpuTimestampsValid &&
+                     summary.stats.shadowsEnabled,
+                 summary.stats.shadowsEnabled
+                     ? "GPU timestamp result unavailable"
+                     : "pass disabled");
     output << ',';
     appendMetric(output, "gpu_visibility_cull", summary.stats.gpuCullMs, "ms",
                  summary.stats.gpuTimestampsValid &&

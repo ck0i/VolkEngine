@@ -39,9 +39,7 @@ float gridMask(vec2 uv) {
     return 1.0 - clamp(min(cell.x, cell.y), 0.0, 1.0);
 }
 
-vec3 environmentDiffuse(vec3 normal) {
+vec3 environmentDiffuse(vec3 normal, vec3 ground, vec3 sky) {
     float skyWeight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 ground = scene.ambientGroundColor.rgb * scene.ambientGroundColor.a;
-    vec3 sky = scene.ambientSkyColor.rgb * scene.ambientSkyColor.a;
     return mix(ground, sky, skyWeight);
 }

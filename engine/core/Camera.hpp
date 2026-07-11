@@ -17,6 +17,10 @@ public:
     [[nodiscard]] Vec3 position() const { return position_; }
     [[nodiscard]] Vec3 forward() const;
     [[nodiscard]] Vec3 right() const;
+    [[nodiscard]] float verticalFov() const noexcept { return verticalFov_; }
+    [[nodiscard]] float aspect() const noexcept { return aspect_; }
+    [[nodiscard]] float nearPlane() const noexcept { return nearPlane_; }
+    [[nodiscard]] float farPlane() const noexcept { return farPlane_; }
 
 private:
     Vec3 position_{0.0f, 1.6f, 5.0f};

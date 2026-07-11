@@ -1,0 +1,47 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define VE_LIGHT_ASSIGNMENT 1
+#include "common/lighting.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+bool lightTouchesTile(LocalLight light, uvec2 tile) {
+    vec4 clip = lighting.viewProjection * vec4(light.positionRange.xyz, 1.0);
+    float range = light.positionRange.w;
+    if (clip.w + range <= 0.0) return false;
+    if (clip.w <= range) return true;
+
+    vec2 center = (clip.xy / clip.w * 0.5 + 0.5) * lighting.viewport.xy;
+    float conservativeDepth = max(clip.w - range, 0.0001);
+    vec2 radius = abs(vec2(lighting.viewProjection[0][0],
+                           lighting.viewProjection[1][1])) *
+                  range / conservativeDepth * 0.5 * lighting.viewport.xy;
+    vec2 tileMinimum = vec2(tile * LIGHT_TILE_SIZE);
+    vec2 tileMaximum = min(tileMinimum + vec2(LIGHT_TILE_SIZE),
+                           lighting.viewport.xy);
+    return all(greaterThanEqual(center + radius, tileMinimum)) &&
+           all(lessThan(center - radius, tileMaximum));
+}
+
+void main() {
+    uvec2 tile = gl_GlobalInvocationID.xy;
+    if (tile.x >= lighting.counts.y || tile.y >= lighting.counts.z) return;
+
+    uint tileIndex = tile.y * lighting.counts.y + tile.x;
+    uint offset = tileIndex * MAXIMUM_LIGHTS_PER_TILE;
+    uint count = 0U;
+    uint overflow = 0U;
+    uint lightCount = min(lighting.counts.x, MAXIMUM_LOCAL_LIGHTS);
+    for (uint lightIndex = 0U; lightIndex < lightCount; ++lightIndex) {
+        if (!lightTouchesTile(localLights[lightIndex], tile)) continue;
+        if (count < MAXIMUM_LIGHTS_PER_TILE) {
+            lightTileIndices[offset + count] = lightIndex;
+            ++count;
+        } else {
+            ++overflow;
+        }
+    }
+    lightTileHeaders[tileIndex].offset = offset;
+    lightTileHeaders[tileIndex].count = count;
+    if (overflow != 0U) atomicAdd(lightListCounters.overflowCount, overflow);
+}

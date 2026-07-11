@@ -35,10 +35,23 @@ Current packing:
 - `albedoRoughness.a`: roughness.
 - `emissiveMetallic.rgb`: emissive color.
 - `emissiveMetallic.a`: metallic.
-- `flags.x`: ground grid overlay enabled.
-- `flags.y`: albedo/ORM material texture sampling enabled.
-- `flags.z`: normal-map sampling enabled.
-- `flags.w`: normal-map strength in `[0, 1]`.
+- `flags.x`: ground-grid overlay enable.
+- `flags.y`: integral `RenderMaterialClass` ABI value (`Standard`, `Masked`, `ClearCoat`, `Foliage`, `Skin`, `Hair`, `Cloth`, or `Emissive`).
+- `flags.z`: alpha cutoff for the masked class, or class-response strength for the other specialized models.
+- `flags.w`: normal-map strength in `[0, 4]`.
+
+Texture availability is encoded separately from this vec4 by the three `TextureAssetHandle` roles (base color, normal, ORM). Invalid, non-integral material classes and negative class/normal parameters are rejected before renderer borrowing.
+
+## Lighting and environment records
+
+`Lighting.hpp` defines fixed CPU/GLSL ABI records and bounds:
+
+- `RenderDirectionalLight`: normalized world-space direction, linear color/intensity, and a shadow-enable bit. The renderer fits three practical-split reverse-Z cascades.
+- `RenderLocalLight`: point/spot type, world-space position/range, linear color/intensity, spot direction/cones, and shadow intent. A scene accepts at most 256 lights; invalid ranges, cones, directions, colors, and non-finite values fail before submission.
+- `RenderEnvironment`: neutral sky/ground tint-intensity multipliers plus positive exposure compensation and finite equirectangular rotation. Renderer-owned maximum mip and active-probe count replace the corresponding shader-facing fields each frame.
+- `RenderReflectionProbe`: world-space center, positive blend radius, and finite non-negative tint/intensity. At most four spherical probes are accepted.
+
+Forward+ uses 16×16 screen tiles with at most 64 local-light indices per tile. `buildTiledLightLists()` is the deterministic CPU reference contract used by tests; the Vulkan backend records one GPU assignment dispatch and reports exact bounded overflow. `assignShadowAtlasSlots()` reserves three of sixteen 512² atlas slots for directional cascades, then assigns shadow-casting spot lights in scene order and reports overflow.
 
 ## `SceneRenderItem`
 
@@ -61,9 +74,10 @@ Contract:
 ## `SceneRenderList`
 
 A reusable vector-backed render-list plus optional material-grid metadata. `WorldSceneExtractor` owns and reuses its list; callers may borrow the `const SceneRenderList&` returned by `build()` until the next build or extractor destruction. The renderer borrows it synchronously for one draw call and does not retain it.
+Lighting is owned by the list as frame data: `setLocalLights`, `setDirectionalLight`, `setEnvironment`, and `setReflectionProbes` validate a complete replacement before committing it; their accessors return read-only views. `clear()` also restores default directional/environment state and removes local lights and probes.
 List operations:
 
-- `clear()` — clears items and invalidates grid metadata.
+- `clear()` — clears items, lighting/probes, and grid metadata; restores default directional/environment records.
 - `reserve(capacity)` — preserves capacity for repeated scenes.
 - `push(item)` — appends one item and invalidates grid tiles if the append lands inside the declared grid range.
 - `size()`, `capacity()`, `empty()`.

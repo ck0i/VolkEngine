@@ -46,6 +46,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
     FrameResources& frame = frameOwner_.frames[frameOwner_.currentFrame];
     checkVk(vkWaitForFences(deviceOwner_.device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences frame");
     validateGpuVisibility(frame);
+    validateLightLists(frame);
     retireDeferredPipelineSets();
     readBackGpuTimestamp(static_cast<std::uint32_t>(frameOwner_.currentFrame));
     destroyFrameUploadWaitSemaphores(frame);
@@ -55,6 +56,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
     const auto cpuStart = std::chrono::steady_clock::now();
     const auto cpuSceneEnd = cpuStart;
     const Mat4 projection = camera.projectionMatrix();
+    frame.gpuRenderItemsChangedThisFrame = false;
     const Mat4 viewProjection = projection * camera.viewMatrix();
     SceneVisibilityPlan visibility =
         indirectSceneDrawsEnabled_
@@ -66,6 +68,9 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
         ensureSceneInstanceCapacity(frame, frameOwner_.currentFrame,
                                     visibility.visibleItemCount);
     }
+    prepareShadowCasters(frame, frameOwner_.currentFrame, camera, renderItems);
+    prepareLighting(frame, frameOwner_.currentFrame, camera, renderItems,
+                    viewProjection);
     updateUniforms(frame, camera, viewProjection, elapsedSeconds);
     checkVk(vkResetCommandPool(deviceOwner_.device, frame.commandPool, 0), "vkResetCommandPool frame");
     const bool useDepthPrepass = resolveDepthPrepassForFrame(visibility);
@@ -322,11 +327,6 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         const std::uint32_t queryBase = static_cast<std::uint32_t>(frameOwner_.currentFrame) * kTimestampQueriesPerFrame;
         vkCmdResetQueryPool(frame.commandBuffer, frameOwner_.timestampQueryPool, queryBase, kTimestampQueriesPerFrame);
         vkCmdWriteTimestamp2(frame.commandBuffer, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, frameOwner_.timestampQueryPool, queryBase + kTimestampFrameStart);
-        if (!indirectSceneDrawsEnabled_) {
-            vkCmdWriteTimestamp2(
-                frame.commandBuffer, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-                frameOwner_.timestampQueryPool, queryBase + kTimestampCullEnd);
-        }
     }
 
 
@@ -483,13 +483,16 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     if (useDepthPrepass && !FrameGraphVariantPolicy::depthVariantAvailable(config_.depthPrepassMode, true)) {
         throw std::runtime_error("Depth prepass selected without a compiled frame-graph pass");
     }
-    const VkDescriptorSet sceneSet = resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame];
+    const std::array<VkDescriptorSet, 2> sceneSets{
+        resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame],
+        resourceOwner_.lightingDescriptorSets[frameOwner_.currentFrame]};
     const VkDeviceSize offset = 0;
     if (sceneDrawCalls > 0U) {
         vkCmdBindVertexBuffers(frame.commandBuffer, 0, 1, &resourceOwner_.sceneVertexBuffer.buffer, &offset);
         vkCmdBindIndexBuffer(frame.commandBuffer, resourceOwner_.sceneIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineOwner_.sceneLayout,
-                                0, 1, &sceneSet, 0, nullptr);
+                                0, static_cast<std::uint32_t>(sceneSets.size()),
+                                sceneSets.data(), 0, nullptr);
     }
 
     FrameGraphRecordContext graphContext{
@@ -502,7 +505,12 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         imageIndex,
         sceneDrawCalls,
         useDepthPrepass,
-        indirectSceneDrawsEnabled_ ? visibility.visibleItemCount : 0U};
+        indirectSceneDrawsEnabled_ ? visibility.visibleItemCount : 0U,
+        (swapchainOwner_.extent.width + kLightTileSize - 1U) /
+            kLightTileSize,
+        (swapchainOwner_.extent.height + kLightTileSize - 1U) /
+            kLightTileSize,
+        frame.submittedLocalLightCount};
     const FrameGraph::ExecutionCallbacks callbacks{
         &graphContext,
         &createGraphResource,
@@ -563,6 +571,22 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     stats_.depthPyramidOcclusion =
         indirectSceneDrawsEnabled_ && config_.depthPyramidOcclusion &&
         !config_.gpuVisibilityValidation;
+    stats_.localLightCount = frame.submittedLocalLightCount;
+    stats_.lightListOverflowCount =
+        frame.completedLightListCountersValid
+            ? frame.completedLightListOverflowCount
+            : 0U;
+    stats_.shadowViewCount = frame.shadowViewCount;
+    stats_.shadowAtlasCapacity = kShadowAtlasSlotCount;
+    stats_.shadowAtlasOverflowCount =
+        frame.shadowAtlasOverflowCount;
+    stats_.reflectionProbeCount = frame.reflectionProbeCount;
+    stats_.materialClassCounts = visibility.materialClassCounts;
+    stats_.shadowsEnabled =
+        config_.shadows && indirectSceneDrawsEnabled_;
+    stats_.environmentMapEnabled =
+        resourceOwner_.environmentMap.image != VK_NULL_HANDLE;
+    stats_.effectiveExposure = frame.exposureScale;
     stats_.gpuDrivenVisibility = indirectSceneDrawsEnabled_;
     stats_.gpuVisibilityValidated =
         config_.gpuVisibilityValidation && gpuCountersValid;
@@ -653,7 +677,6 @@ void VulkanRenderer::Impl::applyGraphTransition(const FrameGraphRecordContext& c
         }
         return;
     }
-
     Buffer* buffer = nullptr;
     if (intent.resource.index == variant.resources.cullCandidates.index) {
         buffer = &context.frame->cullCandidates;
@@ -672,6 +695,26 @@ void VulkanRenderer::Impl::applyGraphTransition(const FrameGraphRecordContext& c
     } else if (intent.resource.index ==
                variant.resources.meshClusterRanges.index) {
         buffer = &resourceOwner_.meshClusterRanges;
+    } else if (intent.resource.index == variant.resources.localLights.index) {
+        buffer = &context.frame->localLights;
+    } else if (intent.resource.index ==
+               variant.resources.lightingUniforms.index) {
+        buffer = &context.frame->lightingUniforms;
+    } else if (intent.resource.index ==
+               variant.resources.lightTileHeaders.index) {
+        buffer = &context.frame->lightTileHeaders;
+    } else if (intent.resource.index ==
+               variant.resources.lightTileIndices.index) {
+        buffer = &context.frame->lightTileIndices;
+    } else if (intent.resource.index ==
+               variant.resources.lightListCounters.index) {
+        buffer = &context.frame->lightListCounters;
+    } else if (intent.resource.index ==
+               variant.resources.shadowInstances.index) {
+        buffer = &context.frame->shadowInstanceIndices;
+    } else if (intent.resource.index ==
+               variant.resources.shadowCommands.index) {
+        buffer = &context.frame->shadowIndirectCommands;
     }
     if (buffer != nullptr) {
         const VulkanBufferSyncState state =
@@ -706,6 +749,13 @@ void VulkanRenderer::Impl::applyGraphTransition(const FrameGraphRecordContext& c
             resourceOwner_.depthPyramid.syncState, state,
             VK_IMAGE_ASPECT_COLOR_BIT, 0,
             resourceOwner_.depthPyramid.mipLevels, forceMemoryDependency);
+        return;
+    }
+    if (intent.resource.index == variant.resources.shadowAtlas.index) {
+        transitionImageTracked(
+            context.frame->commandBuffer, resourceOwner_.shadowAtlas.image,
+            resourceOwner_.shadowAtlas.syncState, state,
+            VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, forceMemoryDependency);
         return;
     }
     if (intent.resource.index == variant.resources.depth.index) {
@@ -756,6 +806,149 @@ void VulkanRenderer::Impl::recordCullGraphPass(
     }
 }
 
+void VulkanRenderer::Impl::recordLightAssignmentGraphPass(
+    const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+    const FrameGraph::PassResources& resources) {
+    static_cast<void>(resources.edge(context.variant->resources.localLights));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightingUniforms));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightTileHeaders));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightTileIndices));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightListCounters));
+    const DebugLabelScope label{*this, context.frame->commandBuffer, desc.name,
+                                desc.debugColor};
+    recordLightAssignment(context.frame->commandBuffer,
+                          context.lightTileColumns, context.lightTileRows);
+    if (frameOwner_.timestampsEnabled) {
+        const std::uint32_t queryBase =
+            static_cast<std::uint32_t>(frameOwner_.currentFrame) *
+            kTimestampQueriesPerFrame;
+        vkCmdWriteTimestamp2(
+            context.frame->commandBuffer,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            frameOwner_.timestampQueryPool,
+            queryBase + kTimestampLightAssignmentEnd);
+        if (!indirectSceneDrawsEnabled_) {
+            vkCmdWriteTimestamp2(
+                context.frame->commandBuffer,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                frameOwner_.timestampQueryPool,
+                queryBase + kTimestampCullEnd);
+        }
+    }
+}
+void VulkanRenderer::Impl::recordShadowGraphPass(
+    const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+    const FrameGraph::PassResources& resources) {
+    const FrameGraph::Edge& atlasEdge =
+        resources.edge(context.variant->resources.shadowAtlas);
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightingUniforms));
+    if (indirectSceneDrawsEnabled_) {
+        static_cast<void>(
+            resources.edge(context.variant->resources.sceneInstances));
+        static_cast<void>(
+            resources.edge(context.variant->resources.shadowInstances));
+        static_cast<void>(
+            resources.edge(context.variant->resources.shadowCommands));
+    }
+    const DebugLabelScope label{*this, context.frame->commandBuffer, desc.name,
+                                desc.debugColor};
+    VkRenderingAttachmentInfo attachment{
+        VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    attachment.imageView = resourceOwner_.shadowAtlas.view;
+    attachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    attachment.loadOp =
+        atlasEdge.load == FrameGraphAttachmentLoad::Clear
+            ? VK_ATTACHMENT_LOAD_OP_CLEAR
+            : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.storeOp =
+        vulkanAttachmentStoreOp(atlasEdge.access, atlasEdge.store);
+    attachment.clearValue.depthStencil = {0.0F, 0U};
+    VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    rendering.renderArea.extent = {kShadowAtlasExtent, kShadowAtlasExtent};
+    rendering.layerCount = 1U;
+    rendering.pDepthAttachment = &attachment;
+    vkCmdBeginRendering(context.frame->commandBuffer, &rendering);
+    vkCmdBindPipeline(context.frame->commandBuffer,
+                      VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipelineOwner_.shadow);
+    const std::array<VkDescriptorSet, 2> descriptorSets{
+        resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame],
+        resourceOwner_.lightingDescriptorSets[frameOwner_.currentFrame]};
+    vkCmdBindDescriptorSets(
+        context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelineOwner_.shadowLayout, 0U,
+        static_cast<std::uint32_t>(descriptorSets.size()),
+        descriptorSets.data(), 0U, nullptr);
+    const VkDeviceSize vertexOffset = 0U;
+    vkCmdBindVertexBuffers(context.frame->commandBuffer, 0U, 1U,
+                           &resourceOwner_.sceneVertexBuffer.buffer,
+                           &vertexOffset);
+    vkCmdBindIndexBuffer(context.frame->commandBuffer,
+                         resourceOwner_.sceneIndexBuffer.buffer, 0U,
+                         VK_INDEX_TYPE_UINT32);
+    constexpr std::uint32_t atlasColumns =
+        kShadowAtlasExtent / kShadowAtlasSlotExtent;
+    for (std::uint32_t viewIndex = 0U;
+         viewIndex < context.frame->shadowViewCount; ++viewIndex) {
+        const std::uint32_t tileX = viewIndex % atlasColumns;
+        const std::uint32_t tileY = viewIndex / atlasColumns;
+        constexpr std::uint32_t guardPixels = 2U;
+        constexpr std::uint32_t innerExtent =
+            kShadowAtlasSlotExtent - guardPixels * 2U;
+        const std::uint32_t originX =
+            tileX * kShadowAtlasSlotExtent + guardPixels;
+        const std::uint32_t originY =
+            tileY * kShadowAtlasSlotExtent + guardPixels;
+        const VkViewport viewport{
+            static_cast<float>(originX), static_cast<float>(originY),
+            static_cast<float>(innerExtent), static_cast<float>(innerExtent),
+            0.0F, 1.0F};
+        const VkRect2D scissor{
+            {static_cast<std::int32_t>(originX),
+             static_cast<std::int32_t>(originY)},
+            {innerExtent, innerExtent}};
+        vkCmdSetViewport(context.frame->commandBuffer, 0U, 1U, &viewport);
+        vkCmdSetScissor(context.frame->commandBuffer, 0U, 1U, &scissor);
+        const ShadowPushConstants push{viewIndex};
+        vkCmdPushConstants(
+            context.frame->commandBuffer, pipelineOwner_.shadowLayout,
+            VK_SHADER_STAGE_VERTEX_BIT, 0U, sizeof(push), &push);
+        if (context.frame->shadowCommandCount > 0U) {
+            vkCmdDrawIndexedIndirect(
+                context.frame->commandBuffer,
+                context.frame->shadowIndirectCommands.buffer, 0U,
+                context.frame->shadowCommandCount,
+                sizeof(VkDrawIndexedIndirectCommand));
+        }
+    }
+    vkCmdEndRendering(context.frame->commandBuffer);
+    const VkViewport fullViewport{
+        0.0F, 0.0F,
+        static_cast<float>(swapchainOwner_.extent.width),
+        static_cast<float>(swapchainOwner_.extent.height),
+        0.0F, 1.0F};
+    const VkRect2D fullScissor{{0, 0}, swapchainOwner_.extent};
+    vkCmdSetViewport(context.frame->commandBuffer, 0U, 1U,
+                     &fullViewport);
+    vkCmdSetScissor(context.frame->commandBuffer, 0U, 1U,
+                    &fullScissor);
+    if (frameOwner_.timestampsEnabled) {
+        vkCmdWriteTimestamp2(
+            context.frame->commandBuffer,
+            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            frameOwner_.timestampQueryPool,
+            static_cast<std::uint32_t>(frameOwner_.currentFrame) *
+                    kTimestampQueriesPerFrame +
+                kTimestampShadowEnd);
+    }
+}
+
+
 void VulkanRenderer::Impl::recordDepthGraphPass(const FrameGraphRecordContext& context,
                                                 const FrameGraph::PassDesc& desc,
                                                 const FrameGraph::PassResources& resources) {
@@ -794,6 +987,13 @@ void VulkanRenderer::Impl::recordHdrGraphPass(const FrameGraphRecordContext& con
                              static_cast<std::uint32_t>(frameOwner_.currentFrame) * kTimestampQueriesPerFrame +
                                  kTimestampDepthEnd);
     }
+    static_cast<void>(resources.edge(context.variant->resources.localLights));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightingUniforms));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightTileHeaders));
+    static_cast<void>(
+        resources.edge(context.variant->resources.lightTileIndices));
     const FrameGraph::Edge& colorEdge = resources.edge(context.variant->resources.hdr);
     const FrameGraph::Edge& depthEdge = resources.edge(context.variant->resources.depth);
     const DebugLabelScope label{*this, context.frame->commandBuffer, desc.name, desc.debugColor};
@@ -963,7 +1163,8 @@ void VulkanRenderer::Impl::recordTonemapGraphPass(const FrameGraphRecordContext&
     vkCmdBindDescriptorSets(context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineOwner_.tonemapLayout, 0, 1, &resourceOwner_.tonemapDescriptorSet, 0, nullptr);
     const TonemapPushConstants pushConstants{
-        config_.exposure, isSrgbSwapchainFormat(swapchainOwner_.format) ? 0U : 1U};
+        context.frame->exposureScale,
+        isSrgbSwapchainFormat(swapchainOwner_.format) ? 0U : 1U};
     vkCmdPushConstants(context.frame->commandBuffer, pipelineOwner_.tonemapLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pushConstants), &pushConstants);
     vkCmdDraw(context.frame->commandBuffer, 3, 1, 0, 0);
@@ -1027,7 +1228,12 @@ bool VulkanRenderer::Impl::executeGraphPass(void* rawContext, const FrameGraph::
     auto& context = *static_cast<FrameGraphRecordContext*>(rawContext);
     try {
         const FrameGraphPasses& passes = context.variant->passes;
-        if (pass.index == passes.gpuCull.index) {
+        if (pass.index == passes.lightAssignment.index) {
+            context.renderer->recordLightAssignmentGraphPass(
+                context, desc, resources);
+        } else if (pass.index == passes.shadows.index) {
+            context.renderer->recordShadowGraphPass(context, desc, resources);
+        } else if (pass.index == passes.gpuCull.index) {
             context.renderer->recordCullGraphPass(context, desc, resources);
         } else if (pass.index == passes.depthPrepass.index) {
             context.renderer->recordDepthGraphPass(context, desc, resources);

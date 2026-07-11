@@ -31,6 +31,7 @@ struct EngineConfig {
     float exposure = 1.0f;
     bool shaderHotReload = false;
     bool indirectSceneDraws = true;
+    bool shadows = true;
     bool gpuVisibilityValidation = false;
     bool depthPyramidOcclusion = true;
     bool gpuClusterCommands = false;

@@ -255,6 +255,8 @@ void VulkanRenderer::Impl::pickPhysicalDevice() {
     deviceOwner_.info.discreteGpu = deviceOwner_.physicalDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
     deviceOwner_.info.dynamicRendering = features13.dynamicRendering == VK_TRUE;
     deviceOwner_.info.synchronization2 = features13.synchronization2 == VK_TRUE;
+    deviceOwner_.info.shaderDemoteToHelperInvocation =
+        features13.shaderDemoteToHelperInvocation == VK_TRUE;
     deviceOwner_.info.descriptorIndexing = features12.descriptorIndexing == VK_TRUE;
     deviceOwner_.info.bindlessSampledImagesSupported = supportsBindlessSampledImages(features12);
     deviceOwner_.info.samplerFilterMinmax =
@@ -334,6 +336,11 @@ VulkanRenderer::Impl::DeviceSuitability VulkanRenderer::Impl::evaluateDeviceSuit
     vkGetPhysicalDeviceFeatures2(device, &features2);
     if (features13.dynamicRendering != VK_TRUE) { reject("missing Vulkan 1.3 dynamicRendering feature"); }
     if (features13.synchronization2 != VK_TRUE) { reject("missing Vulkan 1.3 synchronization2 feature"); }
+    if (features13.shaderDemoteToHelperInvocation != VK_TRUE) {
+        reject(
+            "missing Vulkan 1.3 shaderDemoteToHelperInvocation feature "
+            "required by masked materials");
+    }
 
     return result;
 }
@@ -406,14 +413,22 @@ void VulkanRenderer::Impl::createLogicalDevice() {
     VkPhysicalDeviceVulkan13Features features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
+    features13.shaderDemoteToHelperInvocation = VK_TRUE;
     VkPhysicalDeviceVulkan12Features features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     features12.pNext = &features13;
 
 
+    VkPhysicalDeviceVulkan13Features supportedFeatures13{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceVulkan12Features supportedFeatures12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    supportedFeatures12.pNext = &supportedFeatures13;
     VkPhysicalDeviceFeatures2 supportedFeatures2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     supportedFeatures2.pNext = &supportedFeatures12;
     vkGetPhysicalDeviceFeatures2(deviceOwner_.physicalDevice, &supportedFeatures2);
+    if (supportedFeatures13.shaderDemoteToHelperInvocation != VK_TRUE) {
+        throw std::runtime_error(
+            "Selected Vulkan device cannot execute masked material shaders");
+    }
     const bool descriptorIndexingEnabled = supportedFeatures12.descriptorIndexing == VK_TRUE;
     const bool bindlessSampledImagesEnabled = supportsBindlessSampledImages(supportedFeatures12);
     if (descriptorIndexingEnabled) {

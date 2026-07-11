@@ -15,6 +15,7 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `exposure` | `1.0f` | Positive finite tonemap exposure; `VulkanRenderer` rejects invalid programmatic configs before backend startup. |
 | `shaderHotReload` | `false` | Poll copied SPIR-V files and atomically swap rebuilt pipelines on success. |
 | `indirectSceneDraws` | `true` | Request multi-draw indirect; backend falls back when features are missing. |
+| `shadows` | `true` | Enables directional cascades and eligible local spot-shadow views. Disabling it preserves Forward+ direct/environment lighting while reporting shadow timing as unavailable. |
 | `debugOverlay` | `true` | Enables Dear ImGui backend and overlay when compiled in. |
 | `gpuTimestamps` | `true` | Requests timestamp queries; unsupported/disabled results keep `gpuTimestampsValid = false`. |
 | `fixedSimulationStepSeconds` | `1 / 60` | Finite positive gameplay/world update interval. |

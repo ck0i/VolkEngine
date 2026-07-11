@@ -30,8 +30,10 @@ VulkanRenderer::Impl::Impl(Window& window, EngineConfig config,
     createImageViews();
     createFrameGraph(false);
     realizeFrameGraphResources();
+    createShadowResources();
     createTextureResources();
     createSampler();
+    createEnvironmentResources();
     createDescriptorLayouts();
     createPipelineCache();
     createPipelines();
@@ -93,6 +95,8 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     destroyBuffer(resourceOwner_.clusterHierarchy);
     destroyBuffer(resourceOwner_.meshClusterRanges);
     destroyBuffer(resourceOwner_.clusterData);
+    destroyImage(resourceOwner_.shadowAtlas);
+    destroyImage(resourceOwner_.environmentMap);
     for (ImageResource& texture : resourceOwner_.materialTextures) {
         destroyImage(texture);
     }
@@ -106,6 +110,13 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
         destroyBuffer(frame.cullUniforms);
         destroyBuffer(frame.visibleInstanceIndices);
         destroyBuffer(frame.cullCounters);
+        destroyBuffer(frame.localLights);
+        destroyBuffer(frame.lightingUniforms);
+        destroyBuffer(frame.lightTileHeaders);
+        destroyBuffer(frame.lightTileIndices);
+        destroyBuffer(frame.lightListCounters);
+        destroyBuffer(frame.shadowInstanceIndices);
+        destroyBuffer(frame.shadowIndirectCommands);
         if (frame.imageAvailable != VK_NULL_HANDLE) {
             vkDestroySemaphore(deviceOwner_.device, frame.imageAvailable, nullptr);
             frame.imageAvailable = VK_NULL_HANDLE;
@@ -152,6 +163,12 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
         vkDestroyDescriptorPool(deviceOwner_.device, resourceOwner_.descriptorPool, nullptr);
         resourceOwner_.descriptorPool = VK_NULL_HANDLE;
     }
+    if (resourceOwner_.lightingSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(deviceOwner_.device,
+                                     resourceOwner_.lightingSetLayout,
+                                     nullptr);
+        resourceOwner_.lightingSetLayout = VK_NULL_HANDLE;
+    }
     if (resourceOwner_.cullSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(deviceOwner_.device,
                                      resourceOwner_.cullSetLayout, nullptr);
@@ -170,6 +187,16 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     if (resourceOwner_.sceneSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(deviceOwner_.device, resourceOwner_.sceneSetLayout, nullptr);
         resourceOwner_.sceneSetLayout = VK_NULL_HANDLE;
+    }
+    if (resourceOwner_.environmentSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device,
+                         resourceOwner_.environmentSampler, nullptr);
+        resourceOwner_.environmentSampler = VK_NULL_HANDLE;
+    }
+    if (resourceOwner_.shadowSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(deviceOwner_.device, resourceOwner_.shadowSampler,
+                         nullptr);
+        resourceOwner_.shadowSampler = VK_NULL_HANDLE;
     }
     if (resourceOwner_.depthReductionSampler != VK_NULL_HANDLE) {
         vkDestroySampler(deviceOwner_.device,

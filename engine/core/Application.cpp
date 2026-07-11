@@ -35,16 +35,24 @@ RenderMaterial renderMaterial(const ImportedMaterial& material,
          material.emissiveFactor.z, material.metallicFactor},
         {}};
     result.textures = renderer.materialTextureHandles(material.id);
+    result.flags.y = static_cast<float>(
+        material.alphaMode == MaterialAlphaMode::Mask
+            ? RenderMaterialClass::Masked
+            : RenderMaterialClass::Standard);
+    if (material.alphaMode == MaterialAlphaMode::Mask) {
+        result.flags.z = material.baseColorFactor.w > 0.0F
+            ? material.alphaCutoff / material.baseColorFactor.w
+            : 2.0F;
+    }
     float normalScale = 1.0f;
     for (const ImportedTextureReference& texture : material.textures) {
         switch (texture.role) {
         case TextureRole::BaseColor:
         case TextureRole::MetallicRoughness:
-            result.flags.y = 1.0f;
-            break;
         case TextureRole::Normal:
-            result.flags.z = 1.0f;
-            normalScale = texture.scale;
+            if (texture.role == TextureRole::Normal) {
+                normalScale = texture.scale;
+            }
             break;
         case TextureRole::Occlusion:
         case TextureRole::Emissive: break;
@@ -280,18 +288,19 @@ int Application::runInternal(World* world,
                    simulationClock_.retainedSeconds() * 1000.0);
     const RenderStats finalStats = renderer_.stats();
     const RenderDeviceInfo& finalDevice = renderer_.deviceInfo();
-    std::array<char, 128> finalGpu{};
+    std::array<char, 192> finalGpu{};
     if (finalStats.gpuTimestampsValid) {
         std::snprintf(
             finalGpu.data(), finalGpu.size(),
-            "%.3f ms (cull %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
-            finalStats.gpuFrameMs, finalStats.gpuCullMs,
+            "%.3f ms (lights %.3f / cull %.3f / shadows %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
+            finalStats.gpuFrameMs, finalStats.gpuLightAssignmentMs,
+            finalStats.gpuCullMs, finalStats.gpuShadowMs,
             finalStats.gpuDepthPrepassMs, finalStats.gpuHdrSceneMs,
             finalStats.gpuDepthPyramidMs, finalStats.gpuFinalPassMs);
     } else {
         std::snprintf(finalGpu.data(), finalGpu.size(), "pending/unavailable");
     }
-    logger()->info("Exited cleanly. Last frame: frame {:.3f} ms, CPU {:.3f} ms (scene {:.3f} / prepare {:.3f} / record {:.3f} / submit {:.3f}), GPU {}, prepass {}, scene passes {}, batches {}, submission {}, upload sync {}, visible {}/{}, draws {}, culled items {}, triangles scene/submitted {}/{}, grid tiles {} (accepted {}, culled {}, intersected {}), grid cache {} (work {}), instance cap {} ({:.2f} MiB), sphere LOD instances {}/{}/{}",
+    logger()->info("Exited cleanly. Last frame: frame {:.3f} ms, CPU {:.3f} ms (scene {:.3f} / prepare {:.3f} / record {:.3f} / submit {:.3f}), GPU {}, prepass {}, scene passes {}, batches {}, submission {}, upload sync {}, visible {}/{}, draws {}, culled items {}, triangles scene/submitted {}/{}, grid tiles {} (accepted {}, culled {}, intersected {}), grid cache {} (work {}), instance cap {} ({:.2f} MiB), sphere LOD instances {}/{}/{}, lights {} (overflow {}), shadows {}/{} (overflow {}), probes {}, exposure {:.2f}",
                    finalStats.frameDeltaMs, finalStats.cpuFrameMs,
                    finalStats.cpuSceneBuildMs, finalStats.cpuPrepareMs, finalStats.cpuCommandRecordMs, finalStats.cpuQueueSubmitMs,
                    finalGpu.data(),
@@ -302,7 +311,14 @@ int Application::runInternal(World* world,
                    finalStats.gridTileCount, finalStats.gridTilesAccepted, finalStats.gridTilesCulled, finalStats.gridTilesIntersected,
                    finalStats.gridVisibilityCacheHit ? "hit" : "miss", finalStats.gridVisibilityWorkItems,
                    finalStats.sceneInstanceCapacity, finalStats.sceneInstanceBufferMiB,
-                   finalStats.sphereLodHighCount, finalStats.sphereLodMediumCount, finalStats.sphereLodLowCount);
+                   finalStats.sphereLodHighCount, finalStats.sphereLodMediumCount, finalStats.sphereLodLowCount,
+                   finalStats.localLightCount,
+                   finalStats.lightListOverflowCount,
+                   finalStats.shadowViewCount,
+                   finalStats.shadowAtlasCapacity,
+                   finalStats.shadowAtlasOverflowCount,
+                   finalStats.reflectionProbeCount,
+                   finalStats.effectiveExposure);
     const RunMetricDistributions distributions{
         cpuFrameSamples.distribution(),
         cpuSceneBuildSamples.distribution(),

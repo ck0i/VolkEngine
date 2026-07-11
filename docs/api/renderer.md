@@ -60,6 +60,7 @@ Returns immutable backend/device metadata selected during initialization.
 | `descriptorIndexing`, `bindlessSampledImagesSupported` | Descriptor-indexing features and the capability-gated runtime sampled-image table. Unsupported devices retain the fixed material-set fallback. |
 | `multiDrawIndirect`, `drawIndirectFirstInstance` | Feature bits required for the indirect scene path. |
 | `samplerAnisotropy`, `maxSamplerAnisotropy` | Texture sampler capability actually enabled/selected. |
+| `shaderDemoteToHelperInvocation` | Vulkan 1.3 masked-material capability selected and enabled; adapters lacking it are rejected rather than compiling an invalid alpha-tested shader path. |
 | `transferUploadSync` | `SameQueueBarrier` or `QueueSemaphore` upload first-use path. |
 | `indirectSceneDraws` | Whether indirect scene submission is active, not just requested. |
 
@@ -70,7 +71,7 @@ Timing fields:
 - `cpuFrameMs`: render-submit CPU window.
 - `cpuSceneBuildMs`, `cpuPrepareMs`, `cpuCommandRecordMs`, `cpuQueueSubmitMs`: exclusive CPU buckets inside `cpuFrameMs`.
 - `frameDeltaMs`: wall-clock frame delta supplied by the app loop.
-- `gpuFrameMs`, `gpuCullMs`, `gpuDepthPrepassMs`, `gpuHdrSceneMs`, `gpuDepthPyramidMs`, `gpuFinalPassMs`: timestamp-derived GPU intervals when valid.
+- `gpuFrameMs`, `gpuLightAssignmentMs`, `gpuCullMs`, `gpuShadowMs`, `gpuDepthPrepassMs`, `gpuHdrSceneMs`, `gpuDepthPyramidMs`, `gpuFinalPassMs`: timestamp-derived GPU intervals when valid. Disabled shadow work remains unavailable in schema telemetry rather than presenting a measured pass.
 - `gpuTimestampsValid`: true only after completed query data was read.
 - `depthPyramidBuildEnabled`, `depthPyramidOcclusion`: distinguish an executing pyramid build from active use by culling; CPU-reference validation builds the pyramid while intentionally disabling occlusion.
 - `elapsedSeconds`: frame time source used for animation.
@@ -102,6 +103,14 @@ Submission/scene fields:
 - `visibleCullingUnitCount`, `testedCullingUnitCount`, `occludedCullingUnitCount`: completed GPU visibility workload/rejection counters.
 - `cullingUnitsAreClusters`: counter granularity; `false` means scene instances in mesh-command mode, while `true` means cluster instances in cluster-command mode.
 - `materialDescriptorCount`, `materialDescriptorCapacity`: live bindless sampled-image pressure, or fixed-fallback occupancy/capacity.
+
+Lighting/material fields:
+
+- `localLightCount`, `lightListOverflowCount`: submitted bounded light count and completed Forward+ tile-index overflow.
+- `shadowViewCount`, `shadowAtlasCapacity`, `shadowAtlasOverflowCount`: active directional/local atlas views, fixed slot capacity, and deterministic slot pressure.
+- `reflectionProbeCount`: active bounded spherical probes.
+- `materialClassCounts[8]`: visible submitted instance counts indexed by the canonical `RenderMaterialClass` ABI.
+- `shadowsEnabled`, `environmentMapEnabled`, `effectiveExposure`: actual renderer path and frame exposure after scene compensation.
 
 Grid/LOD fields:
 

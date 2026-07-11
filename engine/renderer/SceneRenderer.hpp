@@ -4,6 +4,7 @@
 #include "core/Math.hpp"
 #include "core/World.hpp"
 #include "renderer/Geometry.hpp"
+#include "renderer/Lighting.hpp"
 
 #include <array>
 #include <compare>
@@ -11,10 +12,12 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <span>
 #include <string_view>
 #include <vector>
 
 namespace ve {
+
 
 
 struct alignas(16) RenderMaterial {
@@ -101,6 +104,24 @@ public:
         return materialGridTileRevision_;
     }
 
+    void setLocalLights(std::vector<RenderLocalLight> lights);
+    [[nodiscard]] std::span<const RenderLocalLight> localLights() const noexcept {
+        return localLights_;
+    }
+    void setDirectionalLight(const RenderDirectionalLight& light);
+    [[nodiscard]] const RenderDirectionalLight& directionalLight() const noexcept {
+        return directionalLight_;
+    }
+    void setEnvironment(const RenderEnvironment& environment);
+    [[nodiscard]] const RenderEnvironment& environment() const noexcept {
+        return environment_;
+    }
+    void setReflectionProbes(std::vector<RenderReflectionProbe> probes);
+    [[nodiscard]] std::span<const RenderReflectionProbe>
+    reflectionProbes() const noexcept {
+        return reflectionProbes_;
+    }
+
 private:
     void invalidateMaterialGridTiles() noexcept;
     [[nodiscard]] bool indexInMaterialGridRange(std::size_t index) const noexcept;
@@ -110,6 +131,10 @@ private:
     bool materialGridTilesCoverRange_ = false;
     std::uint64_t materialGridTileRevision_ = 0;
     std::vector<SceneGridTile> materialGridTiles_{};
+    std::vector<RenderLocalLight> localLights_;
+    RenderDirectionalLight directionalLight_{};
+    std::vector<RenderReflectionProbe> reflectionProbes_;
+    RenderEnvironment environment_{};
 };
 
 struct SceneEntityId {

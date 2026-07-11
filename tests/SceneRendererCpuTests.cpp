@@ -237,6 +237,48 @@ int main() {
     expectEqual("build(4, 5) imported model appended", first[firstImportedItemIndex].mesh, ve::builtin_assets::kReferenceMesh);
     expectVec3Nearly("build(4, 5) imported model transformed center", first[firstImportedItemIndex].boundsCenter, importedModelCenter);
     expectNearly("build(4, 5) imported model transformed radius", first[firstImportedItemIndex].boundsRadius, importedModelRadius);
+    expectEqual("benchmark creates bounded local lights",
+                first.localLights().size(), static_cast<std::size_t>(16U));
+    expectEqual("benchmark creates reflection probes",
+                first.reflectionProbes().size(),
+                static_cast<std::size_t>(2U));
+    expectEqual("benchmark directional light casts shadows",
+                first.directionalLight().parameters[0], 1U);
+    std::array<bool, 8> materialClasses{};
+    const ve::SceneGridRange generatedGrid = first.materialGridRange();
+    const std::size_t generatedCount =
+        static_cast<std::size_t>(generatedGrid.rows) *
+        generatedGrid.columns;
+    for (std::size_t index = 0U; index < generatedCount; ++index) {
+        const float encoded =
+            first[generatedGrid.firstItem + index].material.flags.y;
+        const auto materialClass =
+            static_cast<std::size_t>(std::lround(encoded));
+        if (materialClass < materialClasses.size()) {
+            materialClasses[materialClass] = true;
+        }
+    }
+    expectEqual("benchmark covers standard material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::Standard)], true);
+    expectEqual("benchmark covers clear-coat material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::ClearCoat)], true);
+    expectEqual("benchmark covers foliage material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::Foliage)], true);
+    expectEqual("benchmark covers skin material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::Skin)], true);
+    expectEqual("benchmark covers hair material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::Hair)], true);
+    expectEqual("benchmark covers cloth material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::Cloth)], true);
+    expectEqual("benchmark covers emissive material",
+                materialClasses[static_cast<std::size_t>(
+                    ve::RenderMaterialClass::Emissive)], true);
 
     ve::SceneRenderItem invalidAuthoredItem = authoredItem;
     invalidAuthoredItem.material.flags.x = std::numeric_limits<float>::quiet_NaN();

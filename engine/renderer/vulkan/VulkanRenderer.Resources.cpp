@@ -2,6 +2,9 @@
 #include "assets/DerivedDataCache.hpp"
 #include "assets/TextureArtifact.hpp"
 
+#include <algorithm>
+#include <bit>
+#include <cmath>
 #include <cstring>
 
 namespace ve {
@@ -14,6 +17,134 @@ bool hasNonOpaqueAlpha(const LoadedImageRgba8& image) noexcept {
         }
     }
     return false;
+}
+
+std::uint16_t floatToHalf(const float value) noexcept {
+    const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
+    const std::uint32_t sign = (bits >> 16U) & 0x8000U;
+    const std::uint32_t exponent = (bits >> 23U) & 0xFFU;
+    std::uint32_t mantissa = bits & 0x7FFFFFU;
+    if (exponent == 0xFFU) {
+        return static_cast<std::uint16_t>(
+            sign | 0x7C00U | (mantissa != 0U ? 0x0200U : 0U));
+    }
+    const int halfExponent = static_cast<int>(exponent) - 127 + 15;
+    if (halfExponent >= 31) {
+        return static_cast<std::uint16_t>(sign | 0x7C00U);
+    }
+    if (halfExponent <= 0) {
+        if (halfExponent < -10) {
+            return static_cast<std::uint16_t>(sign);
+        }
+        mantissa |= 0x800000U;
+        const std::uint32_t shift =
+            static_cast<std::uint32_t>(14 - halfExponent);
+        const std::uint32_t rounded =
+            (mantissa + (1U << (shift - 1U))) >> shift;
+        return static_cast<std::uint16_t>(sign | rounded);
+    }
+    mantissa += 0x1000U;
+    if ((mantissa & 0x800000U) != 0U) {
+        mantissa = 0U;
+        if (halfExponent + 1 >= 31) {
+            return static_cast<std::uint16_t>(sign | 0x7C00U);
+        }
+        return static_cast<std::uint16_t>(
+            sign | (static_cast<std::uint32_t>(halfExponent + 1) << 10U));
+    }
+    return static_cast<std::uint16_t>(
+        sign | (static_cast<std::uint32_t>(halfExponent) << 10U) |
+        (mantissa >> 13U));
+}
+
+struct EnvironmentMip {
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    std::vector<float> pixels;
+};
+
+std::vector<EnvironmentMip> buildProceduralEnvironmentMap() {
+    constexpr std::uint32_t width = 256U;
+    constexpr std::uint32_t height = 128U;
+    std::vector<EnvironmentMip> mips;
+    mips.push_back({width, height,
+                    std::vector<float>(
+                        static_cast<std::size_t>(width) * height * 4U)});
+    EnvironmentMip& base = mips.front();
+    const Vec3 sunDirection =
+        normalize(Vec3{0.32F, 0.88F, 0.34F});
+    for (std::uint32_t y = 0U; y < height; ++y) {
+        const float v = (static_cast<float>(y) + 0.5F) /
+                        static_cast<float>(height);
+        const float latitude = (0.5F - v) * 3.14159265359F;
+        const float cosLatitude = std::cos(latitude);
+        for (std::uint32_t x = 0U; x < width; ++x) {
+            const float u = (static_cast<float>(x) + 0.5F) /
+                            static_cast<float>(width);
+            const float longitude =
+                (u * 2.0F - 1.0F) * 3.14159265359F;
+            const Vec3 direction{
+                cosLatitude * std::cos(longitude),
+                std::sin(latitude),
+                cosLatitude * std::sin(longitude)};
+            const float skyWeight =
+                std::clamp(direction.y * 0.5F + 0.5F, 0.0F, 1.0F);
+            Vec3 color =
+                Vec3{0.055F, 0.045F, 0.035F} * (1.0F - skyWeight) +
+                Vec3{0.12F, 0.32F, 0.72F} * skyWeight;
+            const float horizon =
+                std::exp(-std::abs(direction.y) * 14.0F);
+            color = color + Vec3{0.42F, 0.23F, 0.10F} * horizon;
+            const float sun =
+                std::pow(std::max(dot(direction, sunDirection), 0.0F),
+                         720.0F);
+            color = color + Vec3{20.0F, 15.5F, 9.0F} * sun;
+            const std::size_t offset =
+                (static_cast<std::size_t>(y) * width + x) * 4U;
+            base.pixels[offset] = color.x;
+            base.pixels[offset + 1U] = color.y;
+            base.pixels[offset + 2U] = color.z;
+            base.pixels[offset + 3U] = 1.0F;
+        }
+    }
+    while (mips.back().width > 1U || mips.back().height > 1U) {
+        const EnvironmentMip& source = mips.back();
+        EnvironmentMip destination;
+        destination.width = std::max(source.width / 2U, 1U);
+        destination.height = std::max(source.height / 2U, 1U);
+        destination.pixels.resize(
+            static_cast<std::size_t>(destination.width) *
+            destination.height * 4U);
+        for (std::uint32_t y = 0U; y < destination.height; ++y) {
+            for (std::uint32_t x = 0U; x < destination.width; ++x) {
+                for (std::uint32_t channel = 0U; channel < 4U; ++channel) {
+                    float sum = 0.0F;
+                    for (std::uint32_t dy = 0U; dy < 2U; ++dy) {
+                        for (std::uint32_t dx = 0U; dx < 2U; ++dx) {
+                            const std::uint32_t sx =
+                                std::min(x * 2U + dx, source.width - 1U);
+                            const std::uint32_t sy =
+                                std::min(y * 2U + dy, source.height - 1U);
+                            sum += source.pixels[
+                                (static_cast<std::size_t>(sy) *
+                                     source.width +
+                                 sx) *
+                                    4U +
+                                channel];
+                        }
+                    }
+                    destination.pixels[
+                        (static_cast<std::size_t>(y) *
+                             destination.width +
+                         x) *
+                            4U +
+                        channel] = sum * 0.25F;
+                }
+            }
+        }
+        mips.push_back(std::move(destination));
+    }
+    return mips;
 }
 
 } // namespace
@@ -331,6 +462,112 @@ void VulkanRenderer::Impl::createTextureResources() {
     }
 }
 
+void VulkanRenderer::Impl::createEnvironmentResources() {
+    std::vector<EnvironmentMip> mips = buildProceduralEnvironmentMap();
+    const VkExtent2D extent{mips.front().width, mips.front().height};
+    constexpr VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(
+        deviceOwner_.physicalDevice, format, &properties);
+    if ((properties.optimalTilingFeatures &
+         VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0U) {
+        throw std::runtime_error(
+            "HDR environment format lacks linear filtering support");
+    }
+    ImageResource environment = createImage(
+        extent, format,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        static_cast<std::uint32_t>(mips.size()));
+    Buffer staging;
+    VkCommandBuffer commands = VK_NULL_HANDLE;
+    try {
+        setObjectName(VK_OBJECT_TYPE_IMAGE,
+                      handleToUint64(environment.image),
+                      "Procedural HDR Environment Image");
+        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW,
+                      handleToUint64(environment.view),
+                      "Procedural HDR Environment View");
+        vmaSetAllocationName(deviceOwner_.allocator, environment.allocation,
+                             "Procedural HDR Environment Allocation");
+        environment.resourceId =
+            resourceOwner_.registry.registerResource(
+                GpuResourceKind::Image, "Procedural HDR Environment",
+                environment.allocationBytes);
+
+        std::vector<VkBufferImageCopy> regions;
+        regions.reserve(mips.size());
+        VkDeviceSize totalBytes = 0U;
+        for (std::uint32_t level = 0U;
+             level < static_cast<std::uint32_t>(mips.size()); ++level) {
+            const EnvironmentMip& mip = mips[level];
+            VkBufferImageCopy region{};
+            region.bufferOffset = totalBytes;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = level;
+            region.imageSubresource.layerCount = 1U;
+            region.imageExtent = {mip.width, mip.height, 1U};
+            regions.push_back(region);
+            const VkDeviceSize bytes =
+                static_cast<VkDeviceSize>(mip.pixels.size()) *
+                sizeof(std::uint16_t);
+            if (bytes >
+                std::numeric_limits<VkDeviceSize>::max() - totalBytes) {
+                throw std::runtime_error(
+                    "HDR environment staging size overflows");
+            }
+            totalBytes += bytes;
+        }
+        staging = createBuffer(
+            totalBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        {
+            ScopedVmaMap map{deviceOwner_.allocator, staging.allocation,
+                             "vmaMapMemory HDR environment staging"};
+            auto* destination = static_cast<std::uint16_t*>(map.get());
+            for (const EnvironmentMip& mip : mips) {
+                for (const float value : mip.pixels) {
+                    *destination++ = floatToHalf(value);
+                }
+            }
+        }
+        commands = beginGraphicsUploadCommands();
+        transitionImageTracked(
+            commands, environment.image, environment.syncState,
+            ImageSyncState{VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT},
+            VK_IMAGE_ASPECT_COLOR_BIT, 0U, environment.mipLevels);
+        vkCmdCopyBufferToImage(
+            commands, staging.buffer, environment.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            static_cast<std::uint32_t>(regions.size()), regions.data());
+        transitionImageTracked(
+            commands, environment.image, environment.syncState,
+            imageSyncStateFor(FrameGraphAccess::Read,
+                              FrameGraphUsage::SampledImage),
+            VK_IMAGE_ASPECT_COLOR_BIT, 0U, environment.mipLevels);
+        const VkCommandBuffer submitted = commands;
+        commands = VK_NULL_HANDLE;
+        submitGraphicsUpload(submitted, takeBuffer(staging));
+        resourceOwner_.environmentMap = takeImage(environment);
+        logger()->info(
+            "Created procedural HDR environment {}x{} with {} mips",
+            extent.width, extent.height,
+            resourceOwner_.environmentMap.mipLevels);
+    } catch (...) {
+        if (commands != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(deviceOwner_.device,
+                                 frameOwner_.graphicsCommandPool, 1U,
+                                 &commands);
+        }
+        destroyBuffer(staging);
+        destroyImage(environment);
+        throw;
+    }
+}
+
 std::array<TextureAssetHandle, 3> VulkanRenderer::Impl::materialTextureHandles(
     const AssetId material) const {
     const auto found = std::ranges::find(
@@ -359,6 +596,28 @@ void VulkanRenderer::Impl::createSampler() {
     samplerInfo.maxLod = 0.0f;
     checkVk(vkCreateSampler(deviceOwner_.device, &samplerInfo, nullptr, &resourceOwner_.linearSampler), "vkCreateSampler");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(resourceOwner_.linearSampler), "Linear Clamp Sampler");
+    VkSamplerCreateInfo environmentSamplerInfo = samplerInfo;
+    environmentSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    environmentSamplerInfo.maxLod = static_cast<float>(
+        mipLevelCountForExtent({256U, 128U}) - 1U);
+    checkVk(vkCreateSampler(
+                deviceOwner_.device, &environmentSamplerInfo, nullptr,
+                &resourceOwner_.environmentSampler),
+            "vkCreateSampler HDR environment");
+    setObjectName(
+        VK_OBJECT_TYPE_SAMPLER,
+        handleToUint64(resourceOwner_.environmentSampler),
+        "HDR Environment Sampler");
+    VkSamplerCreateInfo shadowSamplerInfo = samplerInfo;
+    shadowSamplerInfo.compareEnable = VK_TRUE;
+    shadowSamplerInfo.compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    shadowSamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    checkVk(vkCreateSampler(deviceOwner_.device, &shadowSamplerInfo, nullptr,
+                            &resourceOwner_.shadowSampler),
+            "vkCreateSampler shadow atlas");
+    setObjectName(VK_OBJECT_TYPE_SAMPLER,
+                  handleToUint64(resourceOwner_.shadowSampler),
+                  "Shadow Atlas Comparison Sampler");
     VkFormatProperties depthProperties{};
     VkFormatProperties pyramidProperties{};
     vkGetPhysicalDeviceFormatProperties(
@@ -428,7 +687,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     if (!resourceOwner_.bindlessMaterialsEnabled &&
         textureCount > vulkan_renderer_detail::kMaterialTextureCount) {
         throw std::runtime_error(
-            "Scene requires bindless sampled images, but the device feature or descriptor limit is unavailable");
+            "Material texture count exceeds fixed descriptor capacity");
     }
     resourceOwner_.materialDescriptorCapacity =
         resourceOwner_.bindlessMaterialsEnabled
@@ -484,6 +743,52 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     }
     checkVk(vkCreateDescriptorSetLayout(deviceOwner_.device, &sceneInfo, nullptr, &resourceOwner_.sceneSetLayout), "vkCreateDescriptorSetLayout scene");
     setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, handleToUint64(resourceOwner_.sceneSetLayout), "Scene Descriptor Set Layout");
+
+    std::array<VkDescriptorSetLayoutBinding, 8> lightingBindings{};
+    for (std::uint32_t binding = 0; binding < 3U; ++binding) {
+        lightingBindings[binding].binding = binding;
+        lightingBindings[binding].descriptorType =
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        lightingBindings[binding].descriptorCount = 1U;
+        lightingBindings[binding].stageFlags =
+            VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    lightingBindings[3].binding = 3U;
+    lightingBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    lightingBindings[3].descriptorCount = 1U;
+    lightingBindings[3].stageFlags =
+        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+        VK_SHADER_STAGE_VERTEX_BIT;
+    lightingBindings[4].binding = 4U;
+    lightingBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    lightingBindings[4].descriptorCount = 1U;
+    lightingBindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    lightingBindings[5].binding = 5U;
+    lightingBindings[5].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    lightingBindings[5].descriptorCount = 1U;
+    lightingBindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    lightingBindings[6].binding = 6U;
+    lightingBindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    lightingBindings[6].descriptorCount = 1U;
+    lightingBindings[6].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    lightingBindings[7].binding = 7U;
+    lightingBindings[7].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    lightingBindings[7].descriptorCount = 1U;
+    lightingBindings[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutCreateInfo lightingInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    lightingInfo.bindingCount =
+        static_cast<std::uint32_t>(lightingBindings.size());
+    lightingInfo.pBindings = lightingBindings.data();
+    checkVk(vkCreateDescriptorSetLayout(
+                deviceOwner_.device, &lightingInfo, nullptr,
+                &resourceOwner_.lightingSetLayout),
+            "vkCreateDescriptorSetLayout lighting");
+    setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+                  handleToUint64(resourceOwner_.lightingSetLayout),
+                  "Lighting Descriptor Set Layout");
 
     VkDescriptorSetLayoutBinding tonemapBinding{};
     tonemapBinding.binding = 0;
@@ -556,12 +861,13 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     constexpr std::uint32_t cullSetCount = kMaxFramesInFlight;
     constexpr std::uint32_t depthPyramidSetCount =
         static_cast<std::uint32_t>(kMaxDepthPyramidMipLevels);
+    constexpr std::uint32_t lightingSetCount = kMaxFramesInFlight;
     constexpr std::uint32_t rendererSetCount =
         sceneSetCount + tonemapSetCount + cullSetCount +
-        depthPyramidSetCount;
+        depthPyramidSetCount + lightingSetCount;
     std::array<VkDescriptorPoolSize, 4> poolSizes{};
     poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    sceneSetCount + cullSetCount};
+                    sceneSetCount + cullSetCount + lightingSetCount};
     const std::uint32_t descriptorsPerSceneSet =
         resourceOwner_.bindlessMaterialsEnabled
             ? textureCount
@@ -569,9 +875,10 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     poolSizes[1] = {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         sceneSetCount * descriptorsPerSceneSet + tonemapSetCount +
-            cullSetCount + depthPyramidSetCount};
+            cullSetCount + depthPyramidSetCount + lightingSetCount * 2U};
     poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    sceneSetCount * 2U + cullSetCount * 6U};
+                    sceneSetCount * 2U + cullSetCount * 6U +
+                        lightingSetCount * 5U};
     poolSizes[3] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                     depthPyramidSetCount};
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};

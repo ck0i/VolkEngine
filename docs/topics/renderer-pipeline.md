@@ -7,6 +7,7 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 
 ## Source-map / ownership (current source split)
 
+- `engine/renderer/Lighting.cpp` — backend-neutral validation, reference Forward+ tile assignment, deterministic shadow-atlas slot allocation, and CPU/GLSL ABI guards.
 - `engine/renderer/vulkan/VulkanRenderer.hpp` — backend-specific public facade exposing `VulkanRenderer(Window&, EngineConfig)`, deleted copy/move, and methods:
   `draw`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`.
 - `engine/renderer/vulkan/VulkanRenderer.cpp` — thin public wrapper that forwards every call to `VulkanRenderer::Impl`.
@@ -15,12 +16,13 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 - `engine/renderer/vulkan/VulkanRenderer.Device.cpp` — Vulkan instance and debug-utils setup, surface creation, physical/logical-device setup, queue-family selection, queue creation, allocator creation, command pool bootstrap, and debug-object-name/debug-label helper functions.
 - `engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp` — swapchain capability queries, format/present-mode/extents choice, swapchain/image-view creation, and swapchain resize/recreate lifecycle for depth/HDR attachments.
 - `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — per-frame resources, fences/semaphores, timestamp queries, and executable frame-graph variant construction/diagnostics.
-- `engine/renderer/vulkan/VulkanRenderer.Resources.cpp` — long-lived GPU buffers/images, texture loading/sampling state, descriptor layouts/pools/sets, tonemap descriptor setup, and resource-registry metadata.
+- `engine/renderer/vulkan/VulkanRenderer.Resources.cpp` — long-lived GPU buffers/images, authored texture loading, generated HDR environment and shadow-atlas images/samplers, descriptor layouts/pools/sets, tonemap descriptor setup, and resource-registry metadata.
 - `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp` — procedural mesh construction, imported OBJ mesh loading, geometry buffer uploads, mesh-batch arrays, and `GpuMesh` offset/count helpers.
 - `engine/renderer/vulkan/VulkanRenderer.Pipelines.cpp` — shader modules, pipeline layouts/pipelines, pipeline cache load/save/validation, and hot-reload path.
 - `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — graph-usage to Vulkan synchronization mapping, tracked transitions, and rollback snapshots.
 - `engine/renderer/vulkan/VulkanRenderer.Uploads.cpp` — staging uploads and transfer-queue versus same-queue synchronization.
 - `engine/renderer/vulkan/VulkanRenderer.Visibility.cpp` — frustum extraction/culling, grid visibility acceleration, LOD bucketing, and draw-work planning.
+- `engine/renderer/vulkan/VulkanRenderer.Lighting.cpp` — per-frame light/probe validation, tile-list capacity, Forward+ descriptor writes, practical directional cascade/local spot-shadow matrices, and bounded atlas preparation.
 - `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — draw orchestration, graph execution callbacks, dynamic-rendering pass recording, submission/presentation, stats, and screenshot integration.
 - `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp` — optional diagnostics overlay (`VOLKENGINE_ENABLE_IMGUI`) lifecycle and rendering.
 - `engine/renderer/vulkan/VulkanRenderer.Screenshot.cpp` — screenshot request/readback handling, swapchain readback copy, PPM publishing, and temp/backup file behavior.
@@ -31,11 +33,11 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 1. Create the instance and optional debug messenger.
 2. Create the GLFW-backed surface, enumerate/rank physical devices, and select the adapter.
 3. Create the logical device, queues, VMA allocator, debug-utils function pointers, and command pools.
-4. Create the swapchain and image views, compile the cached frame-graph variants, then transactionally realize their depth/HDR resources.
-5. Create textures/samplers/descriptors, pipeline cache/pipelines, frame resources, generated meshes, tonemap descriptors, and timestamp queries.
+4. Create the swapchain and image views, compile cached frame-graph variants, then transactionally realize depth/HDR targets and the fixed shadow atlas.
+5. Create authored textures, the mipmapped linear HDR environment, samplers/descriptors, pipeline cache/pipelines, per-frame light/tile/shadow buffers, generated meshes, tonemap descriptors, and timestamp queries.
 6. Create optional ImGui state, then log selected device capabilities and tracked resource totals.
 
-`VulkanRenderer` enforces the contract: Vulkan 1.3, graphics/present/transfer queues, `VK_KHR_swapchain`, usable surface formats/present modes, dynamic rendering, and synchronization2.
+`VulkanRenderer` enforces the contract: Vulkan 1.3, graphics/present/transfer queues, `VK_KHR_swapchain`, usable surface formats/present modes, dynamic rendering, synchronization2, and `shaderDemoteToHelperInvocation` for masked-material fragment behavior.
 Startup logs include rejected adapters and concrete rejection reasons.
 
 ## Frame loop
@@ -44,7 +46,7 @@ Each frame executes the same high-level sequence:
 
 1. Wait for the current frame fence and retire frame-owned/deferred resources.
 2. Read the previous frame timestamp bucket when GPU timestamps are enabled.
-3. Compute camera matrices and the CPU visibility plan, grow mapped instance storage if required, update uniforms, and reset the frame command pool.
+3. Compute camera matrices and the CPU visibility plan, validate scene lighting/environment/probes, prepare bounded light-list/atlas storage and shadow cameras, grow mapped frame storage if required, update descriptors/uniforms, and reset the frame command pool.
 4. Acquire a swapchain image.
 5. Consume any pending screenshot request and begin optional ImGui work.
 6. Select and execute the compiled graph variant into one primary command buffer.
@@ -61,22 +63,34 @@ Default adaptive path (`--auto-depth-prepass`, also `EngineConfig` default):
 
 ```mermaid
 flowchart LR
-    Decide[Runtime visible-count + triangle-count heuristic] -->|small scene| Scene[HDR scene pass\ncolor + depth write]
+    Decide[Runtime visible-count + triangle-count heuristic] -->|small scene| Scene[HDR Forward+ scene\ncolor + depth write]
     Decide -->|large scene| Depth[Depth prepass]
-    Depth --> ScenePre[HDR scene pass\ndepth read + color write]
-    Scene --> Tonemap[Tonemap final pass]
-    ScenePre --> Tonemap
+    Lights[Forward+ tile assignment] --> Scene
+    Lights --> ScenePre
+    Shadows[Directional cascades + local spot atlas] --> Scene
+    Shadows --> ScenePre
+    Depth --> ScenePre[HDR Forward+ scene\ndepth read + color write]
+    Scene --> HiZ[Reverse-Z depth pyramid]
+    ScenePre --> HiZ
+    HiZ --> Tonemap[Exposure + ACES final pass]
     Tonemap --> ImGui[Optional ImGui overlay]
     ImGui --> Present[Present]
 ```
 
-Forced no-prepass (`--no-depth-prepass`) selects a graph containing HDR depth-write, tonemap, and optional screenshot passes. Forced prepass (`--depth-prepass`) selects a graph containing the depth-only pass, HDR depth-read pass, tonemap, and optional screenshot pass.
+Forced no-prepass (`--no-depth-prepass`) selects a graph containing Forward+ assignment, visibility, shadow atlas, HDR depth-write, depth-pyramid, tonemap, and optional screenshot passes. Forced prepass (`--depth-prepass`) selects the equivalent graph with the depth-only pass and HDR depth-read. `--no-shadows` retains deterministic atlas state/graph synchronization but submits zero shadow views and skips shadow rendering.
 
-`Auto` caches all depth/no-depth and screenshot/no-screenshot combinations and selects one after visibility planning; forced modes cache only their valid depth state. `FrameGraph::execute` owns pass order, logical resource activation/retirement, and barrier intent dispatch. Vulkan callbacks own physical resource bindings and command emission.
-Depth uses reverse-Z: `Math.hpp::perspective` maps near to 1 and far to 0, depth attachments clear to 0, and Vulkan depth tests use `GREATER`/`GREATER_OR_EQUAL`.
+`Auto` caches all depth/no-depth and screenshot/no-screenshot combinations and selects one after visibility planning; forced modes cache only their valid depth state. `FrameGraph::execute` owns pass order, logical resource activation/retirement, and barrier intent dispatch. Vulkan callbacks own physical bindings and command emission. The Forward+ compute write is visible to HDR fragment reads; shadow atlas depth writes transition to shader-read-only sampling before HDR. Depth remains reverse-Z: near maps to 1, far to 0, attachments clear to 0, and depth tests use `GREATER`/`GREATER_OR_EQUAL`.
 
 The renderer uses Vulkan dynamic rendering (`vkCmdBeginRendering` / `vkCmdEndRendering`) rather than render-pass/framebuffer objects.
 Swapchain images are preferred as UNORM because `tonemap.frag` normally applies exposure, ACES, and the standard sRGB OETF manually; if a surface only provides an sRGB swapchain format, the tonemap push constant disables shader-side OETF so Vulkan performs the single required encode.
+
+### Forward+ lighting, shadows, and environment
+
+- One compute workgroup covers each 16×16 screen tile, tests at most 256 point/spot lights in deterministic scene order, and writes a fixed 64-index partition plus exact overflow count. This avoids a global allocator and makes one dispatch sufficient for the complete screen.
+- The fixed 2048² selected-depth-format atlas contains sixteen 512² slots. Three stable practical-split directional cascades receive camera-relative orthographic matrices; remaining slots are assigned to shadow-casting spot lights in scene order. Viewport/scissor are restored after atlas rendering before camera passes.
+- Shadow sampling selects cascades by view-space distance, clamps projected depth/UV to the assigned interior, uses a slope-scaled receiver bias, and performs a fixed 3×3 PCF kernel through a comparison sampler. Masked materials use their authored base-color alpha/cutoff in both camera-depth and shadow variants.
+- A renderer-owned 256×128 linear `R16G16B16A16_SFLOAT` equirectangular environment contains a bounded HDR sun and radiance-preserving CPU mip chain. Roughness selects specular LOD; diffuse uses the coarsest mip. Up to four spherical reflection probes blend tint/intensity within bounded radii against the same environment resource.
+- Direct light uses GGX/Smith/Schlick. Specialized class branches add clear-coat, wrapped foliage/skin response, anisotropic hair, cloth sheen, and emissive output without new descriptor sets or pipeline permutations.
 
 ## Scene submission
 
@@ -99,8 +113,8 @@ Swapchain images are preferred as UNORM because `tonemap.frag` normally applies 
 
 ## Screenshot path
 
-`VulkanRenderer::requestScreenshot(path)` queues one screenshot request with latest-request-wins coalescing while a request is still pending.
-The next `draw()` consumes it, records an image-to-buffer transfer copy from the final swapchain image when supported, and waits on the submitting frame before writing disk. A failure before queue submission returns the consumed path to the pending slot unless a newer request has already replaced it.
+`VulkanRenderer::requestScreenshot(path)` queues one request with latest-request-wins coalescing while a request is pending. The next `draw()` consumes it, records an image-to-buffer transfer copy from the final swapchain image when supported, and waits on the submitting frame before writing disk. A failure before queue submission returns the consumed path to the pending slot unless a newer request superseded it.
+
 Output is complete-before-publish:
 
 - writes binary PPM (P6) via a temporary file,
@@ -113,6 +127,6 @@ Unsupported format/usage combinations (no `TRANSFER_SRC` support or non-UNORM sw
 
 - Debug-utils names are assigned to long-lived Vulkan objects when available.
 - Pass regions are labeled for RenderDoc/validation captures.
-- `RenderStats` exposes CPU timing buckets, optional GPU timing validity, draw counts, scene/submitted triangle counts, visibility and grid telemetry, LOD counts, instance capacity, and submission mode.
-- `RenderDeviceInfo` mirrors adapter, feature, and upload-sync decisions.
-- ImGui is optional; `--no-imgui` skips overlay initialization and overlay work.
+- `RenderStats` exposes CPU timing buckets; light-assignment/cull/shadow/depth/HDR/Hi-Z/final GPU intervals; draw/triangle/visibility state; light-list and shadow-atlas pressure; probes/environment/exposure; material-class counts; and submission mode.
+- `RenderDeviceInfo` mirrors adapter, Vulkan 1.3 masked-fragment capability, descriptor/indirect features, and upload-sync decisions.
+- ImGui and run-summary schema v4 expose the same bounded lighting/material state; `--no-imgui` skips overlay initialization and overlay work.

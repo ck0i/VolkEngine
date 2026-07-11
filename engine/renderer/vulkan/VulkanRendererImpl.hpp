@@ -463,7 +463,7 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
     }
 }
 
-inline std::array<std::filesystem::path, 11> shaderSpirvPaths(
+inline std::array<std::filesystem::path, 15> shaderSpirvPaths(
     const std::filesystem::path& shaderDirectory) {
     return {
         shaderDirectory / "scene.vert.spv",
@@ -477,6 +477,10 @@ inline std::array<std::filesystem::path, 11> shaderSpirvPaths(
         shaderDirectory / "scene_depth_gpu.vert.spv",
         shaderDirectory / "depth_pyramid.comp.spv",
         shaderDirectory / "scene_cull_subgroup.comp.spv",
+        shaderDirectory / "light_assign.comp.spv",
+        shaderDirectory / "shadow.vert.spv",
+        shaderDirectory / "shadow.frag.spv",
+        shaderDirectory / "shadow_bindless.frag.spv",
     };
 }
 } // namespace vulkan_renderer_detail
@@ -506,11 +510,13 @@ private:
     static constexpr std::size_t kMaxFramesInFlight = 2;
     static constexpr std::size_t kMaxDepthPyramidMipLevels = 16;
     static constexpr std::uint32_t kTimestampFrameStart = 0;
-    static constexpr std::uint32_t kTimestampCullEnd = 1;
-    static constexpr std::uint32_t kTimestampDepthEnd = 2;
-    static constexpr std::uint32_t kTimestampHdrEnd = 3;
-    static constexpr std::uint32_t kTimestampDepthPyramidEnd = 4;
-    static constexpr std::uint32_t kTimestampFinalEnd = 5;
+    static constexpr std::uint32_t kTimestampLightAssignmentEnd = 1;
+    static constexpr std::uint32_t kTimestampCullEnd = 2;
+    static constexpr std::uint32_t kTimestampShadowEnd = 3;
+    static constexpr std::uint32_t kTimestampDepthEnd = 4;
+    static constexpr std::uint32_t kTimestampHdrEnd = 5;
+    static constexpr std::uint32_t kTimestampDepthPyramidEnd = 6;
+    static constexpr std::uint32_t kTimestampFinalEnd = 7;
     static constexpr std::uint32_t kTimestampQueriesPerFrame =
         kTimestampFinalEnd + 1U;
 
@@ -628,6 +634,26 @@ private:
         Buffer cullCandidates;
         Buffer cullCounters;
         Buffer cullUniforms;
+        Buffer localLights;
+        Buffer lightingUniforms;
+        Buffer lightTileHeaders;
+        Buffer lightTileIndices;
+        Buffer lightListCounters;
+        Buffer shadowInstanceIndices;
+        Buffer shadowIndirectCommands;
+        std::size_t shadowInstanceIndexCapacity = 0;
+        std::uint32_t shadowAtlasOverflowCount = 0;
+        std::uint32_t shadowCommandCount = 0;
+        std::uint32_t shadowViewCount = 0;
+        std::vector<std::uint32_t> shadowIndexScratch;
+        bool shadowCasterCacheValid = false;
+        bool gpuRenderItemsChangedThisFrame = false;
+        std::size_t lightTileCapacity = 0;
+        std::uint32_t reflectionProbeCount = 0;
+        std::uint32_t submittedLocalLightCount = 0;
+        float exposureScale = 1.0F;
+        std::uint32_t completedLightListOverflowCount = 0;
+        bool completedLightListCountersValid = false;
         std::size_t candidateCapacity = 0;
         std::size_t visibleInstanceIndexCapacity = 0;
         std::size_t clusterInstanceCapacity = 0;
@@ -676,6 +702,14 @@ private:
         FrameGraph::ResourceHandle meshClusterRanges;
         FrameGraph::ResourceHandle depthPyramid;
         FrameGraph::ResourceHandle screenshotReadback;
+        FrameGraph::ResourceHandle localLights;
+        FrameGraph::ResourceHandle lightingUniforms;
+        FrameGraph::ResourceHandle lightTileHeaders;
+        FrameGraph::ResourceHandle lightTileIndices;
+        FrameGraph::ResourceHandle shadowAtlas;
+        FrameGraph::ResourceHandle shadowInstances;
+        FrameGraph::ResourceHandle shadowCommands;
+        FrameGraph::ResourceHandle lightListCounters;
     };
     struct FrameGraphPasses {
         FrameGraph::PassHandle depthPrepass;
@@ -683,6 +717,8 @@ private:
         FrameGraph::PassHandle tonemap;
         FrameGraph::PassHandle gpuCull;
         FrameGraph::PassHandle depthPyramid;
+        FrameGraph::PassHandle shadows;
+        FrameGraph::PassHandle lightAssignment;
         FrameGraph::PassHandle screenshotReadback;
     };
     struct FrameGraphVariant {
@@ -702,6 +738,9 @@ private:
         std::uint32_t sceneDrawCalls = 0;
         bool useDepthPrepass = false;
         std::uint32_t gpuCullCandidateCount = 0;
+        std::uint32_t lightTileColumns = 0;
+        std::uint32_t lightTileRows = 0;
+        std::uint32_t localLightCount = 0;
     };
     struct alignas(16) SceneUniforms {
         Mat4 viewProjection;
@@ -749,6 +788,25 @@ private:
         std::uint32_t sourceHeight = 0;
         std::uint32_t useReductionSampler = 0;
     };
+    struct alignas(16) GpuLightingUniforms {
+        Mat4 viewProjection;
+        RenderDirectionalLight directional;
+        RenderEnvironment environment;
+        std::array<std::uint32_t, 4> counts{}; // lights, tile columns, tile rows, reserved
+        Vec4 viewport{}; // width, height, reciprocal width, reciprocal height
+        std::array<Mat4, kShadowAtlasSlotCount> shadowViewProjection{};
+        std::array<Vec4, kShadowAtlasSlotCount> shadowUvScaleBias{};
+        Vec4 cascadeSplits{};
+        std::array<RenderReflectionProbe, kMaximumReflectionProbes>
+            reflectionProbes{};
+    };
+    struct alignas(16) GpuLightListCounters {
+        std::uint32_t overflowCount = 0;
+        std::array<std::uint32_t, 3> reserved{};
+    };
+    struct ShadowPushConstants {
+        std::uint32_t shadowViewIndex = 0;
+    };
     struct PipelineSet {
         VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
         VkPipeline depthPrepass = VK_NULL_HANDLE;
@@ -761,6 +819,10 @@ private:
         VkPipelineLayout depthPyramidLayout = VK_NULL_HANDLE;
         VkPipeline depthPyramid = VK_NULL_HANDLE;
         VkPipeline cull = VK_NULL_HANDLE;
+        VkPipelineLayout lightAssignmentLayout = VK_NULL_HANDLE;
+        VkPipeline lightAssignment = VK_NULL_HANDLE;
+        VkPipelineLayout shadowLayout = VK_NULL_HANDLE;
+        VkPipeline shadow = VK_NULL_HANDLE;
     };
     struct RetiredPipelineSet {
         PipelineSet pipelines;
@@ -795,6 +857,18 @@ private:
     static_assert(sizeof(DepthPyramidPushConstants) == 12);
     static_assert(offsetof(GpuCullCounters, sphereLodCounts) == 16,
                   "GpuCullCounters.sphereLodCounts offset mismatch");
+    static_assert(sizeof(GpuLightingUniforms) == 1616,
+                  "GpuLightingUniforms must match GLSL LightingData layout");
+    static_assert(offsetof(GpuLightingUniforms, directional) == 64);
+    static_assert(offsetof(GpuLightingUniforms, environment) == 112);
+    static_assert(offsetof(GpuLightingUniforms, counts) == 160);
+    static_assert(offsetof(GpuLightingUniforms, viewport) == 176);
+    static_assert(offsetof(GpuLightingUniforms, shadowViewProjection) == 192);
+    static_assert(offsetof(GpuLightingUniforms, shadowUvScaleBias) == 1216);
+    static_assert(offsetof(GpuLightingUniforms, cascadeSplits) == 1472);
+    static_assert(offsetof(GpuLightingUniforms, reflectionProbes) == 1488);
+    static_assert(sizeof(GpuLightListCounters) == 16);
+    static_assert(sizeof(ShadowPushConstants) == 4);
 
     void createInstance();
     void createDebugMessenger();
@@ -807,8 +881,10 @@ private:
     void createSwapchain();
     void createImageViews();
     void realizeFrameGraphResources();
+    void createShadowResources();
     void createSampler();
     void createTextureResources();
+    void createEnvironmentResources();
     [[nodiscard]] const ReferenceAssetBundle& referenceAssets();
     void createDescriptorLayouts();
     void createPipelineCache();
@@ -848,6 +924,12 @@ private:
     void recordCullGraphPass(const FrameGraphRecordContext& context,
                              const FrameGraph::PassDesc& desc,
                              const FrameGraph::PassResources& resources);
+    void recordLightAssignmentGraphPass(
+        const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+        const FrameGraph::PassResources& resources);
+    void recordShadowGraphPass(
+        const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+        const FrameGraph::PassResources& resources);
     [[nodiscard]] static bool transitionGraphResource(void* context,
                                                       const FrameGraph::BarrierIntent& intent) noexcept;
     [[nodiscard]] static bool executeGraphPass(void* context, FrameGraph::PassHandle pass,
@@ -882,6 +964,23 @@ private:
     void updateFrameInstanceDataDescriptor(std::size_t frameIndex) const;
     void ensureSceneInstanceCapacity(FrameResources& frame, std::size_t frameIndex, std::size_t requiredCapacity);
     void updateFrameCullDescriptors(std::size_t frameIndex) const;
+    void updateFrameLightingDescriptors(std::size_t frameIndex) const;
+    void ensureLightTileCapacity(FrameResources& frame, std::size_t frameIndex,
+                                 std::size_t requiredTileCount);
+    void prepareLighting(FrameResources& frame, std::size_t frameIndex,
+                         const Camera& camera,
+                         const SceneRenderList& renderItems,
+                         const Mat4& viewProjection);
+    void recordLightAssignment(VkCommandBuffer commandBuffer,
+                               std::uint32_t tileColumns,
+                               std::uint32_t tileRows) const;
+    void ensureShadowCasterCapacity(FrameResources& frame,
+                                    std::size_t frameIndex,
+                                    std::size_t requiredInstanceCount);
+    void prepareShadowCasters(FrameResources& frame, std::size_t frameIndex,
+                              const Camera& camera,
+                              const SceneRenderList& renderItems);
+    void validateLightLists(FrameResources& frame) const;
     void ensureGpuVisibilityCapacity(FrameResources& frame, std::size_t frameIndex,
                                      std::size_t candidateCount,
                                      std::size_t clusterInstanceCapacity);
@@ -1036,6 +1135,8 @@ private:
 
     struct ResourceOwner {
         ImageResource depth;
+        ImageResource shadowAtlas;
+        ImageResource environmentMap;
         std::vector<TextureRole> materialTextureRoles;
         ImageResource depthPyramid;
         std::vector<VkImageView> depthPyramidMipViews;
@@ -1049,6 +1150,8 @@ private:
         bool bindlessMaterialsEnabled = false;
         VkSampler linearSampler = VK_NULL_HANDLE;
         VkSampler depthReductionSampler = VK_NULL_HANDLE;
+        VkSampler shadowSampler = VK_NULL_HANDLE;
+        VkSampler environmentSampler = VK_NULL_HANDLE;
         bool depthReductionSamplerEnabled = false;
         VkSampler textureSampler = VK_NULL_HANDLE;
         VkSampler normalTextureSampler = VK_NULL_HANDLE;
@@ -1059,12 +1162,14 @@ private:
         VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
         VkDescriptorSetLayout depthPyramidSetLayout = VK_NULL_HANDLE;
         VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSetLayout lightingSetLayout = VK_NULL_HANDLE;
         VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
         std::array<VkDescriptorSet, kMaxFramesInFlight> sceneDescriptorSets{};
         VkDescriptorSet tonemapDescriptorSet = VK_NULL_HANDLE;
         std::array<VkDescriptorSet, kMaxDepthPyramidMipLevels>
             depthPyramidDescriptorSets{};
         std::array<VkDescriptorSet, kMaxFramesInFlight> cullDescriptorSets{};
+        std::array<VkDescriptorSet, kMaxFramesInFlight> lightingDescriptorSets{};
         const ReferenceAssetBundle* referenceAssets = nullptr;
         Buffer sceneVertexBuffer;
         Buffer clusterData;
@@ -1095,9 +1200,13 @@ private:
         VkPipeline cull = VK_NULL_HANDLE;
         VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
         VkPipeline tonemap = VK_NULL_HANDLE;
+        VkPipelineLayout lightAssignmentLayout = VK_NULL_HANDLE;
+        VkPipeline lightAssignment = VK_NULL_HANDLE;
+        VkPipelineLayout shadowLayout = VK_NULL_HANDLE;
+        VkPipeline shadow = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 11> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 15> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };
@@ -1136,6 +1245,7 @@ private:
         std::vector<std::uint32_t> meshInstanceCounts;
         std::uint32_t visibleItemCount = 0;
         std::uint64_t sceneTriangleCount = 0;
+        std::array<unsigned, 8> materialClassCounts{};
         Vec3 cameraPosition{};
         Vec3 cameraForward{1.0f, 0.0f, 0.0f};
         std::uint32_t culledItemCount = 0;

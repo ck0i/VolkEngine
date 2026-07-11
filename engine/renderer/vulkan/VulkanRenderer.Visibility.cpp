@@ -98,6 +98,9 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     plan.cameraForward = camera.forward();
     for (std::size_t index = 0; index < renderItems.size(); ++index) {
         const SceneRenderItem& item = renderItems[index];
+        const std::size_t materialClass = static_cast<std::size_t>(
+            std::clamp(std::lround(item.material.flags.y), 0L, 7L));
+        ++plan.materialClassCounts[materialClass];
         if (updateAllRenderItems ||
             !sameRenderItem(frame.cachedGpuRenderItems[index], item)) {
             GpuCullCandidate& candidate = candidates[index];
@@ -121,6 +124,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
             resourceOwner_.sceneMeshTriangleCounts[triangleMesh];
     }
     frame.gpuRenderItemCacheValid = true;
+    frame.gpuRenderItemsChangedThisFrame = renderItemsChanged;
 
     auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
         frame.indirectCommands.mapped);
@@ -388,6 +392,11 @@ VulkanRenderer::Impl::planSceneVisibility(
     const float projectionScaleY = projection.m[5] < 0.0f ? -projection.m[5] : projection.m[5];
     if (renderItems.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
         throw std::runtime_error("Scene visibility exceeds renderer instance-count range");
+    }
+    for (const SceneRenderItem& item : renderItems) {
+        const std::size_t materialClass = static_cast<std::size_t>(
+            std::clamp(std::lround(item.material.flags.y), 0L, 7L));
+        ++plan.materialClassCounts[materialClass];
     }
     plan.gridRange = renderItems.materialGridRange();
     const std::vector<SceneGridTile>& gridTiles = renderItems.materialGridTiles();
