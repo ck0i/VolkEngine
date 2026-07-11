@@ -15,34 +15,35 @@ inline constexpr bool kDefaultValidationEnabled = VOLKENGINE_VALIDATION != 0;
 inline constexpr bool kDefaultValidationEnabled = false;
 #endif
 
-enum class DepthPrepassMode : std::uint8_t {
-    Auto,
-    ForceOff,
-    ForceOn
-};
+enum class DepthPrepassMode : std::uint8_t { Auto, ForceOff, ForceOn };
 
 struct EngineConfig {
-    std::string applicationName = "VolkEngine Sandbox";
+  std::string applicationName = "VolkEngine Sandbox";
     std::uint32_t initialWidth = 1280;
     std::uint32_t initialHeight = 720;
     bool validation = kDefaultValidationEnabled;
     bool requireValidation = false;
-    bool vsync = true;
-    float exposure = 1.0f;
-    bool shaderHotReload = false;
-    bool indirectSceneDraws = true;
-    bool shadows = true;
-    bool gpuVisibilityValidation = false;
+  bool vsync = true;
+  float exposure = 1.0f;
+  bool shaderHotReload = false;
+  bool assetHotReload = false;
+  bool indirectSceneDraws = true;
+  bool shadows = true;
+  bool gpuVisibilityValidation = false;
     bool depthPyramidOcclusion = true;
     bool gpuClusterCommands = false;
     bool debugOverlay = true;
     bool gpuTimestamps = true;
-    double fixedSimulationStepSeconds = 1.0 / 60.0;
-    double maximumSimulationAccumulatedSeconds = 0.25;
-    std::uint32_t maximumSimulationSubsteps = 8;
-    std::uint32_t materialGridRows = 4;
-    std::uint32_t materialGridColumns = 5;
-    std::uint32_t materialGridTileRows = 16;
+  double fixedSimulationStepSeconds = 1.0 / 60.0;
+  double maximumSimulationAccumulatedSeconds = 0.25;
+  std::uint32_t maximumSimulationSubsteps = 8;
+  std::uint32_t jobWorkerCount = 0;
+  std::uint32_t maximumJobs = 4'096;
+  std::uint32_t maximumJobDependencies = 16'384;
+  std::uint32_t jobTimelineCapacity = 8'192;
+  std::uint32_t materialGridRows = 4;
+  std::uint32_t materialGridColumns = 5;
+  std::uint32_t materialGridTileRows = 16;
     std::uint32_t materialGridTileColumns = 16;
     DepthPrepassMode depthPrepassMode = DepthPrepassMode::Auto;
     std::filesystem::path shaderDirectory = executableDirectory() / "shaders";

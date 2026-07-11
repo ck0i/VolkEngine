@@ -129,4 +129,4 @@ Unsupported format/usage combinations (no `TRANSFER_SRC` support or non-UNORM sw
 - Pass regions are labeled for RenderDoc/validation captures.
 - `RenderStats` exposes CPU timing buckets; light-assignment/cull/shadow/depth/HDR/Hi-Z/final GPU intervals; draw/triangle/visibility state; light-list and shadow-atlas pressure; probes/environment/exposure; material-class counts; and submission mode.
 - `RenderDeviceInfo` mirrors adapter, Vulkan 1.3 masked-fragment capability, descriptor/indirect features, and upload-sync decisions.
-- ImGui and run-summary schema v4 expose the same bounded lighting/material state; `--no-imgui` skips overlay initialization and overlay work.
+- ImGui and run-summary schema v5 expose bounded lighting/material state; the summary additionally records bounded job/IO counters and worker timing. `--no-imgui` skips overlay initialization and overlay work.

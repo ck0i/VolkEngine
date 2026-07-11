@@ -17,6 +17,7 @@ option(VOLKENGINE_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehavi
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/VolkEngineDependencies.cmake")
 volkengine_resolve_dependencies()
+find_package(Threads REQUIRED)
 
 if(VOLKENGINE_ENABLE_IMGUI)
     add_library(VolkEngineImGui STATIC
@@ -216,6 +217,7 @@ add_library(VolkEngine STATIC
     engine/assets/TextureArtifact.cpp
     engine/assets/ReferenceAssetPipeline.cpp
     engine/core/Application.cpp
+    engine/core/JobSystem.cpp
     engine/core/Camera.cpp
     engine/core/FileSystem.cpp
     engine/core/Log.cpp
@@ -234,6 +236,7 @@ add_library(VolkEngine STATIC
     engine/renderer/SceneRenderer.cpp
     engine/renderer/vulkan/VmaUsage.cpp
     engine/renderer/vulkan/VulkanRenderer.cpp
+    engine/renderer/vulkan/VulkanRenderer.Assets.cpp
     engine/renderer/vulkan/VulkanRenderer.Device.cpp
     engine/renderer/vulkan/VulkanRenderer.Frame.cpp
     engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp
@@ -279,6 +282,7 @@ target_link_libraries(VolkEngine
 target_link_libraries(VolkEngine
     PRIVATE
         ${VOLKENGINE_STB_TARGET}
+        Threads::Threads
         ${VOLKENGINE_CGLTF_TARGET})
 
 target_compile_definitions(VolkEngine
@@ -357,6 +361,7 @@ add_executable(VolkEngineAssetPipelineCpuTest
     engine/assets/TextureArtifact.cpp
     engine/assets/ReferenceAssetPipeline.cpp
     engine/core/FileSystem.cpp
+    engine/core/JobSystem.cpp
     engine/renderer/Geometry.cpp
     engine/renderer/MeshClusters.cpp
     engine/renderer/ImageLoader.cpp
@@ -364,6 +369,7 @@ add_executable(VolkEngineAssetPipelineCpuTest
 target_link_libraries(VolkEngineAssetPipelineCpuTest
     PRIVATE
         ${VOLKENGINE_CGLTF_TARGET}
+        Threads::Threads
         ${VOLKENGINE_STB_TARGET})
 target_include_directories(VolkEngineAssetPipelineCpuTest
     PRIVATE
@@ -423,10 +429,14 @@ add_test(NAME ScenePersistenceCpu
 add_executable(VolkEngineWorldSchedulerCpuTest
     tests/WorldSchedulerCpuTests.cpp
     engine/platform/Input.cpp
-    engine/core/Camera.cpp)
+    engine/core/Camera.cpp
+    engine/core/JobSystem.cpp)
 target_include_directories(VolkEngineWorldSchedulerCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_link_libraries(VolkEngineWorldSchedulerCpuTest
+    PRIVATE
+        Threads::Threads)
 volkengine_target_warnings(VolkEngineWorldSchedulerCpuTest)
 add_test(NAME WorldSchedulerCpu
     COMMAND VolkEngineWorldSchedulerCpuTest)
@@ -590,6 +600,30 @@ target_include_directories(VolkEngineLightingCpuTest
 volkengine_target_warnings(VolkEngineLightingCpuTest)
 add_test(NAME LightingCpu
     COMMAND VolkEngineLightingCpuTest)
+
+add_executable(VolkEngineJobSystemCpuTest
+    tests/JobSystemCpuTests.cpp
+    engine/core/JobSystem.cpp)
+target_include_directories(VolkEngineJobSystemCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_link_libraries(VolkEngineJobSystemCpuTest
+    PRIVATE
+        Threads::Threads)
+volkengine_target_warnings(VolkEngineJobSystemCpuTest)
+add_test(NAME JobSystemCpu
+    COMMAND VolkEngineJobSystemCpuTest)
+
+add_executable(VolkEngineJobSystemBenchmark
+    tests/JobSystemBenchmark.cpp
+    engine/core/JobSystem.cpp)
+target_include_directories(VolkEngineJobSystemBenchmark
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+target_link_libraries(VolkEngineJobSystemBenchmark
+    PRIVATE
+        Threads::Threads)
+volkengine_target_warnings(VolkEngineJobSystemBenchmark)
 
 add_executable(VolkEngineWorldCpuTest
     tests/WorldCpuTests.cpp)

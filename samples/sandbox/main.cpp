@@ -45,119 +45,150 @@ struct PauseRequested {};
 struct SandboxSystemContext {
     ve::InputActionMap inputActions;
     ve::SimulationEventChannel<PauseRequested, 8> *pauseRequests = nullptr;
-    ve::SimulationTimerQueue<SpinDirectionFlip, 8> *directionFlips = nullptr;
+  ve::SimulationTimerQueue<SpinDirectionFlip, 8> *directionFlips = nullptr;
 };
 
-template <typename Integer> Integer parseInteger(const std::string_view value, const std::string_view optionName) {
-    Integer parsed{};
-    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), parsed);
-    if (ec != std::errc{} || ptr != value.data() + value.size()) {
-        throw std::invalid_argument("Invalid value for " + std::string(optionName));
-    }
+template <typename Integer>
+Integer parseInteger(const std::string_view value,
+                     const std::string_view optionName) {
+  Integer parsed{};
+  const auto [ptr, ec] =
+      std::from_chars(value.data(), value.data() + value.size(), parsed);
+  if (ec != std::errc{} || ptr != value.data() + value.size()) {
+    throw std::invalid_argument("Invalid value for " + std::string(optionName));
+  }
     return parsed;
 }
 
 template <typename Integer>
-Integer parsePositiveInteger(const std::string_view value, const std::string_view optionName) {
-    const Integer parsed = parseInteger<Integer>(value, optionName);
-    if (parsed == 0) {
-        throw std::invalid_argument("Invalid positive value for " + std::string(optionName));
-    }
-    return parsed;
+Integer parsePositiveInteger(const std::string_view value,
+                             const std::string_view optionName) {
+  const Integer parsed = parseInteger<Integer>(value, optionName);
+  if (parsed == 0) {
+    throw std::invalid_argument("Invalid positive value for " +
+                                std::string(optionName));
+  }
+  return parsed;
 }
 
-std::uint32_t parseWindowDimension(const std::string_view value, const std::string_view optionName) {
-    const std::uint32_t parsed = parsePositiveInteger<std::uint32_t>(value, optionName);
-    constexpr std::uint32_t kMaxGlfwWindowExtent = static_cast<std::uint32_t>(std::numeric_limits<int>::max());
-    if (parsed > kMaxGlfwWindowExtent) {
-        throw std::invalid_argument(std::string(optionName) + " exceeds GLFW's int extent range");
-    }
-    return parsed;
+std::uint32_t parseWindowDimension(const std::string_view value,
+                                   const std::string_view optionName) {
+  const std::uint32_t parsed =
+      parsePositiveInteger<std::uint32_t>(value, optionName);
+  constexpr std::uint32_t kMaxGlfwWindowExtent =
+      static_cast<std::uint32_t>(std::numeric_limits<int>::max());
+  if (parsed > kMaxGlfwWindowExtent) {
+    throw std::invalid_argument(std::string(optionName) +
+                                " exceeds GLFW's int extent range");
+  }
+  return parsed;
 }
 
-float parseFloat(const std::string_view value, const std::string_view optionName) {
-    float parsed = 0.0f;
-    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), parsed);
-    if (ec != std::errc{} || ptr != value.data() + value.size() || !ve::isValidExposure(parsed)) {
-        throw std::invalid_argument("Invalid positive value for " + std::string(optionName));
-    }
-    return parsed;
+float parseFloat(const std::string_view value,
+                 const std::string_view optionName) {
+  float parsed = 0.0f;
+  const auto [ptr, ec] =
+      std::from_chars(value.data(), value.data() + value.size(), parsed);
+  if (ec != std::errc{} || ptr != value.data() + value.size() ||
+      !ve::isValidExposure(parsed)) {
+    throw std::invalid_argument("Invalid positive value for " +
+                                std::string(optionName));
+  }
+  return parsed;
 }
 
-std::string_view requireValue(int &index, const int argc, char **argv, const std::string_view optionName) {
-    if (index + 1 >= argc) {
-        throw std::invalid_argument("Missing value for " + std::string(optionName));
-    }
+std::string_view requireValue(int &index, const int argc, char **argv,
+                              const std::string_view optionName) {
+  if (index + 1 >= argc) {
+    throw std::invalid_argument("Missing value for " + std::string(optionName));
+  }
     return std::string_view{argv[++index]};
 }
 
 void validateConfig(const ve::EngineConfig &config) {
-    const std::size_t requiredItems =
-        ve::DemoSceneRenderer::requiredItemCount(config.materialGridRows, config.materialGridColumns);
-    if (requiredItems > kMaxSandboxSceneItems) {
-        throw std::runtime_error("Sandbox material grid would generate " + std::to_string(requiredItems) +
-                                 " scene items; cap is " + std::to_string(kMaxSandboxSceneItems) +
-                                 " to avoid exhausting host memory. Use smaller "
-                                 "--grid-rows/--grid-columns.");
-    }
-    if (config.materialGridTileRows == 0 || config.materialGridTileColumns == 0) {
-        throw std::runtime_error("Sandbox material grid tile dimensions must be positive.");
-    }
+  const std::size_t requiredItems = ve::DemoSceneRenderer::requiredItemCount(
+      config.materialGridRows, config.materialGridColumns);
+  if (requiredItems > kMaxSandboxSceneItems) {
+    throw std::runtime_error("Sandbox material grid would generate " +
+                             std::to_string(requiredItems) +
+                             " scene items; cap is " +
+                             std::to_string(kMaxSandboxSceneItems) +
+                             " to avoid exhausting host memory. Use smaller "
+                             "--grid-rows/--grid-columns.");
+  }
+  if (config.materialGridTileRows == 0 || config.materialGridTileColumns == 0) {
+    throw std::runtime_error(
+        "Sandbox material grid tile dimensions must be positive.");
+  }
 }
 
 void populateWorldScene(ve::World &world) {
     const ve::World::Entity pivot = world.createEntity();
-    const ve::SceneEntityId pivotId = ve::generateWorldSceneEntityId(world);
-    ve::setWorldSceneIdentity(world, pivot, pivotId, "Sandbox Pivot");
-    auto &pivotTransform = world.emplace<ve::WorldSceneTransform>(pivot);
-    pivotTransform.current = ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {1.0f, 1.0f, 1.0f}};
-    world.emplace<SpinController>(pivot);
+  const ve::SceneEntityId pivotId = ve::generateWorldSceneEntityId(world);
+  ve::setWorldSceneIdentity(world, pivot, pivotId, "Sandbox Pivot");
+  auto &pivotTransform = world.emplace<ve::WorldSceneTransform>(pivot);
+  pivotTransform.current =
+      ve::TransformTRS{{0.0f, 0.6f, -2.2f}, {}, {1.0f, 1.0f, 1.0f}};
+  world.emplace<SpinController>(pivot);
 
-    const ve::World::Entity cube = world.createEntity();
-    const ve::SceneEntityId cubeId = ve::generateWorldSceneEntityId(world);
-    ve::setWorldSceneIdentity(world, cube, cubeId, "Sandbox Cube");
-    auto &transform = world.emplace<ve::WorldSceneTransform>(cube);
-    transform.current = ve::TransformTRS{{0.85f, 0.0f, 0.0f}, {}, {0.75f, 0.75f, 0.75f}};
-    ve::setWorldSceneParent(world, cube, pivot);
+  const ve::World::Entity cube = world.createEntity();
+  const ve::SceneEntityId cubeId = ve::generateWorldSceneEntityId(world);
+  ve::setWorldSceneIdentity(world, cube, cubeId, "Sandbox Cube");
+  auto &transform = world.emplace<ve::WorldSceneTransform>(cube);
+  transform.current =
+      ve::TransformTRS{{0.85f, 0.0f, 0.0f}, {}, {0.75f, 0.75f, 0.75f}};
+  ve::setWorldSceneParent(world, cube, pivot);
 
-    auto &renderable = world.emplace<ve::WorldSceneRenderable>(cube);
+  auto &renderable = world.emplace<ve::WorldSceneRenderable>(cube);
     renderable.mesh = ve::builtin_assets::kCube;
     renderable.material.albedoRoughness = {0.75f, 0.18f, 0.08f, 0.55f};
-    renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
+  renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
 }
 
-// Pause requests published here become visible to the consumer on the next successful fixed step.
-void publishPauseRequests(void *context, ve::World &, ve::WorldSystemScheduler::CommandWriter &,
-                          const ve::InputState &input, const double, const double) {
-    auto &sandboxContext = *static_cast<SandboxSystemContext *>(context);
-    const ve::InputActionState actions = sandboxContext.inputActions.evaluate(input);
-    if (actions.pressed(kPauseAction)) {
-        static_cast<void>(sandboxContext.pauseRequests->publish(PauseRequested{}));
-    }
+// Pause requests published here become visible to the consumer on the next
+// successful fixed step.
+void publishPauseRequests(void *context, ve::World &,
+                          ve::WorldSystemScheduler::CommandWriter &,
+                          const ve::InputState &input, const double,
+                          const double) {
+  auto &sandboxContext = *static_cast<SandboxSystemContext *>(context);
+  const ve::InputActionState actions =
+      sandboxContext.inputActions.evaluate(input);
+  if (actions.pressed(kPauseAction)) {
+    static_cast<void>(sandboxContext.pauseRequests->publish(PauseRequested{}));
+  }
 }
 
-void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler::CommandWriter &,
-                      const ve::InputState &, const double, const double deltaSeconds) {
-    const auto &sandboxContext = *static_cast<const SandboxSystemContext *>(context);
-    const std::span<const PauseRequested> pauseRequests = sandboxContext.pauseRequests->events();
-    const std::span<const ve::SimulationTimerEvent<SpinDirectionFlip>> directionFlips =
-        sandboxContext.directionFlips->events();
+void updateWorldScene(void *context, ve::World &world,
+                      ve::WorldSystemScheduler::CommandWriter &,
+                      const ve::InputState &, const double,
+                      const double deltaSeconds) {
+  const auto &sandboxContext =
+      *static_cast<const SandboxSystemContext *>(context);
+  const std::span<const PauseRequested> pauseRequests =
+      sandboxContext.pauseRequests->events();
+  const std::span<const ve::SimulationTimerEvent<SpinDirectionFlip>>
+      directionFlips = sandboxContext.directionFlips->events();
 
-    world.each<ve::WorldSceneTransform, SpinController>(
-        [&](const ve::World::Entity, ve::WorldSceneTransform &transform, SpinController &spin) {
-            for (const PauseRequested &pauseRequest : pauseRequests) {
-                static_cast<void>(pauseRequest);
-                spin.paused = !spin.paused;
-            }
-            for (const ve::SimulationTimerEvent<SpinDirectionFlip> &directionFlip : directionFlips) {
-                static_cast<void>(directionFlip);
-                spin.direction = -spin.direction;
-            }
-            if (!spin.paused) {
-                spin.angleRadians += deltaSeconds * 0.55 * static_cast<double>(spin.direction);
-            }
-            transform.current.rotation = ve::rotationY(static_cast<float>(spin.angleRadians));
-        });
+  world.each<ve::WorldSceneTransform, SpinController>(
+      [&](const ve::World::Entity, ve::WorldSceneTransform &transform,
+          SpinController &spin) {
+        for (const PauseRequested &pauseRequest : pauseRequests) {
+          static_cast<void>(pauseRequest);
+          spin.paused = !spin.paused;
+        }
+        for (const ve::SimulationTimerEvent<SpinDirectionFlip> &directionFlip :
+             directionFlips) {
+          static_cast<void>(directionFlip);
+          spin.direction = -spin.direction;
+        }
+        if (!spin.paused) {
+          spin.angleRadians +=
+              deltaSeconds * 0.55 * static_cast<double>(spin.direction);
+        }
+        transform.current.rotation =
+            ve::rotationY(static_cast<float>(spin.angleRadians));
+      });
 }
 
 SandboxArgs parseArguments(int argc, char **argv) {
@@ -171,42 +202,50 @@ SandboxArgs parseArguments(int argc, char **argv) {
             args.run.resizeSmoke = true;
         } else if (arg == "--acquire-recovery-smoke") {
             args.run.acquireRecoverySmoke = true;
-        } else if (arg == "--world-scene") {
-            args.worldScene = true;
-        } else if (arg == "--load-scene") {
-            args.loadScenePath = std::filesystem::path{requireValue(i, argc, argv, arg)};
-            args.worldScene = true;
-        } else if (arg == "--save-scene") {
-            args.saveScenePath = std::filesystem::path{requireValue(i, argc, argv, arg)};
-            args.worldScene = true;
-        } else if (arg == "--frames") {
-            args.run.maxFrames = parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--warmup-frames") {
-            args.run.warmupFrames =
-                parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--scenario") {
-            args.run.scenarioName = std::string{requireValue(i, argc, argv, arg)};
-            if (args.run.scenarioName.empty() || args.run.scenarioName.size() > 128U) {
-                throw std::invalid_argument("--scenario must contain 1 to 128 characters");
-            }
-        } else if (arg == "--width") {
-            args.config.initialWidth = parseWindowDimension(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--height") {
-            args.config.initialHeight = parseWindowDimension(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--grid-rows") {
-            args.config.materialGridRows = parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--grid-columns") {
-            args.config.materialGridColumns =
-                parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--grid-tile-rows") {
-            args.config.materialGridTileRows =
-                parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--grid-tile-columns") {
-            args.config.materialGridTileColumns =
-                parsePositiveInteger<std::uint32_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--auto-depth-prepass") {
-            args.config.depthPrepassMode = ve::DepthPrepassMode::Auto;
-        } else if (arg == "--depth-prepass") {
+    } else if (arg == "--world-scene") {
+      args.worldScene = true;
+    } else if (arg == "--load-scene") {
+      args.loadScenePath =
+          std::filesystem::path{requireValue(i, argc, argv, arg)};
+      args.worldScene = true;
+    } else if (arg == "--save-scene") {
+      args.saveScenePath =
+          std::filesystem::path{requireValue(i, argc, argv, arg)};
+      args.worldScene = true;
+    } else if (arg == "--frames") {
+      args.run.maxFrames =
+          parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--warmup-frames") {
+      args.run.warmupFrames =
+          parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--scenario") {
+      args.run.scenarioName = std::string{requireValue(i, argc, argv, arg)};
+      if (args.run.scenarioName.empty() ||
+          args.run.scenarioName.size() > 128U) {
+        throw std::invalid_argument(
+            "--scenario must contain 1 to 128 characters");
+      }
+    } else if (arg == "--width") {
+      args.config.initialWidth =
+          parseWindowDimension(requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--height") {
+      args.config.initialHeight =
+          parseWindowDimension(requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--grid-rows") {
+      args.config.materialGridRows = parsePositiveInteger<std::uint32_t>(
+          requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--grid-columns") {
+      args.config.materialGridColumns = parsePositiveInteger<std::uint32_t>(
+          requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--grid-tile-rows") {
+      args.config.materialGridTileRows = parsePositiveInteger<std::uint32_t>(
+          requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--grid-tile-columns") {
+      args.config.materialGridTileColumns = parsePositiveInteger<std::uint32_t>(
+          requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--auto-depth-prepass") {
+      args.config.depthPrepassMode = ve::DepthPrepassMode::Auto;
+    } else if (arg == "--depth-prepass") {
             args.config.depthPrepassMode = ve::DepthPrepassMode::ForceOn;
         } else if (arg == "--no-depth-prepass") {
             args.config.depthPrepassMode = ve::DepthPrepassMode::ForceOff;
@@ -248,18 +287,22 @@ SandboxArgs parseArguments(int argc, char **argv) {
             args.config.gpuTimestamps = true;
         } else if (arg == "--no-gpu-timestamps") {
             args.config.gpuTimestamps = false;
-        } else if (arg == "--exposure") {
-            args.config.exposure = parseFloat(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--screenshot") {
-            args.run.screenshotPath = std::filesystem::path{requireValue(i, argc, argv, arg)};
-        } else if (arg == "--screenshot-frame") {
-            args.run.screenshotFrame =
-                parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
-        } else if (arg == "--run-summary") {
-            args.run.summaryPath = std::filesystem::path{requireValue(i, argc, argv, arg)};
-        } else if (arg == "--hot-reload-shaders") {
-            args.config.shaderHotReload = true;
-        } else {
+    } else if (arg == "--exposure") {
+      args.config.exposure = parseFloat(requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--screenshot") {
+      args.run.screenshotPath =
+          std::filesystem::path{requireValue(i, argc, argv, arg)};
+    } else if (arg == "--screenshot-frame") {
+      args.run.screenshotFrame =
+          parseInteger<std::uint64_t>(requireValue(i, argc, argv, arg), arg);
+    } else if (arg == "--run-summary") {
+      args.run.summaryPath =
+          std::filesystem::path{requireValue(i, argc, argv, arg)};
+    } else if (arg == "--hot-reload-assets") {
+      args.config.assetHotReload = true;
+    } else if (arg == "--hot-reload-shaders") {
+      args.config.shaderHotReload = true;
+    } else {
             throw std::invalid_argument("Unknown option " + std::string(arg));
         }
     }
@@ -267,14 +310,16 @@ SandboxArgs parseArguments(int argc, char **argv) {
 }
 
 void printUsage() {
-    std::cout << "Usage: VolkEngineSandbox [--frames N] [--warmup-frames N] "
-                 "[--scenario NAME] [--world-scene] [--load-scene FILE.vescene] "
-                 "[--save-scene FILE.vescene] [--resize-smoke] "
-                 "[--acquire-recovery-smoke] [--screenshot FILE.ppm] [--screenshot-frame N] "
-                 "[--hot-reload-shaders] [--grid-rows N] [--grid-columns N] "
-                 "[--grid-tile-rows N] [--grid-tile-columns N] "
-                 "[--auto-depth-prepass|--depth-prepass|--no-depth-prepass] "
-                 "[--indirect-draws|--no-indirect-draws] "
+  std::cout
+      << "Usage: VolkEngineSandbox [--frames N] [--warmup-frames N] "
+         "[--scenario NAME] [--world-scene] [--load-scene FILE.vescene] "
+         "[--save-scene FILE.vescene] [--resize-smoke] "
+         "[--acquire-recovery-smoke] [--screenshot FILE.ppm] "
+         "[--screenshot-frame N] "
+         "[--hot-reload-assets] [--hot-reload-shaders] [--grid-rows N] "
+         "[--grid-tile-rows N] [--grid-tile-columns N] "
+         "[--auto-depth-prepass|--depth-prepass|--no-depth-prepass] "
+         "[--indirect-draws|--no-indirect-draws] "
                  "[--shadows|--no-shadows] [--gpu-visibility-validation] "
                  "[--hiz-occlusion|--no-hiz-occlusion] "
                  "[--cluster-indirect-commands|--mesh-indirect-commands] "
@@ -298,41 +343,50 @@ int main(int argc, char **argv) {
         if (args.run.maxFrames > 0U &&
             args.run.warmupFrames >= args.run.maxFrames) {
             throw std::invalid_argument("--warmup-frames must be less than --frames");
-        }
-        if (!args.run.screenshotPath.empty() && args.run.maxFrames > 0U &&
-            args.run.screenshotFrame >= args.run.maxFrames) {
-            throw std::invalid_argument("--screenshot-frame must be less than --frames");
-        }
-        ve::Application app{args.config};
-        if (!args.worldScene) {
+    }
+    if (!args.run.screenshotPath.empty() && args.run.maxFrames > 0U &&
+        args.run.screenshotFrame >= args.run.maxFrames) {
+      throw std::invalid_argument(
+          "--screenshot-frame must be less than --frames");
+    }
+    ve::Application app{args.config};
+    if (!args.worldScene) {
             return app.run(args.run);
         }
         ve::World world;
         if (args.loadScenePath.empty()) {
             populateWorldScene(world);
         } else {
-            ve::loadWorldScene(world, args.loadScenePath);
-        }
-        SandboxSystemContext sandboxContext{};
-        sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::key(ve::InputKey::Space));
-        sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::gamepadButton(0U, ve::GamepadButton::A));
-        constexpr std::array<std::string_view, 1> spinDependencies{"pause-input"};
-        ve::WorldSystemScheduler scheduler;
-        scheduler.reserveSimulationResources(2);
-        sandboxContext.pauseRequests = &scheduler.createEventChannel<PauseRequested, 8>();
-        sandboxContext.directionFlips = &scheduler.createTimerQueue<SpinDirectionFlip, 8>();
-        const ve::TimerHandle directionFlipHandle =
-            sandboxContext.directionFlips->schedule(120U, SpinDirectionFlip{}, 120U);
-        if (!directionFlipHandle) {
-            throw std::runtime_error("Failed to schedule sandbox spin direction timer");
-        }
-        scheduler.reserveSystems(2);
-        scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{"pause-input", &publishPauseRequests, &sandboxContext});
-        scheduler.addSystem(
-            ve::WorldSystemScheduler::SystemDesc{"spin", &updateWorldScene, &sandboxContext, spinDependencies});
-        scheduler.compile();
-        const int result = app.run(world, scheduler, args.run);
-        if (result == 0 && !args.saveScenePath.empty()) {
+      ve::loadWorldScene(world, args.loadScenePath);
+    }
+    SandboxSystemContext sandboxContext{};
+    sandboxContext.inputActions.bind(
+        kPauseAction, ve::InputBinding::key(ve::InputKey::Space));
+    sandboxContext.inputActions.bind(
+        kPauseAction,
+        ve::InputBinding::gamepadButton(0U, ve::GamepadButton::A));
+    constexpr std::array<std::string_view, 1> spinDependencies{"pause-input"};
+    ve::WorldSystemScheduler scheduler;
+    scheduler.reserveSimulationResources(2);
+    sandboxContext.pauseRequests =
+        &scheduler.createEventChannel<PauseRequested, 8>();
+    sandboxContext.directionFlips =
+        &scheduler.createTimerQueue<SpinDirectionFlip, 8>();
+    const ve::TimerHandle directionFlipHandle =
+        sandboxContext.directionFlips->schedule(120U, SpinDirectionFlip{},
+                                                120U);
+    if (!directionFlipHandle) {
+      throw std::runtime_error(
+          "Failed to schedule sandbox spin direction timer");
+    }
+    scheduler.reserveSystems(2);
+    scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{
+        "pause-input", &publishPauseRequests, &sandboxContext});
+    scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{
+        "spin", &updateWorldScene, &sandboxContext, spinDependencies});
+    scheduler.compile();
+    const int result = app.run(world, scheduler, args.run);
+    if (result == 0 && !args.saveScenePath.empty()) {
             ve::saveWorldScene(world, args.saveScenePath);
         }
         return result;

@@ -1,6 +1,6 @@
 # Core API
 
-Headers: `engine/core/Config.hpp`, `Application.hpp`, `Camera.hpp`, `Time.hpp`, `FileSystem.hpp`, `Log.hpp`, `Math.hpp`, `Assert.hpp`.
+Headers: `engine/core/Config.hpp`, `Application.hpp`, `JobSystem.hpp`, `WorldScheduler.hpp`, `Camera.hpp`, `Time.hpp`, `FileSystem.hpp`, `Log.hpp`, `Math.hpp`, `Assert.hpp`.
 
 ## `EngineConfig`
 
@@ -14,6 +14,7 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `vsync` | `true` | `true` selects FIFO; `false` asks for immediate-first fallback. |
 | `exposure` | `1.0f` | Positive finite tonemap exposure; `VulkanRenderer` rejects invalid programmatic configs before backend startup. |
 | `shaderHotReload` | `false` | Poll copied SPIR-V files and atomically swap rebuilt pipelines on success. |
+| `assetHotReload` | `false` | Runs reference-asset source reads/import/cook work on the bounded job system and transactionally publishes a complete candidate at a main-thread frame boundary. |
 | `indirectSceneDraws` | `true` | Request multi-draw indirect; backend falls back when features are missing. |
 | `shadows` | `true` | Enables directional cascades and eligible local spot-shadow views. Disabling it preserves Forward+ direct/environment lighting while reporting shadow timing as unavailable. |
 | `debugOverlay` | `true` | Enables Dear ImGui backend and overlay when compiled in. |
@@ -21,6 +22,8 @@ Runtime renderer/application configuration. Construct it on the stack, override 
 | `fixedSimulationStepSeconds` | `1 / 60` | Finite positive gameplay/world update interval. |
 | `maximumSimulationAccumulatedSeconds` | `0.25` | Finite backlog cap, at least one fixed step; excess wall time is dropped to prevent unbounded catch-up. |
 | `maximumSimulationSubsteps` | `8` | Positive per-render-frame update budget that bounds simulation CPU work while retaining bounded debt. |
+| `jobWorkerCount` | `0` | Worker count; zero selects `hardware_concurrency - 1` with a minimum of one. |
+| `maximumJobs`, `maximumJobDependencies`, `jobTimelineCapacity` | `4096`, `16384`, `8192` | Fixed scheduler slot, dependency-edge, and timeline capacities allocated during application construction. |
 | `materialGridRows`, `materialGridColumns` | `4`, `5` | Demo material-grid dimensions. |
 | `materialGridTileRows`, `materialGridTileColumns` | `16`, `16` | Demo grid tile dimensions for culling acceleration. |
 | `depthPrepassMode` | `DepthPrepassMode::Auto` | Adaptive prepass selection by visible scene complexity; `ForceOn` and `ForceOff` are deterministic overrides. |
@@ -53,8 +56,16 @@ config.validation = true;
 ve::Application app{config};
 return app.run(ve::RunOptions{.maxFrames = 120});
 ```
-`Application` owns the main `Window`, `Camera`, concrete `VulkanRenderer` facade, demo/world scene extractors, wall `Clock`, and `FixedStepClock`. It builds the per-frame scene submission and passes it to the renderer; the backend only borrows that list during `draw()`. Private split internals stay behind `VulkanRenderer::Impl`.
+`Application` owns the main `Window`, `Camera`, bounded `JobSystem`, active `ReferenceAssetBundle`, concrete `VulkanRenderer` facade, demo/world scene extractors, wall `Clock`, and `FixedStepClock`. Asset cooking starts before platform/renderer construction. With `assetHotReload` enabled, subsequent cooks execute in the background; the main thread only polls completion and publishes a validated candidate at a frame boundary. Publication replaces GPU geometry, clusters, textures, descriptors, authored draws, and visibility caches transactionally, while failure leaves the prior CPU/GPU bundle live.
 `run(options)` retains the sandbox's `DemoSceneRenderer` path, including material-grid metadata. `run(world, options)` renders a caller-prepared world without mutating it. `run(world, update, options)` invokes the legacy non-owning function-pointer callback zero or more times per rendered frame using the configured fixed step. `runWithInput(world, update, options)` additionally passes a read-only `InputState` snapshot to each substep. Input transitions and accumulated cursor/scroll motion are retained across render frames that emit no simulation update, delivered once to the first available substep, then consumed; held state persists for later substeps. Camera input remains render-rate and uses the bounded wall delta. Both world callback paths then extract the latest world snapshot and submit it synchronously. The caller owns `World`, must keep it alive for the full call, and must not mutate it concurrently.
+
+### `JobSystem`
+
+`JobSystem` is a fixed-capacity dependency scheduler. Construction preallocates job slots, dependency edges, per-worker queues, and a bounded timeline. External submissions distribute ready jobs round-robin; each worker consumes its own queue LIFO and steals from peers FIFO. `JobDesc` names are copied into fixed timeline storage, while callbacks and contexts remain non-owning and must outlive completion.
+
+`submit()` returns a generational `JobHandle`. Dependencies become ready only after every parent succeeds; parent failure or cancellation propagates to dependents. `wait()` and `waitAll()` execute other ready work when called by a worker, so nested jobs remain live with one worker and do not consume a blocked thread. Running callbacks inspect `JobContext::cancellationRequested()` and may cooperatively `wait()` on children. Completed handles retain their terminal status and exception until explicit `release()`/`releaseAll()`; stale handles are rejected.
+
+Capacity exhaustion, duplicate/stale dependencies, recursive terminal release, and submission after shutdown fail explicitly. Shutdown supports drain or cancellation. `stats()` snapshots submitted/succeeded/failed/cancelled/active/running counts, queue high-water mark, steals, total worker time, and per-category General/Simulation/IO/Asset counters. `timeline()` returns bounded completion records with queue/start/finish timestamps and worker assignment.
 
 ### `WorldSystemScheduler`
 
@@ -62,8 +73,9 @@ return app.run(ve::RunOptions{.maxFrames = 120});
 
 `compile()` resolves dependencies and performs a stable topological sort: every named dependency executes first, and otherwise-ready systems use registration index as the tie-break. Missing dependencies throw `std::invalid_argument`; cycles throw `std::runtime_error`. Either failure leaves no published plan. Registry mutation invalidates a prior plan, and `execute()` rejects uncompiled or recursive use.
 
-Each callback receives `(context, world, commands, input, simulationElapsedSeconds, simulationDeltaSeconds)`. Systems run single-threaded in compiled order. The restricted `CommandWriter` records `destroy`, `remove<T>`, and owned `emplace<T>` operations but cannot trigger playback or discard work mid-step. The scheduler plays its buffer once after all systems in the fixed step, so structural changes become visible only at that boundary. A system/playback exception propagates and discards scheduler-owned deferred work for the failed step. `reserveSystems()` and `reserveDeferredCommandSlots()` move registry and command-vector growth out of steady execution; callback work and type-erased component payload storage may still allocate. With no allocating callback or command capture, compiled ordering and dispatch allocate nothing.
-The `CommandWriter&` is valid only for the callback invocation and is non-copyable/non-movable; systems must not retain its address.
+Mutable callbacks receive `(context, world, commands, input, simulationElapsedSeconds, simulationDeltaSeconds)` and execute serially in compiled order. `addParallelSystem()` instead registers a read-only callback over `const World` and `const InputState`; the compiler groups dependency-independent read-only systems into parallel phases and inserts a barrier before every mutable system or dependent phase. Parallel callbacks cannot obtain `CommandWriter`, so the existing mutable `World` plus deferred-command ownership contract remains serial.
+
+The restricted `CommandWriter` records `destroy`, `remove<T>`, and owned `emplace<T>` operations but cannot trigger playback or discard work mid-step. Structural changes become visible only at the end-of-step playback boundary. Parallel failure still joins every submitted phase job, propagates the first exception, and rolls back commands plus scheduler-owned simulation resources. `reserveSystems()`, `reserveSimulationResources()`, and `reserveDeferredCommandSlots()` move scheduler growth out of steady execution; with non-allocating callbacks, compiled dispatch performs no allocations.
 
 #### Typed simulation events
 

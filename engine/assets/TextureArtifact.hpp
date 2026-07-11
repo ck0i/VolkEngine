@@ -40,13 +40,21 @@ struct TextureArtifact {
 
 struct TextureImportOptions {
     std::size_t maximumSourceBytes = 256U * 1024U * 1024U;
-    std::size_t maximumPayloadBytes = 512U * 1024U * 1024U;
+  std::size_t maximumPayloadBytes = 512U * 1024U * 1024U;
 };
 
-[[nodiscard]] TextureArtifact importTextureArtifact(
-    const std::filesystem::path& path, AssetId id, TextureRole role,
-    TextureColorSpace colorSpace, const TextureImportOptions& options = {});
-[[nodiscard]] std::vector<std::byte> serializeTextureArtifact(const TextureArtifact& texture);
-[[nodiscard]] TextureArtifact deserializeTextureArtifact(std::span<const std::byte> bytes);
+[[nodiscard]] TextureArtifact
+importTextureArtifact(std::span<const std::byte> source,
+                      const std::filesystem::path &sourceName, AssetId id,
+                      TextureRole role, TextureColorSpace colorSpace,
+                      const TextureImportOptions &options = {});
+[[nodiscard]] TextureArtifact
+importTextureArtifact(const std::filesystem::path &path, AssetId id,
+                      TextureRole role, TextureColorSpace colorSpace,
+                      const TextureImportOptions &options = {});
+[[nodiscard]] std::vector<std::byte>
+serializeTextureArtifact(const TextureArtifact &texture);
+[[nodiscard]] TextureArtifact
+deserializeTextureArtifact(std::span<const std::byte> bytes);
 
 } // namespace ve

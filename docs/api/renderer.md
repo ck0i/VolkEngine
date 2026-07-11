@@ -141,13 +141,15 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](../topics/re
 
 Current public operations:
 
-- `VulkanRenderer(Window& window, EngineConfig config)` — constructs backend state and initializes renderer-owned resources.
+- `VulkanRenderer(Window& window, EngineConfig config, ReferenceAssetBundle& referenceAssets)` — constructs backend state, initializes renderer-owned resources, and borrows the stable application-owned active bundle for renderer lifetime.
 - `~VulkanRenderer()` — destroys backend state via `Impl` teardown and persists pipeline-cache metadata during normal shutdown.
 - copy construction/assignment are deleted.
 - move construction/assignment are deleted.
 - `draw(...)` — implements `IRenderer`.
-- `meshBounds(SceneMeshId)` — returns the renderer-owned local-space bounds for a logical mesh; application scene producers can seed conservative item bounds without accessing Vulkan internals.
+- `meshBounds(MeshAssetHandle)` — returns renderer-owned local-space bounds for a generational mesh handle; application scene producers can seed conservative item bounds without accessing Vulkan internals.
+- `materialTextureHandles(AssetId)` — resolves the active authored material's base-color, normal, and metallic-roughness texture handles.
 - `stats()`, `deviceInfo()` — implement `IRenderer`.
+- `reloadReferenceAssets(ReferenceAssetBundle candidate)` — main-thread publication boundary for a fully cooked candidate. Mesh/cluster/texture resources and dependent descriptors replace the old set transactionally after GPU idle; failure restores the old GPU resources, descriptors, stats, and active bundle.
 - `requestScreenshot(std::filesystem::path)` — queues one screenshot for the next `draw()`.
 - `armAcquireRecoverySmoke()` — diagnostics-only one-shot fault injection used by `RunOptions::acquireRecoverySmoke`; ordinary game-facing code should not call it.
 - `waitIdle()` — explicit idle synchronization point for shutdown/test boundaries, not for normal pacing.

@@ -45,15 +45,16 @@ As of July 2026, the repository contains a C++23 static engine library and one G
 Implemented:
 
 - Generational sparse-set ECS storage with guarded queries and deferred structural commands.
-- Deterministic single-thread system scheduling.
+- Deterministic compiled simulation scheduling with explicit dependency-safe read-only parallel phases and serial mutable boundaries.
 - Fixed-capacity transactional typed events and timers.
 - Fixed-step simulation, accumulated input, camera, time, and file helpers.
+- Fixed-capacity dependency-aware work stealing with cooperative waits, cancellation/failure propagation, background asset IO/cooking, and bounded profiling.
 - Persistent UUID entity identity, validated scene hierarchy, fixed-step TRS interpolation, and deterministic CPU scene extraction.
 - Bounded, transactional VESN v2 scene persistence for transforms, hierarchy links, and renderables.
 
 Current limits:
 
-- No job system, thread-safe world mutation model, reflection/schema system, or headless game application lifecycle.
+- No general thread-safe world mutation model, reflection/schema system, or headless game application lifecycle.
 - Scene persistence is an explicit component subset, not a generic authoring schema or optimized cooked-world format.
 - No prefab model, undo/redo, asset GUID database, dirty extraction, spatial streaming, gameplay serialization, or editor metadata.
 - No C# host, Lua integration, production input mapping, runtime UI contract, physics, audio, animation stack, navigation, networking, or replay system.
@@ -101,7 +102,7 @@ Current limits:
 ### Verified baseline
 
 Current local baseline (11 July 2026):
-- `ctest --preset linux-debug` passed all 24 registered tests.
+- `ctest --preset linux-debug` passed all 25 registered tests.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
@@ -109,7 +110,11 @@ Current local baseline (11 July 2026):
 - On the same Intel RPL-S driver, a final paired 110-sample schema-v3 release run at 65,544 instances established the first controlled crossover: default capability-gated subgroup-reserved mesh-command generation plus temporal Hi-Z measured 23.935 ms median GPU frame time versus 27.629 ms for CPU grid culling/direct submission, a 13.4% reduction. The GPU path submitted 15,673,889 triangles instead of 23,992,353 and three draw calls instead of 15. Its CPU-frame median remained higher (3.002 ms versus 1.726 ms) and GPU p95 remained worse (30.526 ms versus 28.128 ms), so this is a bounded crossover result rather than a universal policy claim.
 - The S4 gate passed all 24 registered debug tests and a strict 120-frame Vulkan run on Intel RPL-S graphics. The run required Khronos and synchronization validation, exercised 32 local lights, seven active shadow views, two reflection probes, the seven non-masked material classes, the HDR environment, GPU visibility validation, depth-prepass rendering, two resize/recompile events, and screenshot readback without validation errors; focused CPU contracts and shader compilation cover the eighth, masked class. Schema-v4 telemetry reported zero tile/atlas overflow, 0.045 ms light assignment, 2.432 ms shadow rendering, a 14.734 ms median GPU frame, and a 0.712 ms median CPU render-submit frame across 90 post-warmup samples. A separate strict `--no-shadows` run reported zero shadow views and an unavailable shadow timing with reason `pass disabled`.
 
-This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, and S4's Forward+/shadow/HDR material baseline on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness or cross-hardware correctness.
+- S5's deterministic job benchmark executed 128 independent one-million-iteration integer jobs over three rounds with checksum equality. The best exact 1-worker sample was 502.060 ms and the best exact 8-worker sample was 61.353 ms: an 8.183× speedup with nine steals.
+- A 1,400-frame Vulkan asset-reload smoke on Intel RPL-S graphics changed and restored a live authored texture, published both complete candidates without stopping rendering, wrote a visually inspected 1280×720 screenshot and schema-v5 summary, and exited cleanly. Its 25 jobs all succeeded; telemetry recorded six IO jobs, nineteen Asset jobs, twenty-three steals, a queue high-water mark of three, and 53.903 ms aggregate worker time. Validation was requested but unavailable on the current machine, so this is functional publication evidence rather than new validation-layer evidence.
+- A separate 1,400-frame corrupt-source smoke rejected two invalid-image candidates, retained the active CPU/GPU bundle, continued rendering, emitted a schema-v5 summary, and exited cleanly. The final profile reported twenty-one succeeded and four failed jobs with no leaked active work.
+
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, S3's validated GPU-generated visibility and measured crossover foundation, S4's Forward+/shadow/HDR material baseline, and S5's bounded parallel execution plus transactional background asset-publication path on one local machine. It is evidence of a working renderer and engine foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -244,7 +249,7 @@ Implemented:
 - Standard, masked, clear-coat, foliage, skin, hair, cloth, and emissive classes share one ABI and one Forward+ shader path. Masked depth/shadow variants preserve authored alpha cutoff; all class counts are observable.
 - Renderer diagnostics publish local-light count, tile overflow, shadow views/capacity/overflow, reflection-probe count, material-class coverage, environment/exposure state, and independent light-assignment/shadow GPU intervals through ImGui, the terminal summary, and run-summary schema v4.
 
-## S5. Job system, asynchronous IO, and profiling spine — **Next**
+## S5. Job system, asynchronous IO, and profiling spine — **Current**
 
 Parallelism is required for streaming and world scale, but it must not make ownership or determinism implicit.
 
@@ -261,6 +266,14 @@ Exit criteria:
 - Tests cover dependency ordering, cancellation, shutdown, worker exhaustion, nested waits, deterministic phases, and failure propagation.
 - Asset import and background loading execute without blocking the main/render thread on normal paths.
 - Profiling demonstrates useful parallel speedup on a modern eight-core desktop without regressions in deterministic simulation behavior.
+
+Implemented baseline:
+
+- `JobSystem` preallocates generational job slots, dependency edges, per-worker queues, and a bounded timeline; ready work uses local LIFO execution and cross-worker FIFO stealing. Cooperative waits, cancellation, failure propagation, clean drain/cancel shutdown, explicit terminal release, capacity errors, and aggregate/category metrics have focused contracts.
+- `WorldSystemScheduler` preserves stable topological order, compiles explicit read-only systems into dependency-safe parallel phases, and places serial barriers around every mutable system. Phase failure joins submitted work, propagates the first exception, and rolls back deferred structural commands and scheduler-owned simulation resources.
+- `ReferenceAssetCookTask` runs the parent cook asynchronously. Unique texture inputs dispatch IO source-read jobs followed by dependent Asset decode/import jobs; the source bytes are hashed and decoded once, and one-worker nested execution is covered.
+- `Application` polls background reloads without waiting on normal frames. Changed candidates publish at a main-thread safe point through `VulkanRenderer::reloadReferenceAssets`; geometry, clusters, textures, descriptors, authored draws, and visibility caches cut over transactionally, while failure retains the old CPU/GPU bundle.
+- Run-summary schema v5, shutdown logs, and the live title expose worker/job/category counts, active/running work, queue high-water mark, steals, and worker time. The deterministic exact 1-worker/8-worker benchmark and full 25-test suite satisfy the local S5 gate.
 
 ## S6. Reflected authoring model and interim editor foundation — **Next**
 

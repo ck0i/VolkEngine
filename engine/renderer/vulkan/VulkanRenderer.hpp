@@ -1,8 +1,8 @@
 #pragma once
 
 #include "core/Config.hpp"
-#include "renderer/SceneRenderer.hpp"
 #include "renderer/Renderer.hpp"
+#include "renderer/SceneRenderer.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -13,23 +13,26 @@ class Window;
 
 class VulkanRenderer final : public IRenderer {
 public:
-    VulkanRenderer(Window& window, EngineConfig config, const ReferenceAssetBundle& referenceAssets);
-    ~VulkanRenderer() override;
+  VulkanRenderer(Window &window, EngineConfig config,
+                 ReferenceAssetBundle &referenceAssets);
+  ~VulkanRenderer() override;
 
-    VulkanRenderer(const VulkanRenderer&) = delete;
+  VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
-    VulkanRenderer(VulkanRenderer&&) = delete;
-    VulkanRenderer& operator=(VulkanRenderer&&) = delete;
+  VulkanRenderer(VulkanRenderer &&) = delete;
+  VulkanRenderer &operator=(VulkanRenderer &&) = delete;
 
-    void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
-              double elapsedSeconds, double frameDeltaMs) override;
-    [[nodiscard]] MeshBounds meshBounds(MeshAssetHandle mesh) const;
-    [[nodiscard]] std::array<TextureAssetHandle, 3> materialTextureHandles(
-        AssetId material) const;
-    [[nodiscard]] RenderStats stats() const override;
-    [[nodiscard]] const RenderDeviceInfo& deviceInfo() const override;
-    void requestScreenshot(std::filesystem::path path);
-    void armAcquireRecoverySmoke();
+  void draw(const Camera &camera, const SceneRenderList &scene,
+            double sceneBuildMs, double elapsedSeconds,
+            double frameDeltaMs) override;
+  [[nodiscard]] MeshBounds meshBounds(MeshAssetHandle mesh) const;
+  [[nodiscard]] std::array<TextureAssetHandle, 3>
+  materialTextureHandles(AssetId material) const;
+  [[nodiscard]] RenderStats stats() const override;
+  void reloadReferenceAssets(ReferenceAssetBundle candidate);
+  [[nodiscard]] const RenderDeviceInfo &deviceInfo() const override;
+  void requestScreenshot(std::filesystem::path path);
+  void armAcquireRecoverySmoke();
     void waitIdle();
 
 private:

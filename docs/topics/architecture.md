@@ -6,10 +6,10 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 
 | Path | Responsibility | Public surface |
 | --- | --- | --- |
-| `engine/core` | Application lifecycle, config, clock, camera, world/entity-component storage, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `World`, `Camera`, `Clock`, helper functions. |
+| `engine/core` | Application lifecycle, bounded job scheduling, deterministic serial/parallel simulation phases, config, clock, camera, world/entity-component storage, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `JobSystem`, `WorldSystemScheduler`, `World`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW process runtime, window, input, framebuffer resize state, Vulkan surface creation. | `GlfwRuntime`, `Window`. |
 | `engine/renderer` | Renderer contracts, lighting/material ABI and bounded planning contracts, world-to-scene extraction, scene submission data, procedural/imported mesh helpers, image loading, executable frame graph, and resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, lighting/environment records, `WorldSceneExtractor`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
-| `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
+| `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle, renderer entry points, and transactional authored-asset publication. | `VulkanRenderer`, `draw`, `reloadReferenceAssets`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
 | `engine/renderer/vulkan/VulkanRenderer.cpp` | Thin forwarding wrapper over `VulkanRenderer::Impl`. | Delegates each public call to private implementation. |
@@ -24,6 +24,9 @@ graph TD
     App --> GlfwRuntime[GlfwRuntime]
     App --> Camera[Camera]
     App --> Clock[Clock]
+    App --> Jobs[JobSystem]
+    Jobs --> AssetCook[ReferenceAssetCookTask]
+    Jobs --> Systems[Parallel simulation phases]
     App -->|owns| Renderer[VulkanRenderer]
     App -->|uses| IRenderer[IRenderer]
     Renderer -->|implements| IRenderer
@@ -36,8 +39,10 @@ graph TD
     Graph --> Resources
 ```
 
-- `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
-- `World` owns generational entities and component pools. `WorldSystemScheduler` owns a compiled deterministic system order and one deferred command buffer; system callbacks and contexts remain caller-owned. Caller-owned standalone `WorldCommandBuffer` instances stage structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneParent`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns reusable render-list, local-pose history, and hierarchy-resolution storage. The generic ECS owns no child lists or hierarchy lifecycle hooks.
+- `Application` member order keeps the renderer alive through frame execution, destroys it before the window/GLFW runtime, joins any pending asset cook before destroying the `JobSystem`, and keeps the active asset bundle alive through renderer teardown.
+- `Application` constructs its bounded `JobSystem` before platform and renderer state, owns the stable active `ReferenceAssetBundle`, polls background `ReferenceAssetCookTask` completion, and publishes successful candidates only at a main-thread frame boundary. Renderer publication builds replacement mesh/cluster/texture resources and descriptor bindings before retiring the old set; any cook, upload, or publication failure keeps the previous bundle live.
+- `JobSystem` preallocates job slots, dependency edges, worker deques, and timeline storage. Workers own their queues but may steal FIFO work; callbacks/contexts remain caller-owned until explicit terminal-handle release. Cooperative worker waits execute other ready jobs, preserving progress for nested one-worker workloads.
+- `World` owns generational entities and component pools. `WorldSystemScheduler` owns compiled deterministic execution phases, reusable parallel-job storage, and one deferred command buffer; system callbacks and contexts remain caller-owned. Explicit read-only callbacks may share a phase through `JobSystem`, while every mutable callback and dependency boundary remains serial. Caller-owned standalone `WorldCommandBuffer` instances stage structural changes during queries and replay detached FIFO batches only at explicit safe boundaries. World renderable components (`WorldSceneTransform`, `WorldSceneParent`, `WorldSceneRenderable`) remain simulation-owned; `WorldSceneExtractor` owns reusable render-list, local-pose history, and hierarchy-resolution storage. The generic ECS owns no child lists or hierarchy lifecycle hooks.
 - Typed `SimulationEventChannel` instances are scheduler-owned setup resources with fixed inline payload storage. Systems observe the previous successful step and publish the next FIFO batch; callback/overflow rollback and partial-command-playback promotion keep event lifetime aligned with the scheduler's actual mutation boundary.
 - Scheduler-owned `SimulationTimerQueue` resources add delayed and recurring typed payloads on integer successful-step ticks. Schedule/cancel mutations share the same rollback/promotion boundary as event channels, while monotonic handles and fixed storage avoid wall-time drift, stale-handle aliasing, and steady-state allocation.
 - `ScenePersistence` is a stateless one-shot boundary over the explicit scene component subset. VESN v2 canonicalizes records by persistent 128-bit `WorldSceneIdentity`, stores hierarchy references by stable ID, validates bounded UTF-8 labels and complete parent graphs, and reconstructs into a temporary `World`; v1 file-local ordinals migrate deterministically on load. It does not expose or serialize generic type-erased component pools.
@@ -80,7 +85,7 @@ Engine contracts (`IRenderer`, `FrameGraph`, `RenderStats`, config data) live in
 Its private `Impl` keeps Vulkan internals isolated from application code, which allows:
 - no Vulkan handle leakage beyond the renderer boundary,
 - stable renderer construction/call shape during backend refactors,
-- optional features (`ImGui`, screenshot behavior, pipeline hot reload) without contract churn.
+- optional features (`ImGui`, screenshot behavior, pipeline hot reload, transactional asset reload) without Vulkan handle leakage.
 
 ## Current architectural constraints
 

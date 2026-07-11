@@ -4,6 +4,10 @@ VolkEngine's Vulkan renderer keeps public API in `VulkanRenderer.hpp` and implem
 
 ## Performance-sensitive owners
 
+- `engine/core/JobSystem.cpp`: fixed-capacity dependency scheduling, per-worker deque ownership, work stealing, cooperative waits, cancellation/failure propagation, and bounded timeline/aggregate telemetry.
+- `engine/core/WorldScheduler.hpp`: deterministic phase compilation, reusable parallel-job dispatch storage, serial mutation barriers, and simulation-resource rollback.
+- `engine/assets/ReferenceAssetPipeline.cpp`: background scene cooking plus staged IO-read/asset-import dependencies and transactional DDC/database publication.
+- `engine/renderer/vulkan/VulkanRenderer.Assets.cpp`: frame-safe replacement GPU asset construction, descriptor rebinding, rollback, and old-resource retirement.
 - `engine/renderer/vulkan/VulkanRenderer.Frame.cpp`: `draw` orchestration, swapchain acquire/present, exception-safe command-buffer submission, and screenshot-in-frame integration.
 - `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp`: per-frame command pools/buffers, mapped uniform/instance buffers, mapped indirect buffers when indirect submission is active, fences/semaphores, timestamp query pool, and frame graph compilation state.
 - `engine/renderer/vulkan/VulkanRenderer.Visibility.cpp`: `SceneVisibilityPlan`, frustum culling, mesh-bucket accounting, material-grid tile acceleration, and temporal cache replay.
@@ -32,6 +36,9 @@ VolkEngine's Vulkan renderer keeps public API in `VulkanRenderer.hpp` and implem
 | Area | Current behavior | Module owner |
 | --- | --- | --- |
 | Frames in flight | Two frame slots decouple CPU prep from GPU completion without unbounded latency. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.FrameResources.cpp` |
+| Job scheduling | Fixed job/edge/deque/timeline capacities; local LIFO execution, cross-worker FIFO stealing, dependency readiness, cooperative nested waits, explicit terminal release, and category accounting. | `JobSystem.cpp` |
+| Simulation phases | Stable topological order is retained. Only explicitly read-only, dependency-independent systems share a phase; mutable systems and dependent phases insert full barriers. Compiled execution and callbacks that honor the contract allocate nothing. | `WorldScheduler.hpp` |
+| Asset IO/cooking | Runtime source reads and decode/import jobs use IO→Asset dependencies. Background completion is polled without a main-thread wait; changed candidates publish at a renderer safe point, and failed candidates retain old CPU/GPU state. | `ReferenceAssetPipeline.cpp`, `Application.cpp`, `VulkanRenderer.Assets.cpp` |
 | Presentation | `--no-vsync` prefers immediate mode for lowest present-queue latency when available. Throw-prone scene preparation runs before image acquisition; exceptional post-acquire/pre-submit failures recreate the swapchain and replace the signaled acquire semaphore before rethrowing. Acquired-image sync state chains the semaphore wait into the graph's first swapchain transition. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.FrameResources.cpp`, `VulkanRenderer.Swapchain.cpp` |
 | Depth prepass | Default `Auto` mode selects a cached graph variant using visible item/triangle thresholds with hysteresis; forced prepass uses a dedicated depth-only vertex shader with a position-only vertex input, while `--depth-prepass` and `--no-depth-prepass` force either path for comparisons. Read-only depth attachments use `VK_ATTACHMENT_STORE_OP_NONE`, preventing discard policy from introducing a false cross-frame write. The camera projection is reverse-Z (near maps to depth 1, far to 0), so depth clears use 0 and scene/depth pipelines use `GREATER`/`GREATER_OR_EQUAL` tests. | `VulkanRenderer.Frame.cpp`, `VulkanRenderer.FrameResources.cpp`, `VulkanRenderer.Pipelines.cpp` |
 | Geometry | Generated and imported meshes are packed directly into one mapped staging buffer before upload to shared device-local vertex/index buffers, then full-float CPU mesh arrays are released; OBJ import first counts records to reserve attribute, vertex, index, face scratch, and lookup storage with renderer-range guards before the real parse, treats degenerate explicit normals as missing so generated normals prevent shader NaNs, skips scale-relative degenerate face triangles before index emission, and compacts skipped-only vertices before tangent/bounds calculation. CPU meshes keep full-float tangent-basis data only through import/tangent generation, while triangle-indexed tangent generation validates index ranges once before accumulation instead of branching per triangle. The Vulkan vertex stream packs normal/tangent attributes as `R16G16B16A16_SNORM` to cut vertex bandwidth. Renderer upload reorders triangle-list indices for post-transform vertex-cache locality, remaps vertices into first-use order for vertex-fetch locality, and derives imported-model scene bounds from loaded mesh bounds. | `VulkanRenderer.Meshes.cpp`, `VulkanRenderer.Pipelines.cpp`, `Geometry.cpp` |
@@ -67,6 +74,8 @@ GPU timing fields are valid only when `gpuTimestampsValid` is true. `gpuLightAss
 
 Draw stats intentionally exclude ImGui draw lists. Scene draw counts include scene submissions plus the fullscreen tonemap draw; `sceneTriangleCount` is visible scene geometry before pass multiplication, while `triangleCount` is submitted triangle work including depth/HDR scene passes and the fullscreen tonemap triangle.
 
+Run-summary schema v5 includes `job_system`: worker count, submitted/succeeded/failed/cancelled/active/running jobs, queue high-water mark, steals, aggregate worker milliseconds, and General/Simulation/IO/Asset submission counts. The live title exposes active/running work; shutdown prints the aggregate profile.
+
 ## Benchmark switches
 
 Use sandbox flags to isolate costs:
@@ -81,6 +90,7 @@ Use sandbox flags to isolate costs:
 - `--grid-rows N --grid-columns N` — scale scene-list size.
 - `--grid-tile-rows N --grid-tile-columns N` — measure material-grid tile granularity.
 - `--frames N --resize-smoke` — repeatable automated smoke.
+- `VolkEngineJobSystemBenchmark` — deterministic 128-job integer workload, three rounds, best 1-worker and exact 8-worker samples with checksum equality. The 11 July 2026 local run measured 502.060 ms versus 61.353 ms, an 8.183× speedup with nine steals.
 
 ## Known next work
 
