@@ -142,6 +142,63 @@ void writeBinaryFileAtomic(const std::filesystem::path& path, const std::span<co
     }
 
     std::filesystem::path temporaryPath;
+#if defined(_WIN32)
+    HANDLE file = INVALID_HANDLE_VALUE;
+    for (;;) {
+        temporaryPath = path;
+        temporaryPath += std::filesystem::path{
+            ".tmp." + std::to_string(processIdentifier()) + "."
+            + std::to_string(nextTemporaryFileSuffix.fetch_add(1, std::memory_order_relaxed))};
+        file = CreateFileW(temporaryPath.c_str(),
+                           GENERIC_WRITE,
+                           0,
+                           nullptr,
+                           CREATE_NEW,
+                           FILE_ATTRIBUTE_NORMAL,
+                           nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        const DWORD error = GetLastError();
+        if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS) {
+            throw std::runtime_error(
+                "Failed to create temporary binary file: " + temporaryPath.string()
+                + ": Windows error " + std::to_string(error));
+        }
+    }
+
+    TemporaryFile temporaryFile(temporaryPath);
+    temporaryFile.arm();
+    std::size_t offset = 0;
+    while (offset < data.size()) {
+        const std::size_t remaining = data.size() - offset;
+        const DWORD requested = remaining > std::numeric_limits<DWORD>::max()
+                                    ? std::numeric_limits<DWORD>::max()
+                                    : static_cast<DWORD>(remaining);
+        DWORD written = 0;
+        const BOOL writeSucceeded = WriteFile(file, data.data() + offset, requested, &written, nullptr);
+        if (writeSucceeded == 0 || written != requested) {
+            const DWORD error = writeSucceeded == 0 ? GetLastError() : ERROR_WRITE_FAULT;
+            CloseHandle(file);
+            throw std::runtime_error(
+                "Failed to write temporary binary file: " + temporaryPath.string()
+                + ": Windows error " + std::to_string(error));
+        }
+        offset += written;
+    }
+    if (FlushFileBuffers(file) == 0) {
+        const DWORD error = GetLastError();
+        CloseHandle(file);
+        throw std::runtime_error(
+            "Failed to flush temporary binary file: " + temporaryPath.string()
+            + ": Windows error " + std::to_string(error));
+    }
+    if (CloseHandle(file) == 0) {
+        throw std::runtime_error(
+            "Failed to close temporary binary file: " + temporaryPath.string()
+            + ": Windows error " + std::to_string(GetLastError()));
+    }
+#else
     std::ofstream file;
     for (;;) {
         temporaryPath = path;
@@ -183,6 +240,7 @@ void writeBinaryFileAtomic(const std::filesystem::path& path, const std::span<co
     if (file.fail()) {
         throw std::runtime_error("Failed to close temporary binary file: " + temporaryPath.string());
     }
+#endif
 
 #if defined(_WIN32)
     if (MoveFileExW(temporaryFile.path().c_str(),
