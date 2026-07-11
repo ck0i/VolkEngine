@@ -72,6 +72,7 @@ Timing fields:
 - `frameDeltaMs`: wall-clock frame delta supplied by the app loop.
 - `gpuFrameMs`, `gpuCullMs`, `gpuDepthPrepassMs`, `gpuHdrSceneMs`, `gpuDepthPyramidMs`, `gpuFinalPassMs`: timestamp-derived GPU intervals when valid.
 - `gpuTimestampsValid`: true only after completed query data was read.
+- `depthPyramidBuildEnabled`, `depthPyramidOcclusion`: distinguish an executing pyramid build from active use by culling; CPU-reference validation builds the pyramid while intentionally disabling occlusion.
 - `elapsedSeconds`: frame time source used for animation.
 
 Frame-graph fields:

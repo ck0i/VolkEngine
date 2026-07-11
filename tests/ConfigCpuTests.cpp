@@ -39,6 +39,8 @@ int main() {
     const ve::EngineConfig defaults{};
     expectTrue("default asset directory is configured", !defaults.assetDirectory.empty());
     expectTrue("default cache directory is configured", !defaults.cacheDirectory.empty());
+    expectTrue("depth-pyramid occlusion defaults on",
+               defaults.depthPyramidOcclusion);
 
     if (gFailureCount == 0) {
         return 0;

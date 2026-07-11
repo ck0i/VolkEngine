@@ -60,6 +60,8 @@ int main() {
     assert(serialized.find("\"schema_version\":2") != std::string::npos);
     assert(serialized.find("\"scenario\":\"submission-pressure-v1\"") != std::string::npos);
     assert(serialized.find("\"warmup_frames\":20") != std::string::npos);
+    assert(serialized.find("\"hiz_occlusion\":true") !=
+           std::string::npos);
     assert(serialized.find("\"enabled\":true") != std::string::npos);
     assert(serialized.find("\"synchronization_validation\":true") != std::string::npos);
     assert(serialized.find("\"frame_count\":120") != std::string::npos);

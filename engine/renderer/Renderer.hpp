@@ -72,6 +72,8 @@ struct RenderStats {
     unsigned occludedClusterInstanceCount = 0;
     unsigned materialDescriptorCount = 0;
     unsigned materialDescriptorCapacity = 0;
+    bool depthPyramidBuildEnabled = false;
+    bool depthPyramidOcclusion = false;
     bool gpuDrivenVisibility = false;
     bool gpuVisibilityValidated = false;
     unsigned drawCalls = 0;

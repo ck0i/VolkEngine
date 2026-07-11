@@ -555,6 +555,11 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         static_cast<unsigned>(resourceOwner_.materialTextures.size());
     stats_.materialDescriptorCapacity =
         resourceOwner_.materialDescriptorCapacity;
+    stats_.depthPyramidBuildEnabled =
+        indirectSceneDrawsEnabled_ && config_.depthPyramidOcclusion;
+    stats_.depthPyramidOcclusion =
+        indirectSceneDrawsEnabled_ && config_.depthPyramidOcclusion &&
+        !config_.gpuVisibilityValidation;
     stats_.gpuDrivenVisibility = indirectSceneDrawsEnabled_;
     stats_.gpuVisibilityValidated =
         config_.gpuVisibilityValidation && gpuCountersValid;
@@ -843,6 +848,18 @@ void VulkanRenderer::Impl::recordDepthPyramidGraphPass(
         resources.edge(context.variant->resources.depthPyramid));
     const DebugLabelScope label{*this, context.frame->commandBuffer, desc.name,
                                 desc.debugColor};
+    if (!config_.depthPyramidOcclusion) {
+        if (frameOwner_.timestampsEnabled) {
+            vkCmdWriteTimestamp2(
+                context.frame->commandBuffer,
+                VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                frameOwner_.timestampQueryPool,
+                static_cast<std::uint32_t>(frameOwner_.currentFrame) *
+                        kTimestampQueriesPerFrame +
+                    kTimestampDepthPyramidEnd);
+        }
+        return;
+    }
     const std::uint32_t mipCount = resourceOwner_.depthPyramid.mipLevels;
     if (mipCount == 0U ||
         mipCount > resourceOwner_.depthPyramidMipViews.size()) {

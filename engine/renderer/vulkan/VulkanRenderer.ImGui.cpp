@@ -172,12 +172,15 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
                     stats_.sceneItemCount, stats_.visibleItemCount, stats_.meshBatchCount, stats_.scenePassCount,
                     stats_.indirectSceneDraws ? "multi-draw indirect" : "direct batched");
         ImGui::Text(
-            "Clusters: %u cooked, %u visible / %u tested, %u Hi-Z rejected, GPU cull %s%s",
+            "Clusters: %u cooked, %u visible / %u tested, %u Hi-Z rejected, GPU cull %s%s, Hi-Z %s",
             stats_.sceneClusterCount, stats_.visibleClusterInstanceCount,
             stats_.testedClusterInstanceCount,
             stats_.occludedClusterInstanceCount,
             stats_.gpuDrivenVisibility ? "on" : "off",
-            stats_.gpuVisibilityValidated ? " (CPU-validated)" : "");
+            stats_.gpuVisibilityValidated ? " (CPU-validated)" : "",
+            stats_.depthPyramidOcclusion
+                ? "on"
+                : (stats_.depthPyramidBuildEnabled ? "build-only" : "off"));
         ImGui::Text("Material descriptors: %u / %u",
                     stats_.materialDescriptorCount,
                     stats_.materialDescriptorCapacity);

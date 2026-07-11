@@ -150,6 +150,8 @@ std::string serializeRunSummary(const RunSummary& summary) {
     output << ",\"indirect_draws\":" << summary.config.indirectSceneDraws
            << ",\"gpu_visibility_validation\":"
            << summary.config.gpuVisibilityValidation
+           << ",\"hiz_occlusion\":"
+           << summary.config.depthPyramidOcclusion
            << ",\"resize_smoke\":" << summary.options.resizeSmoke
            << ",\"acquire_recovery_smoke\":" << summary.options.acquireRecoverySmoke
            << ",\"screenshot\":" << !summary.options.screenshotPath.empty()
@@ -222,8 +224,8 @@ std::string serializeRunSummary(const RunSummary& summary) {
     appendMetric(output, "gpu_depth_pyramid",
                  summary.stats.gpuDepthPyramidMs, "ms",
                  summary.stats.gpuTimestampsValid &&
-                     summary.stats.gpuDrivenVisibility,
-                 summary.stats.gpuDrivenVisibility
+                     summary.stats.depthPyramidBuildEnabled,
+                 summary.stats.depthPyramidBuildEnabled
                      ? "GPU timestamp result unavailable"
                      : "pass disabled");
     output << ',';

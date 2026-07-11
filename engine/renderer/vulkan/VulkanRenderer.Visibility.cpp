@@ -1,6 +1,30 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
 
 namespace ve {
+namespace {
+
+[[nodiscard]] bool sameVec4(const Vec4& left, const Vec4& right) noexcept {
+    return left.x == right.x && left.y == right.y &&
+           left.z == right.z && left.w == right.w;
+}
+
+[[nodiscard]] bool sameRenderItem(const SceneRenderItem& left,
+                                  const SceneRenderItem& right) noexcept {
+    return left.boundsCenter.x == right.boundsCenter.x &&
+           left.boundsCenter.y == right.boundsCenter.y &&
+           left.boundsCenter.z == right.boundsCenter.z &&
+           left.boundsRadius == right.boundsRadius &&
+           left.mesh == right.mesh && left.model.m == right.model.m &&
+           sameVec4(left.material.albedoRoughness,
+                    right.material.albedoRoughness) &&
+           sameVec4(left.material.emissiveMetallic,
+                    right.material.emissiveMetallic) &&
+           sameVec4(left.material.flags, right.material.flags) &&
+           left.material.textures == right.material.textures;
+}
+
+} // namespace
+
 
 VulkanRenderer::Impl::SceneVisibilityPlan
 VulkanRenderer::Impl::prepareGpuVisibility(
@@ -51,6 +75,11 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         static_cast<std::size_t>(clusterInstanceCapacity64);
     ensureGpuVisibilityCapacity(frame, frameIndex, renderItems.size(),
                                 clusterInstanceCapacity);
+    const bool updateAllRenderItems =
+        !frame.gpuRenderItemCacheValid ||
+        frame.cachedGpuRenderItems.size() != renderItems.size();
+    frame.cachedGpuRenderItems.resize(renderItems.size());
+    bool renderItemsChanged = updateAllRenderItems;
 
     auto* candidates =
         static_cast<GpuCullCandidate*>(frame.cullCandidates.mapped);
@@ -63,16 +92,21 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     plan.cameraForward = camera.forward();
     for (std::size_t index = 0; index < renderItems.size(); ++index) {
         const SceneRenderItem& item = renderItems[index];
-        GpuCullCandidate& candidate = candidates[index];
-        sceneInstances[index] = instanceDataFor(item);
-        candidate.model = item.model;
-        candidate.bounds = {item.boundsCenter.x, item.boundsCenter.y,
-                            item.boundsCenter.z, item.boundsRadius};
-        candidate.metadata = {
-            item.mesh == builtin_assets::kSphere
-                ? 0U
-                : static_cast<std::uint32_t>(meshBatchIndex(item.mesh)),
-            item.mesh == builtin_assets::kSphere ? 1U : 0U, 0U, 0U};
+        if (updateAllRenderItems ||
+            !sameRenderItem(frame.cachedGpuRenderItems[index], item)) {
+            GpuCullCandidate& candidate = candidates[index];
+            sceneInstances[index] = instanceDataFor(item);
+            candidate.model = item.model;
+            candidate.bounds = {item.boundsCenter.x, item.boundsCenter.y,
+                                item.boundsCenter.z, item.boundsRadius};
+            candidate.metadata = {
+                item.mesh == builtin_assets::kSphere
+                    ? 0U
+                    : static_cast<std::uint32_t>(meshBatchIndex(item.mesh)),
+                item.mesh == builtin_assets::kSphere ? 1U : 0U, 0U, 0U};
+            frame.cachedGpuRenderItems[index] = item;
+            renderItemsChanged = true;
+        }
         const std::size_t triangleMesh =
             item.mesh == builtin_assets::kSphere
                 ? sphereMeshes[0]
@@ -80,6 +114,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         plan.sceneTriangleCount +=
             resourceOwner_.sceneMeshTriangleCounts[triangleMesh];
     }
+    frame.gpuRenderItemCacheValid = true;
 
     auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
         frame.indirectCommands.mapped);
@@ -122,6 +157,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         static_cast<float>(resourceOwner_.depthPyramid.extent.height),
         static_cast<float>(resourceOwner_.depthPyramid.mipLevels),
         resourceOwner_.depthPyramidValid &&
+                config_.depthPyramidOcclusion &&
                 !config_.gpuVisibilityValidation
             ? 1.0f
             : 0.0f};
@@ -197,8 +233,10 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     std::memcpy(frame.cullUniforms.mapped, &uniforms, sizeof(uniforms));
     const VulkanBufferSyncState hostWrite{
         VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT};
-    frame.cullCandidates.syncState = hostWrite;
-    frame.instanceData.syncState = hostWrite;
+    if (renderItemsChanged) {
+        frame.cullCandidates.syncState = hostWrite;
+        frame.instanceData.syncState = hostWrite;
+    }
     frame.cullUniforms.syncState = hostWrite;
     frame.cullCounters.syncState = hostWrite;
     frame.indirectCommands.syncState = hostWrite;

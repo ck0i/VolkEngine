@@ -228,6 +228,10 @@ SandboxArgs parseArguments(int argc, char **argv) {
             args.config.indirectSceneDraws = false;
         } else if (arg == "--gpu-visibility-validation") {
             args.config.gpuVisibilityValidation = true;
+        } else if (arg == "--hiz-occlusion") {
+            args.config.depthPyramidOcclusion = true;
+        } else if (arg == "--no-hiz-occlusion") {
+            args.config.depthPyramidOcclusion = false;
         } else if (arg == "--imgui" || arg == "--debug-overlay") {
             args.config.debugOverlay = true;
         } else if (arg == "--no-imgui" || arg == "--no-debug-overlay") {
@@ -263,7 +267,7 @@ void printUsage() {
                  "[--grid-tile-rows N] [--grid-tile-columns N] "
                  "[--auto-depth-prepass|--depth-prepass|--no-depth-prepass] "
                  "[--indirect-draws|--no-indirect-draws] "
-                 "[--gpu-visibility-validation] [--imgui|--no-imgui] "
+                 "[--gpu-visibility-validation] [--hiz-occlusion|--no-hiz-occlusion] "
                  "[--gpu-timestamps|--no-gpu-timestamps] [--width N] [--height N] "
                  "[--exposure F] [--vsync|--no-vsync] "
                  "[--validation|--no-validation] [--require-validation] "

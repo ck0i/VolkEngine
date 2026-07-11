@@ -631,6 +631,8 @@ private:
         std::size_t visibleInstanceIndexCapacity = 0;
         std::size_t clusterInstanceCapacity = 0;
         std::size_t instanceCapacity = 0;
+        std::vector<SceneRenderItem> cachedGpuRenderItems;
+        bool gpuRenderItemCacheValid = false;
         bool submittedOnce = false;
         bool submittedDepthPrepass = false;
         std::uint32_t submittedScenePassCount = 0;
