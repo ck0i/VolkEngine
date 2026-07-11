@@ -2,8 +2,9 @@
 
 VolkEngine is a C++23 Vulkan renderer foundation for high-fidelity real-time rendering with explicit performance constraints. It currently provides the engine scaffold, GLFW platform layer, Vulkan backend, shader pipeline, CPU renderer contract tests, and runnable sandbox.
 
-Detailed design notes are kept out of this onboarding README. Start at `docs/README.md` for the full documentation map:
+Project direction and capability milestones are maintained in [`ROADMAP.md`](ROADMAP.md). Detailed design notes are kept out of this onboarding README; start at `docs/README.md` for the documentation map:
 
+- `ROADMAP.md` — current engine maturity, ordered capability milestones, exit criteria, and explicit non-goals
 - `docs/api/` — public API surface by header/subsystem
 - `docs/topics/` — architecture, renderer pipeline, performance, shaders, and assets
 

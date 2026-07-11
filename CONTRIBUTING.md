@@ -53,11 +53,13 @@ A technically valid PR may still need revision if the value, scope, or fit is un
 
 ## Required process
 
-### 1. Read the current docs
+### 1. Read the roadmap and current docs
 
-Before proposing code, read the current project documentation relevant to the area you want to change. The docs may move as the engine evolves, so use the repository's current documentation index and nearby subsystem notes instead of relying on a fixed file list.
+Start with [`ROADMAP.md`](ROADMAP.md) to understand the current capability baseline, dependency order, milestone status, and explicit non-goals. A roadmap entry communicates direction; it is not a claimable issue and does not bypass the contribution gate.
 
-Your proposal and PR should use the same vocabulary and constraints as the current docs.
+Then read the project documentation relevant to the area you want to change. The docs may move as the engine evolves, so use the repository's current documentation index and nearby subsystem notes instead of relying on a fixed file list.
+
+Your proposal and PR should use the same vocabulary and constraints as the roadmap and current docs.
 
 ### 2. Open a proposal before implementation
 

@@ -4,6 +4,7 @@ Use this directory as a map, not a novel. The headers are the source of truth fo
 
 ## Start here
 
+- [Project roadmap](../ROADMAP.md) — verified current maturity, ordered capability milestones, exit criteria, and non-goals.
 - [Architecture](topics/architecture.md) — subsystem boundaries, ownership, and frame data flow.
 - [Renderer pipeline](topics/renderer-pipeline.md) — split backend notes for Vulkan startup, device/swapchain orchestration, frame flow, sync/upload paths, and screenshots.
 - [Performance model](topics/performance.md) — hot-path rules, metrics, benchmark switches, and next work.
