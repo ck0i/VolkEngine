@@ -5,7 +5,7 @@ This page is split into API contracts and implementation internals:
 - [Renderer API](api/renderer.md) — public contracts (`IRenderer`, `RenderDeviceInfo`, `RenderStats`).
 - [Renderer pipeline](topics/renderer-pipeline.md) — backend runtime behavior and the Vulkan backend source split.
 - [Scene API](api/scene.md) — render-list records, material-grid metadata, demo scene builder.
-- [Frame graph API](api/frame-graph.md) — pass/resource metadata and validation.
+- [Frame graph API](api/frame-graph.md) — executable pass/resource contracts, synchronization, lifetimes, and transient allocation.
 - [Shaders and assets](topics/shaders-assets.md) — shader build/copy/reload and asset loading.
 
 Application/game code should use `IRenderer` and the API docs above for rendering calls.

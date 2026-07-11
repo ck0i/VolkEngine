@@ -13,6 +13,23 @@ struct VulkanImageSyncState {
     VkAccessFlags2 access = VK_ACCESS_2_NONE;
 };
 
+[[nodiscard]] inline constexpr VulkanImageSyncState vulkanAcquiredImageSyncState() noexcept {
+    return {
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_NONE};
+}
+
+[[nodiscard]] inline constexpr VkAttachmentStoreOp vulkanAttachmentStoreOp(
+    const FrameGraphAccess access, const FrameGraphAttachmentStore store) noexcept {
+    if (store == FrameGraphAttachmentStore::Store) {
+        return VK_ATTACHMENT_STORE_OP_STORE;
+    }
+    return access == FrameGraphAccess::Read
+        ? VK_ATTACHMENT_STORE_OP_NONE
+        : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+}
+
 struct VulkanBufferSyncState {
     VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE;
     VkAccessFlags2 access = VK_ACCESS_2_NONE;

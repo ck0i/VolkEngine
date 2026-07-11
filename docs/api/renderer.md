@@ -74,6 +74,14 @@ Timing fields:
 - `gpuTimestampsValid`: true only after completed query data was read.
 - `elapsedSeconds`: frame time source used for animation.
 
+Frame-graph fields:
+
+- `cpuGraphCompileMs`: last cached-variant compilation duration.
+- `graphPassCount`, `graphResourceCount`, `graphBarrierCount`: selected variant structure.
+- `graphPhysicalAllocationCount`: compiled transient slot count.
+- `graphTransientRequestedBytes`, `graphTransientAllocatedBytes`: logical demand versus slot capacity.
+- `graphRecompileCount`, `graphLastCompileWasResize`: compile frequency and most recent ownership event.
+
 Submission/scene fields:
 
 - `depthPrepassEnabled`

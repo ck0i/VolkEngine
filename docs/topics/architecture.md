@@ -8,7 +8,7 @@ VolkEngine is currently a compact C++23 engine scaffold around a real Vulkan 1.3
 | --- | --- | --- |
 | `engine/core` | Application lifecycle, config, clock, camera, world/entity-component storage, math, logging, file reads, assertions. | `EngineConfig`, `RunOptions`, `Application`, `World`, `Camera`, `Clock`, helper functions. |
 | `engine/platform` | GLFW process runtime, window, input, framebuffer resize state, Vulkan surface creation. | `GlfwRuntime`, `Window`. |
-| `engine/renderer` | Renderer contracts, world-to-scene extraction, scene submission data, sandbox scene implementation, procedural/imported mesh helpers, image loading, frame graph metadata, resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `WorldSceneExtractor`, `DemoSceneRenderer` declarations, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
+| `engine/renderer` | Renderer contracts, world-to-scene extraction, scene submission data, procedural/imported mesh helpers, image loading, executable frame graph, and resource accounting. | `IRenderer`, `RenderStats`, `RenderDeviceInfo`, `SceneRenderList`, `WorldSceneExtractor`, `FrameGraph`, `GpuResourceRegistry`, mesh/image helpers. |
 | `engine/renderer/vulkan/VulkanRenderer.hpp` | Backend façade used by app code: constructor/lifecycle + renderer entry points. | `VulkanRenderer`, `draw`, `meshBounds`, `stats`, `deviceInfo`, `requestScreenshot`, `waitIdle`; deleted copy/move. |
 | `engine/renderer/vulkan/VulkanRendererImpl.hpp` | Private `Impl` declaration for backend state, method contracts, and lightweight shared helpers; source-local heavy helpers stay in their owning `.cpp` files. | Internal only (not part of engine API). |
 | `engine/renderer/vulkan` | Cohesive split implementation units for backend internals. | `VulkanRenderer.cpp` (thin forwarding wrapper), plus module-specific `.cpp` files. |
@@ -32,6 +32,8 @@ graph TD
     Impl --> Swapchain[Swapchain + Present]
     Impl --> Frame[FrameResources]
     Impl --> Resources[Long-lived resources/registries]
+    Impl --> Graph[FrameGraph variants + logical lifetimes]
+    Graph --> Resources
 ```
 
 - `Application` owns `GlfwRuntime`, `Window`, `Camera`, `Clock`, and a renderer implementation; declaration order keeps the runtime alive until after the window and renderer are destroyed.
@@ -45,8 +47,8 @@ graph TD
   - `VulkanRenderer.hpp` remains the backend API entry boundary.
   - `VulkanRenderer.cpp` remains a minimal forwarding wrapper.
   - Internal Vulkan resources (`VkInstance`, device/queues, descriptor state, swapchain state, uploads, etc.) stay private.
-- Buffers/images use explicit structs containing Vulkan handles plus VMA allocations; VMA picks memory types and suballocates.
-- Swapchain-owned image views, render targets, and per-image present semaphores are recreated with swapchain recreation.
+- Buffers/images use explicit structs containing Vulkan handles plus VMA allocations; VMA picks memory types and suballocates. The frame graph owns logical transient lifetimes, slots, and activation/retirement order while the Vulkan backend realizes the physical bindings transactionally.
+- Swapchain-owned image views, graph-owned depth/HDR targets, and per-image present semaphores are recreated at one swapchain ownership boundary. Imported swapchain/readback resources never enter graph lifecycle callbacks.
 - Per-frame uniform and instance buffers are frame-slot resources; indirect command buffers are frame-slot resources only when indirect submission is active; the renderer grows instance storage only after that frame's fence signals.
 
 ## Renderer split summary
@@ -66,7 +68,7 @@ The authoritative Vulkan file-role map lives in [Renderer pipeline](renderer-pip
 3. `FixedStepClock` converts wall time into zero or more constant gameplay substeps with bounded retained debt. For scheduler-backed worlds, `WorldSceneExtractor` prepares TRS history, compiled systems execute single-threaded in dependency order, the scheduler plays structural commands once, and the extractor captures the successful state. Pending input edges/motion reach only the first emitted step while held state persists; failures discard scheduler commands, invalidate presentation history, and propagate.
 4. The world run path builds a presentation snapshot with retained-debt alpha. It interpolates each entity's local translation/scale and shortest-path quaternion rotation one completed fixed step behind simulation, then iteratively resolves parent matrices before submission. New/recycled/teleported entities reset their local history; dead or stale parents detach and cyclic dependents are omitted. Both run paths then call `IRenderer::draw(camera, scene, sceneBuildMs, elapsedSeconds, frameDeltaMs)` immediately; the renderer borrows the reusable list synchronously.
 5. `Frame.cpp` computes visibility and work planning (`planSceneVisibility`) for LOD/grid batching, then fills mapped frame instance buffers.
-6. `Frame.cpp` records command buffers, submits/presents the frame, and only executes the screenshot copy/write path when a request is pending.
+6. `Frame.cpp` executes the selected compiled graph. Graph callbacks emit synchronization barriers and record depth, HDR, tonemap/ImGui, and optional screenshot passes; submission/presentation remain the outer frame ownership boundary.
 7. `RenderStats` and `RenderDeviceInfo` expose what path was used and how the last submitted frame behaved.
 
 Scene files are loaded before entering `Application::run` and saved after it returns. Persistence therefore performs no frame-loop work and never competes with scheduler queries, deferred structural playback, extraction, or renderer borrowing.
@@ -84,6 +86,6 @@ Its private `Impl` keeps Vulkan internals isolated from application code, which 
 
 - One renderer backend exists: Vulkan.
 - The renderer interface is intentionally small: `draw`, `stats`, and `deviceInfo` (plus explicit screenshot/idle hooks).
-- The frame graph is metadata/validation, not yet a transient-resource allocator or barrier owner.
+- The frame graph executes passes and owns backend-neutral barrier, lifetime, and transient-slot contracts. Vulkan resource realization and command emission remain private backend responsibilities.
 - World-to-scene extraction is explicit and CPU-side; it is an ECS bridge, not yet a general streaming scene system.
 - Descriptor indexing support is reported as capability metadata, but bindless descriptors are not enabled until the resource model needs them.

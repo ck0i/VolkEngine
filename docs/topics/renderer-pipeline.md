@@ -14,14 +14,14 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 - `engine/renderer/vulkan/VulkanRenderer.Lifecycle.cpp` — startup/shutdown orchestration, constructor error rollback, `cleanupResources`, and swapchain-dependent setup/teardown entry points.
 - `engine/renderer/vulkan/VulkanRenderer.Device.cpp` — Vulkan instance and debug-utils setup, surface creation, physical/logical-device setup, queue-family selection, queue creation, allocator creation, command pool bootstrap, and debug-object-name/debug-label helper functions.
 - `engine/renderer/vulkan/VulkanRenderer.Swapchain.cpp` — swapchain capability queries, format/present-mode/extents choice, swapchain/image-view creation, and swapchain resize/recreate lifecycle for depth/HDR attachments.
-- `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — per-frame resources (uniform and instance buffers, descriptor sets), mapped per-frame state, per-frame fences/semaphores, timestamp queries, and frame-graph construction metadata.
+- `engine/renderer/vulkan/VulkanRenderer.FrameResources.cpp` — per-frame resources, fences/semaphores, timestamp queries, and executable frame-graph variant construction/diagnostics.
 - `engine/renderer/vulkan/VulkanRenderer.Resources.cpp` — long-lived GPU buffers/images, texture loading/sampling state, descriptor layouts/pools/sets, tonemap descriptor setup, and resource-registry metadata.
 - `engine/renderer/vulkan/VulkanRenderer.Meshes.cpp` — procedural mesh construction, imported OBJ mesh loading, geometry buffer uploads, mesh-batch arrays, and `GpuMesh` offset/count helpers.
 - `engine/renderer/vulkan/VulkanRenderer.Pipelines.cpp` — shader modules, pipeline layouts/pipelines, pipeline cache load/save/validation, and hot-reload path.
-- `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — image layout/access state helpers, image transition barriers, and sync-state bookkeeping for frame-graph usage.
-- `engine/renderer/vulkan/VulkanRenderer.Uploads.cpp` — staging uploads and transfer-queue vs same-queue synchronization (including one-shot upload fences/semaphores).
+- `engine/renderer/vulkan/VulkanRenderer.Sync.cpp` — graph-usage to Vulkan synchronization mapping, tracked transitions, and rollback snapshots.
+- `engine/renderer/vulkan/VulkanRenderer.Uploads.cpp` — staging uploads and transfer-queue versus same-queue synchronization.
 - `engine/renderer/vulkan/VulkanRenderer.Visibility.cpp` — frustum extraction/culling, grid visibility acceleration, LOD bucketing, and draw-work planning.
-- `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — draw loop, command recording/submission/presentation, stats, pacing, and screenshot path integration.
+- `engine/renderer/vulkan/VulkanRenderer.Frame.cpp` — draw orchestration, graph execution callbacks, dynamic-rendering pass recording, submission/presentation, stats, and screenshot integration.
 - `engine/renderer/vulkan/VulkanRenderer.ImGui.cpp` — optional diagnostics overlay (`VOLKENGINE_ENABLE_IMGUI`) lifecycle and rendering.
 - `engine/renderer/vulkan/VulkanRenderer.Screenshot.cpp` — screenshot request/readback handling, swapchain readback copy, PPM publishing, and temp/backup file behavior.
 - `engine/renderer/vulkan/VmaUsage.cpp` — single translation unit containing `#define VMA_IMPLEMENTATION`.
@@ -31,8 +31,8 @@ For engine-facing code, prefer `IRenderer`; direct `VulkanRenderer` usage is bac
 1. Create the instance and optional debug messenger.
 2. Create the GLFW-backed surface, enumerate/rank physical devices, and select the adapter.
 3. Create the logical device, queues, VMA allocator, debug-utils function pointers, and command pools.
-4. Create the swapchain, image views, depth image, and HDR image.
-5. Create texture/sampler/descriptors, pipeline cache, pipelines, frame resources, generated meshes, tonemap descriptors, timestamp queries, and the startup frame graph.
+4. Create the swapchain and image views, compile the cached frame-graph variants, then transactionally realize their depth/HDR resources.
+5. Create textures/samplers/descriptors, pipeline cache/pipelines, frame resources, generated meshes, tonemap descriptors, and timestamp queries.
 6. Create optional ImGui state, then log selected device capabilities and tracked resource totals.
 
 `VulkanRenderer` enforces the contract: Vulkan 1.3, graphics/present/transfer queues, `VK_KHR_swapchain`, usable surface formats/present modes, dynamic rendering, and synchronization2.
@@ -47,7 +47,7 @@ Each frame executes the same high-level sequence:
 3. Compute camera matrices and the CPU visibility plan, grow mapped instance storage if required, update uniforms, and reset the frame command pool.
 4. Acquire a swapchain image.
 5. Consume any pending screenshot request and begin optional ImGui work.
-6. Record one primary command buffer.
+6. Select and execute the compiled graph variant into one primary command buffer.
 7. Submit once to the graphics queue with the expected wait stages.
 8. Present using the acquired image’s per-image wait semaphore and, when required, rebuild swapchain state.
 
@@ -70,9 +70,9 @@ flowchart LR
     ImGui --> Present[Present]
 ```
 
-Forced no-prepass path (`--no-depth-prepass`) records only the HDR scene pass with depth writes. Forced prepass path (`--depth-prepass`) records a depth-only pass first, using `scene_depth.vert` and a position-only vertex input, then records the HDR scene pass.
+Forced no-prepass (`--no-depth-prepass`) selects a graph containing HDR depth-write, tonemap, and optional screenshot passes. Forced prepass (`--depth-prepass`) selects a graph containing the depth-only pass, HDR depth-read pass, tonemap, and optional screenshot pass.
 
-The frame graph is compiled in lockstep with the mode: Auto builds a static superset graph with depth-prepass and HDR depth read/write edges, while forced modes compile only the deterministic path they can record.
+`Auto` caches all depth/no-depth and screenshot/no-screenshot combinations and selects one after visibility planning; forced modes cache only their valid depth state. `FrameGraph::execute` owns pass order, logical resource activation/retirement, and barrier intent dispatch. Vulkan callbacks own physical resource bindings and command emission.
 Depth uses reverse-Z: `Math.hpp::perspective` maps near to 1 and far to 0, depth attachments clear to 0, and Vulkan depth tests use `GREATER`/`GREATER_OR_EQUAL`.
 
 The renderer uses Vulkan dynamic rendering (`vkCmdBeginRendering` / `vkCmdEndRendering`) rather than render-pass/framebuffer objects.

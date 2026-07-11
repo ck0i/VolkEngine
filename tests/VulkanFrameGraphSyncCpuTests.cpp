@@ -54,6 +54,21 @@ int main() {
     assert(present.stage == VK_PIPELINE_STAGE_2_NONE);
     assert(present.access == VK_ACCESS_2_NONE);
 
+    const ve::VulkanImageSyncState acquired = ve::vulkanAcquiredImageSyncState();
+    assert(acquired.layout == VK_IMAGE_LAYOUT_UNDEFINED);
+    assert(acquired.stage == VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+    assert(acquired.access == VK_ACCESS_2_NONE);
+
+    assert(ve::vulkanAttachmentStoreOp(
+               FrameGraphAccess::Write, ve::FrameGraphAttachmentStore::Store) ==
+           VK_ATTACHMENT_STORE_OP_STORE);
+    assert(ve::vulkanAttachmentStoreOp(
+               FrameGraphAccess::Write, ve::FrameGraphAttachmentStore::Discard) ==
+           VK_ATTACHMENT_STORE_OP_DONT_CARE);
+    assert(ve::vulkanAttachmentStoreOp(
+               FrameGraphAccess::Read, ve::FrameGraphAttachmentStore::Discard) ==
+           VK_ATTACHMENT_STORE_OP_NONE);
+
     assert(throwsRuntimeError([] {
         return ve::vulkanImageSyncState(FrameGraphAccess::Read, FrameGraphUsage::UniformBuffer);
     }));

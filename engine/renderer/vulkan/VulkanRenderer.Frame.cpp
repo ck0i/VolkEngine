@@ -201,7 +201,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
     presentInfo.pImageIndices = &imageIndex;
     const VkResult present = vkQueuePresentKHR(deviceOwner_.presentQueue, &presentInfo);
     if (present == VK_SUCCESS || present == VK_SUBOPTIMAL_KHR) {
-        swapchainOwner_.imageStates[imageIndex] = {};
+        swapchainOwner_.imageStates[imageIndex] = vulkanAcquiredImageSyncState();
     }
     if (screenshotThisFrame) {
         checkVk(vkWaitForFences(deviceOwner_.device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences screenshot capture");
@@ -588,8 +588,7 @@ void VulkanRenderer::Impl::recordDepthGraphPass(const FrameGraphRecordContext& c
     attachment.loadOp = edge.load == FrameGraphAttachmentLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
         : edge.load == FrameGraphAttachmentLoad::Clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                                        : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachment.storeOp = edge.store == FrameGraphAttachmentStore::Store
-        ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.storeOp = vulkanAttachmentStoreOp(edge.access, edge.store);
     attachment.clearValue.depthStencil = {0.0f, 0};
     VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
     rendering.renderArea.extent = swapchainOwner_.extent;
@@ -625,8 +624,7 @@ void VulkanRenderer::Impl::recordHdrGraphPass(const FrameGraphRecordContext& con
     colorAttachment.loadOp = colorEdge.load == FrameGraphAttachmentLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
         : colorEdge.load == FrameGraphAttachmentLoad::Clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                                             : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.storeOp = colorEdge.store == FrameGraphAttachmentStore::Store
-        ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.storeOp = vulkanAttachmentStoreOp(colorEdge.access, colorEdge.store);
     colorAttachment.clearValue.color = {{0.02f, 0.025f, 0.035f, 1.0f}};
 
     VkRenderingAttachmentInfo depthAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -635,8 +633,7 @@ void VulkanRenderer::Impl::recordHdrGraphPass(const FrameGraphRecordContext& con
     depthAttachment.loadOp = depthEdge.load == FrameGraphAttachmentLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
         : depthEdge.load == FrameGraphAttachmentLoad::Clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                                             : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.storeOp = depthEdge.store == FrameGraphAttachmentStore::Store
-        ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.storeOp = vulkanAttachmentStoreOp(depthEdge.access, depthEdge.store);
     depthAttachment.clearValue.depthStencil = {0.0f, 0};
 
     VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
@@ -670,8 +667,7 @@ void VulkanRenderer::Impl::recordTonemapGraphPass(const FrameGraphRecordContext&
     attachment.loadOp = edge.load == FrameGraphAttachmentLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
         : edge.load == FrameGraphAttachmentLoad::Clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                                        : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachment.storeOp = edge.store == FrameGraphAttachmentStore::Store
-        ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.storeOp = vulkanAttachmentStoreOp(edge.access, edge.store);
     VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
     rendering.renderArea.extent = swapchainOwner_.extent;
     rendering.layerCount = 1;

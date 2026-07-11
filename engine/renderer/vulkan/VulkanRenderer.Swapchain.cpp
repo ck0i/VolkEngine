@@ -110,7 +110,7 @@ void VulkanRenderer::Impl::createSwapchain() {
     checkVk(vkGetSwapchainImagesKHR(deviceOwner_.device, swapchainOwner_.handle, &imageCount, swapchainOwner_.images.data()), "vkGetSwapchainImagesKHR data");
     swapchainOwner_.format = surfaceFormat.format;
     swapchainOwner_.extent = extent;
-    swapchainOwner_.imageStates.assign(imageCount, {});
+    swapchainOwner_.imageStates.assign(imageCount, vulkanAcquiredImageSyncState());
 
 
     swapchainOwner_.renderFinishedSemaphores.resize(imageCount, VK_NULL_HANDLE);

@@ -86,13 +86,24 @@ std::vector<const char*> VulkanRenderer::Impl::requiredInstanceExtensions() cons
 }
 
 bool VulkanRenderer::Impl::instanceExtensionAvailable(const char* extensionName) const {
-    std::uint32_t extensionCount = 0;
-    checkVk(vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr), "vkEnumerateInstanceExtensionProperties count");
-    std::vector<VkExtensionProperties> extensions(extensionCount);
-    checkVk(vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data()), "vkEnumerateInstanceExtensionProperties data");
-    return std::ranges::any_of(extensions, [extensionName](const VkExtensionProperties& extension) {
-        return std::strcmp(extension.extensionName, extensionName) == 0;
-    });
+    const auto providedBy = [extensionName](const char* layerName) {
+        std::uint32_t extensionCount = 0;
+        checkVk(vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, nullptr),
+                "vkEnumerateInstanceExtensionProperties count");
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+        checkVk(vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, extensions.data()),
+                "vkEnumerateInstanceExtensionProperties data");
+        return std::ranges::any_of(extensions, [extensionName](const VkExtensionProperties& extension) {
+            return std::strcmp(extension.extensionName, extensionName) == 0;
+        });
+    };
+    if (providedBy(nullptr)) {
+        return true;
+    }
+    return deviceOwner_.validationEnabled &&
+           std::ranges::any_of(kValidationLayers, [&](const char* layerName) {
+               return providedBy(layerName);
+           });
 }
 
 void VulkanRenderer::Impl::createDebugMessenger() {

@@ -66,15 +66,15 @@ Implemented:
 - HDR rendering, ACES tone mapping, reverse-Z, and an adaptive depth prepass.
 - Fixed albedo/normal/ORM PBR materials and one directional light.
 - CPU frustum/grid visibility, sphere LOD selection, direct draws, and multi-draw indirect submission.
-- Upload synchronization, pipeline caching, shader hot reload, GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
-- CPU-side OBJ/procedural geometry, mesh cache/fetch optimization, mip generation, greedy voxel meshing, frame-graph topology and barrier intents, and diagnostic resource accounting.
+- Upload synchronization, pipeline caching, shader hot reload, per-pass GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
+- Executable frame-graph variants drive depth, HDR, tone-map, and screenshot work with explicit attachment policy, synchronization intents, logical lifetimes, deterministic transient slots, failure unwind, and machine-readable diagnostics.
 
 Current limits:
 
 - The renderer is single-view and forward-oriented, without scalable local lights, production shadows, image-based lighting, transparency, temporal antialiasing, upscaling, post effects, or robust device-loss policy.
 - Descriptor-indexing capabilities may be enabled, but materials still use a fixed three-texture descriptor array. This is not a bindless material system.
 - Visibility and LOD selection remain CPU-driven. There is no meshlet pipeline, GPU-generated draw stream, occlusion culling, or virtualized geometry.
-- The frame graph plans topology, hazards, and barrier intent; it does not yet own pass execution, resources, transient allocation, or queue scheduling.
+- The frame graph does not schedule multiple queues or physically alias Vulkan memory yet; current depth/HDR logical transients intentionally use separate allocation classes and are realized at swapchain scope.
 - There is no compressed/virtual texture pipeline, asynchronous residency system, scalable world renderer, hardware ray tracing, or production global illumination path.
 
 ### Assets, tools, and delivery
@@ -90,17 +90,17 @@ Current limits:
 
 - No glTF/FBX production importer, stable asset identity, dependency database, derived-data cache, platform cooking, asynchronous streaming, animation import, or material database.
 - No scene editor, asset browser, viewport picking/gizmos, inspector, undo stack, play mode, project creation, packaging, installed SDK, plugin manifest, or package registry.
-- No automated live-Vulkan CI, validation gate, visual regression, performance regression, or maintained external-style sample project.
+- A self-hosted live-Vulkan workflow is defined, but coverage still depends on controlled runner availability; cross-driver visual/performance policy and a maintained external-style sample project remain incomplete.
 
 ### Verified baseline
 
-At the time this roadmap was prepared:
+Current local baseline (11 July 2026):
 
-- `ctest --preset linux-debug` passed all 18 registered tests.
-- A three-frame Vulkan sandbox smoke run created a 1280×720 swapchain, loaded the current textures, compiled the existing frame-graph variants, rendered the adaptive depth/HDR/tone-map path through multi-draw indirect submission, wrote a screenshot, reported timings/statistics, and exited cleanly.
-- Vulkan validation was requested but unavailable in that environment. The smoke run therefore does **not** establish validation-clean execution.
+- `ctest --preset linux-debug` passed all 22 registered tests.
+- A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
+- A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 
-This baseline is evidence of a working renderer foundation, not evidence of a production-ready engine.
+This baseline establishes S1's executable frame-graph and synchronization contract on one local Vulkan driver. It is evidence of a working renderer foundation, not production readiness or cross-hardware correctness.
 
 ## Milestone status
 
@@ -117,9 +117,9 @@ Roadmap entries are not claimable issues. See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 “Short term” means the next dependency-ordered capability chain, not a date estimate. Near-term effort should remain approximately renderer-heavy: roughly 70% renderer/infrastructure and 30% asset/editor foundation. The goal is to make the existing renderer extensible and measurable while producing the first visible creator workflow: an authored scene imported through a real asset pipeline.
 
-## S1. Executable frame graph and explicit resource ownership — **Next**
+## S1. Executable frame graph and explicit resource ownership — **Current**
 
-Turn the current metadata planner into the renderer’s execution and resource-lifetime backbone.
+The former metadata planner is now the renderer's execution and resource-lifetime backbone.
 
 Scope:
 
@@ -136,6 +136,13 @@ Exit criteria:
 - Resource creation, use, transition, retirement, and failure behavior have deterministic CPU contract tests.
 - A live Vulkan smoke run covers resize, swapchain recreation, graph recompilation, and validation-layer execution on a configured GPU runner.
 - Pass timings and transient memory usage are visible and machine-readable.
+
+Current evidence:
+
+- Depth-prepass-on/off and screenshot-on/off variants dispatch depth, HDR, tone-map/ImGui, and readback callbacks exclusively through `FrameGraph::execute`.
+- CPU contracts cover compilation, attachment/usage validation, topology, barriers, lifetimes, transient-slot aliasing, lifecycle order, reverse-order failure unwind, and Vulkan usage mapping.
+- The controlled GPU workflow requires Khronos validation plus synchronization validation and exercises resize/recreation, injected post-acquire recovery, graph recompilation, screenshots, and machine-readable summaries.
+- `RenderStats`, ImGui, and run-summary schema v2 expose pass/resource/barrier counts, transient requested/allocated bytes, physical slot count, compile/recompile state, and depth/HDR/tone-map GPU timings.
 
 ## S2. Asset identity, derived-data cache, and authored-scene import — **Next**
 
