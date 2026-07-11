@@ -1,17 +1,19 @@
 #include "core/Application.hpp"
-#include "core/WorldScheduler.hpp"
-
 #include "core/Log.hpp"
+#include "core/SimulationEvents.hpp"
+#include "core/WorldScheduler.hpp"
+#include "platform/InputActions.hpp"
 #include "renderer/SceneRenderer.hpp"
 #include "scene/ScenePersistence.hpp"
-#include "platform/InputActions.hpp"
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,7 +21,6 @@
 namespace {
 constexpr std::size_t kMaxSandboxSceneItems = 4'194'304;
 constexpr ve::InputActionId kPauseAction{0U};
-
 
 struct SandboxArgs {
     ve::EngineConfig config{};
@@ -35,8 +36,11 @@ struct SpinController {
     bool paused = false;
 };
 
+struct PauseRequested {};
+
 struct SandboxSystemContext {
     ve::InputActionMap inputActions;
+    ve::SimulationEventChannel<PauseRequested, 8> *pauseRequests = nullptr;
 };
 
 template <typename Integer> Integer parseInteger(const std::string_view value, const std::string_view optionName) {
@@ -117,15 +121,25 @@ void populateWorldScene(ve::World &world) {
     renderable.localBounds = ve::MeshBounds{{}, 1.0f, true};
 }
 
-void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler::CommandWriter &,
-                      const ve::InputState &input, const double, const double deltaSeconds) {
-    const auto &sandboxContext = *static_cast<const SandboxSystemContext *>(context);
+// Pause requests published here become visible to the consumer on the next successful fixed step.
+void publishPauseRequests(void *context, ve::World &, ve::WorldSystemScheduler::CommandWriter &,
+                          const ve::InputState &input, const double, const double) {
+    auto &sandboxContext = *static_cast<SandboxSystemContext *>(context);
     const ve::InputActionState actions = sandboxContext.inputActions.evaluate(input);
-    const bool pausePressed = actions.pressed(kPauseAction);
+    if (actions.pressed(kPauseAction)) {
+        static_cast<void>(sandboxContext.pauseRequests->publish(PauseRequested{}));
+    }
+}
+
+void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler::CommandWriter &,
+                      const ve::InputState &, const double, const double deltaSeconds) {
+    const auto &sandboxContext = *static_cast<const SandboxSystemContext *>(context);
+    const std::span<const PauseRequested> pauseRequests = sandboxContext.pauseRequests->events();
 
     world.each<ve::WorldSceneTransform, SpinController>(
         [&](const ve::World::Entity, ve::WorldSceneTransform &transform, SpinController &spin) {
-            if (pausePressed) {
+            for (const PauseRequested &pauseRequest : pauseRequests) {
+                static_cast<void>(pauseRequest);
                 spin.paused = !spin.paused;
             }
             if (!spin.paused) {
@@ -134,7 +148,6 @@ void updateWorldScene(void *context, ve::World &world, ve::WorldSystemScheduler:
             transform.current.rotation = ve::rotationY(static_cast<float>(spin.angleRadians));
         });
 }
-
 
 SandboxArgs parseArguments(int argc, char **argv) {
     SandboxArgs args{};
@@ -247,9 +260,14 @@ int main(int argc, char **argv) {
         SandboxSystemContext sandboxContext{};
         sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::key(ve::InputKey::Space));
         sandboxContext.inputActions.bind(kPauseAction, ve::InputBinding::gamepadButton(0U, ve::GamepadButton::A));
+        constexpr std::array<std::string_view, 1> spinDependencies{"pause-input"};
         ve::WorldSystemScheduler scheduler;
-        scheduler.reserveSystems(1);
-        scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{"spin", &updateWorldScene, &sandboxContext});
+        scheduler.reserveEventChannels(1);
+        sandboxContext.pauseRequests = &scheduler.createEventChannel<PauseRequested, 8>();
+        scheduler.reserveSystems(2);
+        scheduler.addSystem(ve::WorldSystemScheduler::SystemDesc{"pause-input", &publishPauseRequests, &sandboxContext});
+        scheduler.addSystem(
+            ve::WorldSystemScheduler::SystemDesc{"spin", &updateWorldScene, &sandboxContext, spinDependencies});
         scheduler.compile();
         const int result = app.run(world, scheduler, args.run);
         if (result == 0 && !args.saveScenePath.empty()) {

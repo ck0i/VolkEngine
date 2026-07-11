@@ -1,14 +1,17 @@
 #pragma once
 
+#include "core/SimulationEvents.hpp"
 #include "core/World.hpp"
 #include "platform/Input.hpp"
 
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ve {
@@ -73,6 +76,24 @@ public:
         emitted_.reserve(systemCount);
     }
 
+    void reserveEventChannels(const std::size_t channelCount) {
+        ensureNotExecuting();
+        eventChannels_.reserve(channelCount);
+    }
+
+    template <typename T, std::size_t Capacity>
+    [[nodiscard]] SimulationEventChannel<T, Capacity>& createEventChannel() {
+        ensureNotExecuting();
+
+        auto channel = std::unique_ptr<SimulationEventChannel<T, Capacity>>(
+            new SimulationEventChannel<T, Capacity>());
+        SimulationEventChannel<T, Capacity>& reference = *channel;
+        auto control = std::unique_ptr<detail::SimulationEventChannelControl>(
+            static_cast<detail::SimulationEventChannelControl*>(channel.release()));
+        eventChannels_.push_back(std::move(control));
+        invalidateCompilation();
+        return reference;
+    }
     void reserveDeferredCommandSlots(const std::size_t commandCount) {
         ensureNotExecuting();
         commands_.reserve(commandCount);
@@ -180,17 +201,42 @@ public:
         }
 
         executing_ = true;
+        for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
+            channel->checkpoint();
+        }
+
+        CommandWriter commandWriter{commands_};
         try {
-            CommandWriter commandWriter{commands_};
             for (const std::size_t systemIndex : executionOrder_) {
                 const System& system = systems_[systemIndex];
                 system.callback(system.context, world, commandWriter, input, elapsed, delta);
             }
+            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
+                if (channel->overflowed()) {
+                    throw std::overflow_error("Simulation event channel capacity exceeded");
+                }
+            }
+        } catch (...) {
+            commands_.discard();
+            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
+                channel->rollback();
+            }
+            executing_ = false;
+            throw;
+        }
+
+        try {
             ExecutionResult result = commands_.playback(world);
+            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
+                channel->promote();
+            }
             executing_ = false;
             return result;
         } catch (...) {
             commands_.discard();
+            for (const std::unique_ptr<detail::SimulationEventChannelControl>& channel : eventChannels_) {
+                channel->promote();
+            }
             executing_ = false;
             throw;
         }
@@ -256,6 +302,7 @@ private:
     std::vector<std::size_t> executionOrder_;
     std::vector<std::size_t> indegrees_;
     std::vector<bool> emitted_;
+    std::vector<std::unique_ptr<detail::SimulationEventChannelControl>> eventChannels_;
     WorldCommandBuffer commands_;
     bool compiled_ = false;
     bool executing_ = false;

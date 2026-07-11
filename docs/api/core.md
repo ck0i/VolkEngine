@@ -64,6 +64,14 @@ return app.run(ve::RunOptions{.maxFrames = 120});
 Each callback receives `(context, world, commands, input, simulationElapsedSeconds, simulationDeltaSeconds)`. Systems run single-threaded in compiled order. The restricted `CommandWriter` records `destroy`, `remove<T>`, and owned `emplace<T>` operations but cannot trigger playback or discard work mid-step. The scheduler plays its buffer once after all systems in the fixed step, so structural changes become visible only at that boundary. A system/playback exception propagates and discards scheduler-owned deferred work for the failed step. `reserveSystems()` and `reserveDeferredCommandSlots()` move registry and command-vector growth out of steady execution; callback work and type-erased component payload storage may still allocate. With no allocating callback or command capture, compiled ordering and dispatch allocate nothing.
 The `CommandWriter&` is valid only for the callback invocation and is non-copyable/non-movable; systems must not retain its address.
 
+#### Typed simulation events
+
+`createEventChannel<T, Capacity>()` creates a scheduler-owned `SimulationEventChannel` during setup and invalidates the compiled plan. Payloads are fixed-size, trivially copyable, nothrow-default-constructible values; both FIFO buffers live inline in the channel. Channel creation may allocate once inside scheduler ownership, but `publish`, `events`, checkpoint, rollback, and promotion allocate nothing. Returned references remain valid until scheduler destruction.
+
+Systems read only `events()` from the previous successful step and publish into a separate pending buffer. Successful execution retires the current batch and promotes pending events in FIFO order, giving deterministic one-successful-step latency regardless of producer/consumer system order. A full channel latches overflow; the scheduler raises `std::overflow_error` before structural command playback instead of silently dropping the step.
+
+Callback or overflow failure discards commands, removes events published after the step checkpoint, and retains the current batch for retry. Command playback is intentionally different because playback itself may have committed a prefix before throwing: remaining commands are discarded, while current events are consumed and newly published events are promoted so retry cannot duplicate events against an already-partially-mutated world. `reset()` clears both batches outside execution and rejects use during an active scheduler transaction.
+
 `Application::run(world, scheduler, options)` requires a compiled scheduler before entering the platform loop. It retains the same accumulated input, fixed-step timing, transform-history prepare/capture, exception invalidation, and presentation interpolation used by callback-based world runs. Callback/context storage is non-owning and must remain alive through the run.
 
 ## `Camera`
