@@ -58,6 +58,7 @@ function(volkengine_target_warnings target)
             target_compile_options(${target} PRIVATE -Werror)
         endif()
     endif()
+
     if("${target}" MATCHES "Test$")
         if(MSVC)
             target_compile_options(${target} PRIVATE /UNDEBUG)
@@ -65,7 +66,6 @@ function(volkengine_target_warnings target)
             target_compile_options(${target} PRIVATE -UNDEBUG)
         endif()
     endif()
-
 
     if(VOLKENGINE_ENABLE_SANITIZERS)
         if(MSVC)
@@ -87,7 +87,8 @@ set(VOLKENGINE_ASSET_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set(VOLKENGINE_ASSET_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets")
 file(GLOB VOLKENGINE_SHADER_SOURCES CONFIGURE_DEPENDS
     "${VOLKENGINE_SHADER_SOURCE_DIR}/*.vert"
-    "${VOLKENGINE_SHADER_SOURCE_DIR}/*.frag")
+    "${VOLKENGINE_SHADER_SOURCE_DIR}/*.frag"
+    "${VOLKENGINE_SHADER_SOURCE_DIR}/*.comp")
 
 set(VOLKENGINE_SHADER_OUTPUTS)
 foreach(shader ${VOLKENGINE_SHADER_SOURCES})
@@ -104,6 +105,61 @@ foreach(shader ${VOLKENGINE_SHADER_SOURCES})
         VERBATIM)
     list(APPEND VOLKENGINE_SHADER_OUTPUTS "${shader_output}")
 endforeach()
+set(VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT
+    "${VOLKENGINE_SHADER_OUTPUT_DIR}/scene_bindless.frag.spv")
+set(VOLKENGINE_BINDLESS_FRAGMENT_DEPFILE
+    "${VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT}.d")
+add_custom_command(
+    OUTPUT "${VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${VOLKENGINE_SHADER_OUTPUT_DIR}"
+    COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3
+            -DVE_BINDLESS=1 -I "${VOLKENGINE_SHADER_SOURCE_DIR}"
+            -MD -MF "${VOLKENGINE_BINDLESS_FRAGMENT_DEPFILE}"
+            -MT "${VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT}"
+            "${VOLKENGINE_SHADER_SOURCE_DIR}/scene.frag"
+            -o "${VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT}"
+    DEPENDS "${VOLKENGINE_SHADER_SOURCE_DIR}/scene.frag"
+    DEPFILE "${VOLKENGINE_BINDLESS_FRAGMENT_DEPFILE}"
+    COMMENT "Compiling bindless scene fragment shader"
+    VERBATIM)
+list(APPEND VOLKENGINE_SHADER_OUTPUTS "${VOLKENGINE_BINDLESS_FRAGMENT_OUTPUT}")
+set(VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT
+    "${VOLKENGINE_SHADER_OUTPUT_DIR}/scene_gpu.vert.spv")
+set(VOLKENGINE_GPU_SCENE_VERTEX_DEPFILE
+    "${VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT}.d")
+add_custom_command(
+    OUTPUT "${VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${VOLKENGINE_SHADER_OUTPUT_DIR}"
+    COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3
+            -DVE_GPU_VISIBILITY=1 -I "${VOLKENGINE_SHADER_SOURCE_DIR}"
+            -MD -MF "${VOLKENGINE_GPU_SCENE_VERTEX_DEPFILE}"
+            -MT "${VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT}"
+            "${VOLKENGINE_SHADER_SOURCE_DIR}/scene.vert"
+            -o "${VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT}"
+    DEPENDS "${VOLKENGINE_SHADER_SOURCE_DIR}/scene.vert"
+    DEPFILE "${VOLKENGINE_GPU_SCENE_VERTEX_DEPFILE}"
+    COMMENT "Compiling GPU-driven scene vertex shader"
+    VERBATIM)
+set(VOLKENGINE_GPU_DEPTH_VERTEX_OUTPUT
+    "${VOLKENGINE_SHADER_OUTPUT_DIR}/scene_depth_gpu.vert.spv")
+set(VOLKENGINE_GPU_DEPTH_VERTEX_DEPFILE
+    "${VOLKENGINE_GPU_DEPTH_VERTEX_OUTPUT}.d")
+add_custom_command(
+    OUTPUT "${VOLKENGINE_GPU_DEPTH_VERTEX_OUTPUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${VOLKENGINE_SHADER_OUTPUT_DIR}"
+    COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3
+            -DVE_GPU_VISIBILITY=1 -I "${VOLKENGINE_SHADER_SOURCE_DIR}"
+            -MD -MF "${VOLKENGINE_GPU_DEPTH_VERTEX_DEPFILE}"
+            -MT "${VOLKENGINE_GPU_DEPTH_VERTEX_OUTPUT}"
+            "${VOLKENGINE_SHADER_SOURCE_DIR}/scene_depth.vert"
+            -o "${VOLKENGINE_GPU_DEPTH_VERTEX_OUTPUT}"
+    DEPENDS "${VOLKENGINE_SHADER_SOURCE_DIR}/scene_depth.vert"
+    DEPFILE "${VOLKENGINE_GPU_DEPTH_VERTEX_DEPFILE}"
+    COMMENT "Compiling GPU-driven depth vertex shader"
+    VERBATIM)
+list(APPEND VOLKENGINE_SHADER_OUTPUTS
+    "${VOLKENGINE_GPU_SCENE_VERTEX_OUTPUT}"
+    "${VOLKENGINE_GPU_DEPTH_VERTEX_OUTPUT}")
 add_custom_target(VolkEngineShaders DEPENDS ${VOLKENGINE_SHADER_OUTPUTS})
 add_custom_target(VolkEngineAssets
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -132,6 +188,7 @@ add_library(VolkEngine STATIC
     engine/platform/InputActions.cpp
     engine/platform/Window.cpp
     engine/renderer/Geometry.cpp
+    engine/renderer/MeshClusters.cpp
     engine/renderer/GreedyMesher.cpp
     engine/renderer/ImageLoader.cpp
     engine/renderer/StbImageUsage.cpp
@@ -260,6 +317,8 @@ add_executable(VolkEngineAssetPipelineCpuTest
     engine/assets/TextureArtifact.cpp
     engine/assets/ReferenceAssetPipeline.cpp
     engine/core/FileSystem.cpp
+    engine/renderer/Geometry.cpp
+    engine/renderer/MeshClusters.cpp
     engine/renderer/ImageLoader.cpp
     engine/renderer/StbImageUsage.cpp)
 target_link_libraries(VolkEngineAssetPipelineCpuTest
@@ -359,6 +418,16 @@ target_include_directories(VolkEngineGeometryCpuTest
 volkengine_target_warnings(VolkEngineGeometryCpuTest)
 add_test(NAME GeometryCpu
     COMMAND VolkEngineGeometryCpuTest)
+add_executable(VolkEngineMeshClustersCpuTest
+    tests/MeshClustersCpuTests.cpp
+    engine/renderer/Geometry.cpp
+    engine/renderer/MeshClusters.cpp)
+target_include_directories(VolkEngineMeshClustersCpuTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine")
+volkengine_target_warnings(VolkEngineMeshClustersCpuTest)
+add_test(NAME MeshClustersCpu
+    COMMAND VolkEngineMeshClustersCpuTest)
 add_executable(VolkEngineGreedyMesherCpuTest
     tests/GreedyMesherCpuTests.cpp
     engine/renderer/Geometry.cpp
@@ -475,7 +544,6 @@ target_include_directories(VolkEngineWorldCpuTest
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine")
 volkengine_target_warnings(VolkEngineWorldCpuTest)
-add_test(NAME WorldCpu
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     foreach(target IN ITEMS
             VolkEngineWorldSchedulerCpuTest
@@ -483,4 +551,5 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         target_compile_options(${target} PRIVATE -Wno-mismatched-new-delete)
     endforeach()
 endif()
+add_test(NAME WorldCpu
     COMMAND VolkEngineWorldCpuTest)

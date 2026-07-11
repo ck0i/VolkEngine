@@ -38,6 +38,13 @@ int main() {
     summary.stats.assetCookMs = 1.25;
     summary.stats.assetRecordCount = 6;
     summary.stats.assetCacheHits = 6;
+    summary.stats.sceneClusterCount = 87;
+    summary.stats.visibleClusterInstanceCount = 1'540;
+    summary.stats.testedClusterInstanceCount = 2'048;
+    summary.stats.occludedClusterInstanceCount = 508;
+    summary.stats.materialDescriptorCount = 3;
+    summary.stats.materialDescriptorCapacity = 4'096;
+    summary.stats.gpuDrivenVisibility = true;
     ve::BoundedMetricSamples samples;
     for (std::uint32_t value = 1; value <= 100U; ++value) {
         samples.add(static_cast<double>(value));
@@ -58,6 +65,18 @@ int main() {
     assert(serialized.find("\"frame_count\":120") != std::string::npos);
     assert(serialized.find("\"gpu_frame\":{\"available\":false,\"reason\":\"GPU timestamp result unavailable\"") != std::string::npos);
     assert(serialized.find("\"host_device_memory\":{\"available\":false") != std::string::npos);
+    assert(serialized.find("\"tested_cluster_instances\":2048") !=
+           std::string::npos);
+    assert(serialized.find("\"occluded_cluster_instances\":508") !=
+           std::string::npos);
+    assert(serialized.find("\"material_descriptors\":3") !=
+           std::string::npos);
+    assert(serialized.find("\"material_descriptor_capacity\":4096") !=
+           std::string::npos);
+    assert(serialized.find("\"gpu_cluster_cull\":{\"available\":false") !=
+           std::string::npos);
+    assert(serialized.find("\"gpu_depth_pyramid\":{\"available\":false") !=
+           std::string::npos);
     assert(serialized.find("\"frame_graph\":{\"passes\":4,\"logical_resources\":4,\"barriers\":8") != std::string::npos);
     assert(serialized.find("\"last_recompile_reason\":\"resize\"") != std::string::npos);
     assert(serialized.find("\"assets\":{\"records\":6,\"cache_hits\":6,\"cache_misses\":0,\"rebuilt\":0}") !=

@@ -150,6 +150,7 @@
         "VolkEngineFrameGraphCpuTest",
         "VolkEngineImageLoaderCpuTest",
         "VolkEngineGeometryCpuTest",
+        "VolkEngineMeshClustersCpuTest",
         "VolkEngineGreedyMesherCpuTest",
         "VolkEngineGpuResourceRegistryCpuTest",
         "VolkEngineMathCpuTest",

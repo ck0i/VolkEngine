@@ -324,6 +324,10 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
             if (normals == nullptr) { if (!options.generateMissingNormals) throw std::runtime_error("glTF primitive is missing NORMAL"); generateNormals(imported.mesh); }
             if (tangents == nullptr) { if (!options.generateMissingTangents) throw std::runtime_error("glTF primitive is missing TANGENT"); generateTangents(imported.mesh); }
             imported.mesh.bounds = calculateBounds(imported.mesh.vertices);
+            optimizeTriangleIndexOrderForVertexCache(imported.mesh.indices,
+                                                     imported.mesh.vertices.size());
+            optimizeVertexFetchOrder(imported.mesh);
+            imported.clusters = buildMeshClusters(imported.mesh);
             if (primitive.material != nullptr) imported.material = AssetId::derive(sceneId, "material/" + std::to_string(primitive.material - data->materials));
             meshPrimitiveIds[meshIndex].push_back(imported.id);
             result.meshes.push_back(std::move(imported));
@@ -431,6 +435,11 @@ std::vector<std::byte> serializeMeshArtifact(const ImportedMeshPrimitive& mesh) 
         mesh.mesh.indices.size() > kMaximumArtifactElements) {
         throw std::runtime_error("Mesh artifact is invalid or oversized");
     }
+    if (mesh.clusters.clusters.size() > kMaximumArtifactElements ||
+        mesh.clusters.hierarchy.size() > kMaximumArtifactElements) {
+        throw std::runtime_error("Mesh artifact cluster data is oversized");
+    }
+    validateMeshClusters(mesh.mesh, mesh.clusters);
     BinaryWriter writer;
     writer.pod(kMeshMagic);
     writer.pod(ImportedGltfScene::kMeshArtifactSchemaVersion);
@@ -444,6 +453,21 @@ std::vector<std::byte> serializeMeshArtifact(const ImportedMeshPrimitive& mesh) 
     writer.output.insert(writer.output.end(), vertices.begin(), vertices.end());
     const auto indices = std::as_bytes(std::span{mesh.mesh.indices});
     writer.output.insert(writer.output.end(), indices.begin(), indices.end());
+    writer.pod(static_cast<std::uint64_t>(mesh.clusters.clusters.size()));
+    writer.pod(static_cast<std::uint64_t>(mesh.clusters.hierarchy.size()));
+    writer.pod(mesh.clusters.root);
+    for (const MeshCluster& cluster : mesh.clusters.clusters) {
+        writer.pod(cluster.firstIndex);
+        writer.pod(cluster.indexCount);
+        writer.pod(cluster.vertexCount);
+        writeBounds(writer, cluster.bounds);
+    }
+    for (const MeshClusterNode& node : mesh.clusters.hierarchy) {
+        writeBounds(writer, node.bounds);
+        writer.pod(node.left);
+        writer.pod(node.right);
+        writer.pod(node.cluster);
+    }
     return std::move(writer.output);
 }
 
@@ -473,6 +497,27 @@ ImportedMeshPrimitive deserializeMeshArtifact(const std::span<const std::byte> b
     for (std::uint32_t& index : mesh.mesh.indices) {
         index = reader.pod<std::uint32_t>();
     }
+    const auto clusterCount = reader.pod<std::uint64_t>();
+    const auto hierarchyCount = reader.pod<std::uint64_t>();
+    mesh.clusters.root = reader.pod<std::uint32_t>();
+    if (clusterCount > kMaximumArtifactElements ||
+        hierarchyCount > kMaximumArtifactElements) {
+        throw std::runtime_error("Mesh artifact cluster count exceeds limit");
+    }
+    mesh.clusters.clusters.resize(static_cast<std::size_t>(clusterCount));
+    mesh.clusters.hierarchy.resize(static_cast<std::size_t>(hierarchyCount));
+    for (MeshCluster& cluster : mesh.clusters.clusters) {
+        cluster.firstIndex = reader.pod<std::uint32_t>();
+        cluster.indexCount = reader.pod<std::uint32_t>();
+        cluster.vertexCount = reader.pod<std::uint32_t>();
+        cluster.bounds = readBounds(reader);
+    }
+    for (MeshClusterNode& node : mesh.clusters.hierarchy) {
+        node.bounds = readBounds(reader);
+        node.left = reader.pod<std::uint32_t>();
+        node.right = reader.pod<std::uint32_t>();
+        node.cluster = reader.pod<std::uint32_t>();
+    }
     if (!reader.done()) {
         throw std::runtime_error("Mesh artifact has trailing data");
     }
@@ -481,6 +526,7 @@ ImportedMeshPrimitive deserializeMeshArtifact(const std::span<const std::byte> b
             throw std::runtime_error("Mesh artifact index is out of range");
         }
     }
+    validateMeshClusters(mesh.mesh, mesh.clusters);
     return mesh;
 }
 

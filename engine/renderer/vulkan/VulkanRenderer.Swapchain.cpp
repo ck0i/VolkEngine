@@ -141,7 +141,10 @@ VkFormat VulkanRenderer::Impl::findDepthFormat() const {
     for (VkFormat format : candidates) {
         VkFormatProperties properties{};
         vkGetPhysicalDeviceFormatProperties(deviceOwner_.physicalDevice, format, &properties);
-        if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0U) {
+        constexpr VkFormatFeatureFlags required =
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        if ((properties.optimalTilingFeatures & required) == required) {
             return format;
         }
     }
@@ -151,9 +154,13 @@ VkFormat VulkanRenderer::Impl::findDepthFormat() const {
 void VulkanRenderer::Impl::realizeFrameGraphResources() {
     ImageResource replacementDepth;
     ImageResource replacementHdr;
+    ImageResource replacementDepthPyramid;
+    std::vector<VkImageView> replacementDepthPyramidMipViews;
     try {
         replacementDepth = createImage(
-            swapchainOwner_.extent, findDepthFormat(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            swapchainOwner_.extent, findDepthFormat(),
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
             VK_IMAGE_ASPECT_DEPTH_BIT);
         setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(replacementDepth.image), "Depth Image");
         vmaSetAllocationName(deviceOwner_.allocator, replacementDepth.allocation, "Depth Image Allocation");
@@ -172,7 +179,63 @@ void VulkanRenderer::Impl::realizeFrameGraphResources() {
         replacementHdr.resourceId = resourceOwner_.registry.registerResource(
             GpuResourceKind::Image, "HDR Color Image",
             imageByteEstimate(replacementHdr.extent, replacementHdr.format));
+        const VkExtent2D depthPyramidExtent{
+            swapchainOwner_.extent.width / 2U +
+                swapchainOwner_.extent.width % 2U,
+            swapchainOwner_.extent.height / 2U +
+                swapchainOwner_.extent.height % 2U};
+        const std::uint32_t depthPyramidMipLevels =
+            1U + static_cast<std::uint32_t>(std::floor(std::log2(
+                     static_cast<double>(std::max(
+                         depthPyramidExtent.width,
+                         depthPyramidExtent.height)))));
+        if (depthPyramidMipLevels > kMaxDepthPyramidMipLevels) {
+            throw std::runtime_error(
+                "Depth pyramid mip count exceeds renderer limit");
+        }
+        replacementDepthPyramid = createImage(
+            depthPyramidExtent, VK_FORMAT_R32_SFLOAT,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT, depthPyramidMipLevels);
+        setObjectName(VK_OBJECT_TYPE_IMAGE,
+                      handleToUint64(replacementDepthPyramid.image),
+                      "Depth Pyramid Image");
+        vmaSetAllocationName(deviceOwner_.allocator,
+                             replacementDepthPyramid.allocation,
+                             "Depth Pyramid Allocation");
+        setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW,
+                      handleToUint64(replacementDepthPyramid.view),
+                      "Depth Pyramid Full View");
+        replacementDepthPyramidMipViews.reserve(depthPyramidMipLevels);
+        for (std::uint32_t mip = 0; mip < depthPyramidMipLevels; ++mip) {
+            VkImageViewCreateInfo viewInfo{
+                VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+            viewInfo.image = replacementDepthPyramid.image;
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = VK_FORMAT_R32_SFLOAT;
+            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel = mip;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount = 1;
+            VkImageView view = VK_NULL_HANDLE;
+            checkVk(vkCreateImageView(deviceOwner_.device, &viewInfo, nullptr,
+                                      &view),
+                    "vkCreateImageView depth pyramid mip");
+            replacementDepthPyramidMipViews.push_back(view);
+            setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, handleToUint64(view),
+                          "Depth Pyramid Mip " + std::to_string(mip));
+        }
+        replacementDepthPyramid.resourceId =
+            resourceOwner_.registry.registerResource(
+                GpuResourceKind::Image, "Depth Pyramid Image",
+                replacementDepthPyramid.allocationBytes);
     } catch (...) {
+        for (VkImageView view : replacementDepthPyramidMipViews) {
+            vkDestroyImageView(deviceOwner_.device, view, nullptr);
+        }
+        replacementDepthPyramidMipViews.clear();
+        destroyImage(replacementDepthPyramid);
         destroyImage(replacementHdr);
         destroyImage(replacementDepth);
         throw;
@@ -180,13 +243,31 @@ void VulkanRenderer::Impl::realizeFrameGraphResources() {
 
     ImageResource oldDepth = takeImage(resourceOwner_.depth);
     ImageResource oldHdr = takeImage(resourceOwner_.hdr);
+    ImageResource oldDepthPyramid =
+        takeImage(resourceOwner_.depthPyramid);
+    std::vector<VkImageView> oldDepthPyramidMipViews =
+        std::move(resourceOwner_.depthPyramidMipViews);
     resourceOwner_.depth = takeImage(replacementDepth);
     resourceOwner_.hdr = takeImage(replacementHdr);
+    resourceOwner_.depthPyramid = takeImage(replacementDepthPyramid);
+    resourceOwner_.depthPyramidMipViews =
+        std::move(replacementDepthPyramidMipViews);
+    resourceOwner_.depthPyramidValid = false;
+    for (VkImageView view : oldDepthPyramidMipViews) {
+        vkDestroyImageView(deviceOwner_.device, view, nullptr);
+    }
+    destroyImage(oldDepthPyramid);
     destroyImage(oldHdr);
     destroyImage(oldDepth);
 }
 
 void VulkanRenderer::Impl::cleanupSwapchain() {
+    for (VkImageView view : resourceOwner_.depthPyramidMipViews) {
+        vkDestroyImageView(deviceOwner_.device, view, nullptr);
+    }
+    resourceOwner_.depthPyramidMipViews.clear();
+    destroyImage(resourceOwner_.depthPyramid);
+    resourceOwner_.depthPyramidValid = false;
     destroyImage(resourceOwner_.hdr);
     destroyImage(resourceOwner_.depth);
     for (VkImageView view : swapchainOwner_.imageViews) {
@@ -242,6 +323,7 @@ void VulkanRenderer::Impl::recreateSwapchain() {
     if (hadImGui) {
         createImGui();
     }
+    updateDepthPyramidDescriptors();
 
     const bool pipelineFormatsChanged = previousSwapchainFormat != swapchainOwner_.format || previousHdrFormat != resourceOwner_.hdr.format || previousDepthFormat != resourceOwner_.depth.format;
     if (pipelineFormatsChanged || pipelineOwner_.depthPrepass == VK_NULL_HANDLE || pipelineOwner_.scene == VK_NULL_HANDLE || pipelineOwner_.sceneNoPrepass == VK_NULL_HANDLE || pipelineOwner_.tonemap == VK_NULL_HANDLE) {

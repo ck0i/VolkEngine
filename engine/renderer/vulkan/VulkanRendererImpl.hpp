@@ -463,13 +463,19 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
     }
 }
 
-inline std::array<std::filesystem::path, 5> shaderSpirvPaths(const std::filesystem::path& shaderDirectory) {
+inline std::array<std::filesystem::path, 10> shaderSpirvPaths(
+    const std::filesystem::path& shaderDirectory) {
     return {
         shaderDirectory / "scene.vert.spv",
         shaderDirectory / "scene.frag.spv",
         shaderDirectory / "tonemap.vert.spv",
         shaderDirectory / "tonemap.frag.spv",
         shaderDirectory / "scene_depth.vert.spv",
+        shaderDirectory / "scene_bindless.frag.spv",
+        shaderDirectory / "scene_cull.comp.spv",
+        shaderDirectory / "scene_gpu.vert.spv",
+        shaderDirectory / "scene_depth_gpu.vert.spv",
+        shaderDirectory / "depth_pyramid.comp.spv",
     };
 }
 } // namespace vulkan_renderer_detail
@@ -487,6 +493,8 @@ public:
     void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
               double elapsedSeconds, double frameDeltaMs);
     [[nodiscard]] MeshBounds meshBounds(MeshAssetHandle mesh) const;
+    [[nodiscard]] std::array<TextureAssetHandle, 3> materialTextureHandles(
+        AssetId material) const;
     [[nodiscard]] RenderStats stats() const { return stats_; }
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const { return deviceOwner_.info; }
     void requestScreenshot(std::filesystem::path path);
@@ -495,11 +503,15 @@ public:
 
 private:
     static constexpr std::size_t kMaxFramesInFlight = 2;
+    static constexpr std::size_t kMaxDepthPyramidMipLevels = 16;
     static constexpr std::uint32_t kTimestampFrameStart = 0;
-    static constexpr std::uint32_t kTimestampDepthEnd = 1;
-    static constexpr std::uint32_t kTimestampHdrEnd = 2;
-    static constexpr std::uint32_t kTimestampFinalEnd = 3;
-    static constexpr std::uint32_t kTimestampQueriesPerFrame = kTimestampFinalEnd + 1U;
+    static constexpr std::uint32_t kTimestampCullEnd = 1;
+    static constexpr std::uint32_t kTimestampDepthEnd = 2;
+    static constexpr std::uint32_t kTimestampHdrEnd = 3;
+    static constexpr std::uint32_t kTimestampDepthPyramidEnd = 4;
+    static constexpr std::uint32_t kTimestampFinalEnd = 5;
+    static constexpr std::uint32_t kTimestampQueriesPerFrame =
+        kTimestampFinalEnd + 1U;
 
     struct QueueFamilies {
         std::optional<std::uint32_t> graphics;
@@ -566,6 +578,26 @@ private:
         std::uint32_t firstIndex = 0;
         std::int32_t vertexOffset = 0;
     };
+    struct alignas(16) GpuCluster {
+        Vec4 bounds;
+        std::uint32_t indexCount = 0;
+        std::uint32_t firstIndex = 0;
+        std::int32_t vertexOffset = 0;
+        std::uint32_t meshIndex = 0;
+    };
+    struct alignas(16) GpuClusterNode {
+        Vec4 bounds;
+        std::uint32_t left = kInvalidClusterNode;
+        std::uint32_t right = kInvalidClusterNode;
+        std::uint32_t cluster = kInvalidClusterNode;
+        std::uint32_t padding = 0;
+    };
+    static_assert(sizeof(GpuCluster) == 32);
+    static_assert(sizeof(GpuClusterNode) == 32);
+    struct GpuMeshClusterRange {
+        std::uint32_t firstCluster = 0;
+        std::uint32_t clusterCount = 0;
+    };
     struct MeshBatch {
         const GpuMesh* mesh = nullptr;
         std::uint32_t firstInstance = 0;
@@ -591,10 +623,30 @@ private:
         Buffer sceneUniforms;
         Buffer instanceData;
         Buffer indirectCommands;
+        Buffer visibleInstanceIndices;
+        Buffer cullCandidates;
+        Buffer cullCounters;
+        Buffer cullUniforms;
+        std::size_t candidateCapacity = 0;
+        std::size_t visibleInstanceIndexCapacity = 0;
+        std::size_t clusterInstanceCapacity = 0;
         std::size_t instanceCapacity = 0;
         bool submittedOnce = false;
         bool submittedDepthPrepass = false;
         std::uint32_t submittedScenePassCount = 0;
+        bool depthPyramidBuildRecorded = false;
+        std::vector<std::uint32_t> expectedClusterInstanceCounts;
+        bool gpuVisibilityValidationPending = false;
+        std::uint32_t expectedVisibleItemCount = 0;
+        std::array<std::uint32_t, 3> expectedSphereLodCounts{};
+        std::uint32_t submittedSceneItemCount = 0;
+        std::uint32_t completedVisibleItemCount = 0;
+        std::uint32_t completedVisibleClusterInstanceCount = 0;
+        std::array<std::uint32_t, 4> completedSphereLodCounts{};
+        std::uint64_t completedSceneTriangleCount = 0;
+        std::uint32_t completedTestedClusterInstanceCount = 0;
+        std::uint32_t completedOccludedClusterInstanceCount = 0;
+        bool completedGpuCullCountersValid = false;
         std::vector<VkSemaphore> uploadWaitSemaphores;
     };
 
@@ -609,12 +661,23 @@ private:
         FrameGraph::ResourceHandle depth;
         FrameGraph::ResourceHandle hdr;
         FrameGraph::ResourceHandle swapchain;
+        FrameGraph::ResourceHandle cullCandidates;
+        FrameGraph::ResourceHandle cullCounters;
+        FrameGraph::ResourceHandle cullUniforms;
+        FrameGraph::ResourceHandle visibleInstances;
+        FrameGraph::ResourceHandle sceneInstances;
+        FrameGraph::ResourceHandle indirectCommands;
+        FrameGraph::ResourceHandle clusterData;
+        FrameGraph::ResourceHandle meshClusterRanges;
+        FrameGraph::ResourceHandle depthPyramid;
         FrameGraph::ResourceHandle screenshotReadback;
     };
     struct FrameGraphPasses {
         FrameGraph::PassHandle depthPrepass;
         FrameGraph::PassHandle hdrScene;
         FrameGraph::PassHandle tonemap;
+        FrameGraph::PassHandle gpuCull;
+        FrameGraph::PassHandle depthPyramid;
         FrameGraph::PassHandle screenshotReadback;
     };
     struct FrameGraphVariant {
@@ -633,6 +696,7 @@ private:
         std::uint32_t imageIndex = 0;
         std::uint32_t sceneDrawCalls = 0;
         bool useDepthPrepass = false;
+        std::uint32_t gpuCullCandidateCount = 0;
     };
     struct alignas(16) SceneUniforms {
         Mat4 viewProjection;
@@ -652,6 +716,32 @@ private:
         Vec4 albedoRoughness;
         Vec4 emissiveMetallic;
         Vec4 materialFlags;
+        std::array<std::uint32_t, 4> textureIndices{};
+    };
+    struct alignas(16) GpuCullCandidate {
+        Mat4 model;
+        Vec4 bounds;
+        std::array<std::uint32_t, 4> metadata{};
+    };
+    struct alignas(16) GpuCullUniforms {
+        std::array<Vec4, 6> frustumPlanes;
+        Vec4 cameraPositionProjectionScale;
+        Vec4 cameraForward;
+        std::array<std::uint32_t, 4> counts{};
+        std::array<std::uint32_t, 4> sphereLodMeshes{};
+        Mat4 viewProjection;
+        Vec4 depthPyramid;
+    };
+    struct alignas(16) GpuCullCounters {
+        std::uint32_t visibleItemCount = 0;
+        std::uint32_t visibleClusterInstanceCount = 0;
+        std::uint32_t testedClusterInstanceCount = 0;
+        std::uint32_t occludedClusterInstanceCount = 0;
+        std::array<std::uint32_t, 4> sphereLodCounts{};
+    };
+    struct DepthPyramidPushConstants {
+        std::uint32_t sourceWidth = 0;
+        std::uint32_t sourceHeight = 0;
     };
     struct PipelineSet {
         VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
@@ -660,6 +750,10 @@ private:
         VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
         VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
         VkPipeline tonemap = VK_NULL_HANDLE;
+        VkPipelineLayout cullLayout = VK_NULL_HANDLE;
+        VkPipelineLayout depthPyramidLayout = VK_NULL_HANDLE;
+        VkPipeline depthPyramid = VK_NULL_HANDLE;
+        VkPipeline cull = VK_NULL_HANDLE;
     };
     struct RetiredPipelineSet {
         PipelineSet pipelines;
@@ -674,7 +768,7 @@ private:
     static_assert(offsetof(SceneUniforms, lightColor) == 96, "SceneUniforms.lightColor offset mismatch");
     static_assert(offsetof(SceneUniforms, ambientSkyColor) == 112, "SceneUniforms.ambientSkyColor offset mismatch");
     static_assert(offsetof(SceneUniforms, ambientGroundColor) == 128, "SceneUniforms.ambientGroundColor offset mismatch");
-    static_assert(sizeof(InstanceData) == 160, "InstanceData must match GLSL SceneInstance layout");
+    static_assert(sizeof(InstanceData) == 176, "InstanceData must match GLSL SceneInstance layout");
     static_assert(offsetof(InstanceData, model) == 0, "InstanceData.model offset mismatch");
     static_assert(offsetof(InstanceData, normalMatrix0) == 64, "InstanceData.normalMatrix0 offset mismatch");
     static_assert(offsetof(InstanceData, normalMatrix1) == 80, "InstanceData.normalMatrix1 offset mismatch");
@@ -682,6 +776,18 @@ private:
     static_assert(offsetof(InstanceData, albedoRoughness) == 112, "InstanceData.albedoRoughness offset mismatch");
     static_assert(offsetof(InstanceData, emissiveMetallic) == 128, "InstanceData.emissiveMetallic offset mismatch");
     static_assert(offsetof(InstanceData, materialFlags) == 144, "InstanceData.materialFlags offset mismatch");
+    static_assert(offsetof(InstanceData, textureIndices) == 160, "InstanceData.textureIndices offset mismatch");
+    static_assert(sizeof(GpuCullCandidate) == 96,
+                  "GpuCullCandidate must match GLSL CullCandidate layout");
+    static_assert(sizeof(GpuCullUniforms) == 240,
+                  "GpuCullUniforms must match GLSL CullData layout");
+    static_assert(sizeof(GpuMeshClusterRange) == 8,
+                  "GpuMeshClusterRange must match GLSL MeshClusterRange layout");
+    static_assert(sizeof(GpuCullCounters) == 32,
+                  "GpuCullCounters must match GLSL CullCounterData layout");
+    static_assert(sizeof(DepthPyramidPushConstants) == 8);
+    static_assert(offsetof(GpuCullCounters, sphereLodCounts) == 16,
+                  "GpuCullCounters.sphereLodCounts offset mismatch");
 
     void createInstance();
     void createDebugMessenger();
@@ -713,6 +819,8 @@ private:
     void createFrameResources();
     void createMeshes();
     void createTonemapDescriptorSet();
+    void createDepthPyramidDescriptorSets();
+    void updateDepthPyramidDescriptors() const;
     void createTimestampQueries();
     void createFrameGraph(bool resizeRecompile);
     void createImGui();
@@ -730,6 +838,9 @@ private:
     [[nodiscard]] static bool createGraphResource(void* context, FrameGraph::ResourceHandle resource,
                                                   const FrameGraph::ResourceDesc& desc,
                                                   const FrameGraph::TransientAllocation& allocation) noexcept;
+    void recordCullGraphPass(const FrameGraphRecordContext& context,
+                             const FrameGraph::PassDesc& desc,
+                             const FrameGraph::PassResources& resources);
     [[nodiscard]] static bool transitionGraphResource(void* context,
                                                       const FrameGraph::BarrierIntent& intent) noexcept;
     [[nodiscard]] static bool executeGraphPass(void* context, FrameGraph::PassHandle pass,
@@ -738,6 +849,9 @@ private:
     [[nodiscard]] static bool retireGraphResource(void* context, FrameGraph::ResourceHandle resource,
                                                   const FrameGraph::ResourceDesc& desc,
                                                   const FrameGraph::TransientAllocation& allocation) noexcept;
+    void recordDepthPyramidGraphPass(
+        const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
+        const FrameGraph::PassResources& resources);
     void recordSceneBatches(const FrameGraphRecordContext& context) const;
     void recordDepthGraphPass(const FrameGraphRecordContext& context, const FrameGraph::PassDesc& desc,
                               const FrameGraph::PassResources& resources);
@@ -749,14 +863,28 @@ private:
                                    const FrameGraph::PassResources& resources);
     void applyGraphTransition(const FrameGraphRecordContext& context, const FrameGraph::BarrierIntent& intent);
     void recordCommandBuffer(FrameResources& frame, std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, bool useDepthPrepass, const Buffer* screenshotReadback, FrameGraphVariant& graphVariant);
+    void updateFrameVisibleInstanceDescriptor(std::size_t frameIndex) const;
     void restoreFrameFenceAfterSubmitFailure(FrameResources& frame, std::size_t frameIndex, VkResult submitResult);
     void replaceFrameImageAvailableSemaphore(FrameResources& frame, std::size_t frameIndex);
     void recoverAcquiredFrame(FrameResources& frame, std::size_t frameIndex, std::uint32_t imageIndex,
                               const FrameImageSyncSnapshot& imageSyncSnapshot);
     [[nodiscard]] VkDeviceSize checkedSceneInstanceBufferSize(std::size_t capacity) const;
     void createFrameInstanceDataBuffer(FrameResources& frame, std::size_t frameIndex, std::size_t capacity);
+    [[nodiscard]] InstanceData instanceDataFor(
+        const SceneRenderItem& item) const;
     void updateFrameInstanceDataDescriptor(std::size_t frameIndex) const;
     void ensureSceneInstanceCapacity(FrameResources& frame, std::size_t frameIndex, std::size_t requiredCapacity);
+    void updateFrameCullDescriptors(std::size_t frameIndex) const;
+    void ensureGpuVisibilityCapacity(FrameResources& frame, std::size_t frameIndex,
+                                     std::size_t candidateCount,
+                                     std::size_t clusterInstanceCapacity);
+    [[nodiscard]] SceneVisibilityPlan prepareGpuVisibility(
+        FrameResources& frame, std::size_t frameIndex, const Camera& camera,
+        const Mat4& projection, const Mat4& viewProjection,
+        const SceneRenderList& renderItems);
+    void recordGpuCull(VkCommandBuffer commandBuffer,
+                       std::uint32_t candidateCount) const;
+    void validateGpuVisibility(FrameResources& frame) const;
     void updateUniforms(FrameResources& frame, const Camera& camera, const Mat4& viewProjection, double elapsedSeconds);
     void readBackGpuTimestamp(std::uint32_t frameIndex);
     [[nodiscard]] bool screenshotFormatSupported() const;
@@ -894,12 +1022,24 @@ private:
     FrameOwner frameOwner_;
 
 
+    struct MaterialTextureBinding {
+        AssetId material;
+        std::array<TextureAssetHandle, vulkan_renderer_detail::kMaterialTextureCount> textures{};
+    };
+
     struct ResourceOwner {
         ImageResource depth;
+        std::vector<TextureRole> materialTextureRoles;
+        ImageResource depthPyramid;
+        std::vector<VkImageView> depthPyramidMipViews;
+        bool depthPyramidValid = false;
         ImageResource hdr;
         std::vector<ImageResource> materialTextures;
         std::array<std::size_t, vulkan_renderer_detail::kMaterialTextureCount>
             referenceMaterialTextureIndices{};
+        std::vector<MaterialTextureBinding> materialTextureBindings;
+        std::uint32_t materialDescriptorCapacity = vulkan_renderer_detail::kMaterialTextureCount;
+        bool bindlessMaterialsEnabled = false;
         VkSampler linearSampler = VK_NULL_HANDLE;
         VkSampler textureSampler = VK_NULL_HANDLE;
         VkSampler normalTextureSampler = VK_NULL_HANDLE;
@@ -908,11 +1048,23 @@ private:
         float maxSamplerAnisotropy = 1.0f;
         VkDescriptorSetLayout sceneSetLayout = VK_NULL_HANDLE;
         VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSetLayout depthPyramidSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
         VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
         std::array<VkDescriptorSet, kMaxFramesInFlight> sceneDescriptorSets{};
         VkDescriptorSet tonemapDescriptorSet = VK_NULL_HANDLE;
+        std::array<VkDescriptorSet, kMaxDepthPyramidMipLevels>
+            depthPyramidDescriptorSets{};
+        std::array<VkDescriptorSet, kMaxFramesInFlight> cullDescriptorSets{};
         const ReferenceAssetBundle* referenceAssets = nullptr;
         Buffer sceneVertexBuffer;
+        Buffer clusterData;
+        Buffer clusterHierarchy;
+        Buffer meshClusterRanges;
+        std::vector<GpuMeshClusterRange> sceneMeshClusterRanges;
+        std::vector<GpuCluster> sceneClusters;
+        std::vector<GpuClusterNode> sceneClusterHierarchy;
+        std::vector<std::uint32_t> sceneClusterRoots;
         Buffer sceneIndexBuffer;
         std::vector<GpuMesh> sceneMeshes;
         std::vector<MeshBounds> sceneMeshBounds;
@@ -926,12 +1078,16 @@ private:
         VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
         VkPipeline depthPrepass = VK_NULL_HANDLE;
         VkPipeline scene = VK_NULL_HANDLE;
+        VkPipelineLayout depthPyramidLayout = VK_NULL_HANDLE;
+        VkPipeline depthPyramid = VK_NULL_HANDLE;
         VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
+        VkPipelineLayout cullLayout = VK_NULL_HANDLE;
+        VkPipeline cull = VK_NULL_HANDLE;
         VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
         VkPipeline tonemap = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 5> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 10> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };
@@ -1014,6 +1170,8 @@ private:
     std::vector<MeshBatch> meshBatchScratch_;
     std::vector<std::uint32_t> meshFirstInstanceScratch_;
     std::vector<std::uint32_t> materializedInstanceCountScratch_;
+    std::vector<std::uint32_t> gpuClusterCapacityScratch_;
+    std::vector<std::uint32_t> gpuMeshPotentialCountScratch_;
     std::vector<std::vector<InstanceData>> instanceSortScratch_;
     std::vector<std::vector<InstanceSortKey>> instanceSortKeyScratch_;
     CachedGridVisibility gridVisibilityCache_;

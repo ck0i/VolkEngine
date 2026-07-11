@@ -37,6 +37,15 @@ int main() {
         ve::vulkanImageSyncState(FrameGraphAccess::Read, FrameGraphUsage::SampledImage);
     assert(sampled.layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     assert(sampled.access == VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    assert((sampled.stage & VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) != 0U);
+    const ve::VulkanImageSyncState storageImage =
+        ve::vulkanImageSyncState(FrameGraphAccess::Write,
+                                 FrameGraphUsage::StorageImage);
+    assert(storageImage.layout == VK_IMAGE_LAYOUT_GENERAL);
+    assert(storageImage.stage == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    assert(storageImage.access ==
+           (VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT));
 
     const ve::VulkanImageSyncState transferSource =
         ve::vulkanImageSyncState(FrameGraphAccess::Read, FrameGraphUsage::TransferSource);
@@ -79,9 +88,12 @@ int main() {
     const ve::VulkanBufferSyncState uniform =
         ve::vulkanBufferSyncState(FrameGraphAccess::Read, FrameGraphUsage::UniformBuffer);
     assert(uniform.access == VK_ACCESS_2_UNIFORM_READ_BIT);
+    assert((uniform.stage & VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) != 0U);
     const ve::VulkanBufferSyncState storageWrite =
         ve::vulkanBufferSyncState(FrameGraphAccess::Write, FrameGraphUsage::StorageBuffer);
-    assert(storageWrite.access == VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    assert(storageWrite.access ==
+           (VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT));
     const ve::VulkanBufferSyncState indirect =
         ve::vulkanBufferSyncState(FrameGraphAccess::Read, FrameGraphUsage::IndirectBuffer);
     assert(indirect.stage == VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
@@ -102,6 +114,10 @@ int main() {
 
     assert(throwsRuntimeError([] {
         return ve::vulkanBufferSyncState(FrameGraphAccess::Read, FrameGraphUsage::ColorAttachment);
+    }));
+    assert(throwsRuntimeError([] {
+        return ve::vulkanBufferSyncState(FrameGraphAccess::Write,
+                                         FrameGraphUsage::StorageImage);
     }));
     assert(throwsRuntimeError([] {
         return ve::vulkanBufferSyncState(FrameGraphAccess::Write, FrameGraphUsage::UniformBuffer);

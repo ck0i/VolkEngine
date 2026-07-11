@@ -111,10 +111,14 @@ void VulkanRenderer::Impl::createTextureResources() {
     }
     uploads.reserve(textureCount);
     resourceOwner_.referenceMaterialTextureIndices.fill(std::numeric_limits<std::size_t>::max());
+    resourceOwner_.materialTextureBindings.clear();
+    resourceOwner_.materialTextureBindings.reserve(authored.scene.materials.size());
     DerivedDataCache textureCache{config_.cacheDirectory / "assets" / "ddc"};
     for (std::size_t materialIndex = 0; materialIndex < authored.scene.materials.size();
          ++materialIndex) {
         const ImportedMaterial& material = authored.scene.materials[materialIndex];
+        MaterialTextureBinding binding;
+        binding.material = material.id;
         for (const ImportedTextureReference& reference : material.textures) {
             auto existing = std::ranges::find_if(uploads, [&](const TextureUpload& upload) {
                 return upload.path == reference.sourcePath && upload.role == reference.role &&
@@ -153,6 +157,18 @@ void VulkanRenderer::Impl::createTextureResources() {
                 uploads.push_back(std::move(upload));
                 textureIndex = uploads.size() - 1U;
             }
+            if (textureIndex > std::numeric_limits<std::uint32_t>::max()) {
+                throw std::runtime_error("Material texture descriptor index range exhausted");
+            }
+            const TextureAssetHandle handle{
+                static_cast<std::uint32_t>(textureIndex), 1U};
+            switch (reference.role) {
+            case TextureRole::BaseColor: binding.textures[0] = handle; break;
+            case TextureRole::Normal: binding.textures[1] = handle; break;
+            case TextureRole::MetallicRoughness: binding.textures[2] = handle; break;
+            case TextureRole::Occlusion:
+            case TextureRole::Emissive: break;
+            }
             if (materialIndex == 0U) {
                 switch (reference.role) {
                 case TextureRole::BaseColor: resourceOwner_.referenceMaterialTextureIndices[0] = textureIndex; break;
@@ -163,6 +179,7 @@ void VulkanRenderer::Impl::createTextureResources() {
                 }
             }
         }
+        resourceOwner_.materialTextureBindings.push_back(binding);
     }
     if (uploads.empty()) {
         throw std::runtime_error("Authored reference scene contains no texture assets");
@@ -295,7 +312,10 @@ void VulkanRenderer::Impl::createTextureResources() {
 
         resourceOwner_.materialTextures.clear();
         resourceOwner_.materialTextures.reserve(uploads.size());
+        resourceOwner_.materialTextureRoles.clear();
+        resourceOwner_.materialTextureRoles.reserve(uploads.size());
         for (TextureUpload& upload : uploads) {
+            resourceOwner_.materialTextureRoles.push_back(upload.role);
             resourceOwner_.materialTextures.push_back(takeImage(upload.image));
             logger()->info("Loaded authored texture {} ({}x{}, {} mips, format {})",
                            upload.path.string(), upload.baseWidth, upload.baseHeight,
@@ -309,6 +329,17 @@ void VulkanRenderer::Impl::createTextureResources() {
         destroyLocalUploads();
         throw;
     }
+}
+
+std::array<TextureAssetHandle, 3> VulkanRenderer::Impl::materialTextureHandles(
+    const AssetId material) const {
+    const auto found = std::ranges::find(
+        resourceOwner_.materialTextureBindings, material,
+        &MaterialTextureBinding::material);
+    if (found == resourceOwner_.materialTextureBindings.end()) {
+        throw std::runtime_error("Authored material has no GPU texture binding");
+    }
+    return found->textures;
 }
 
 void VulkanRenderer::Impl::createSampler() {
@@ -333,48 +364,96 @@ void VulkanRenderer::Impl::createSampler() {
     textureSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     textureSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     textureSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    const auto samplerMaxLod = [](const std::uint32_t mipLevels) {
-        return mipLevels > 0U ? static_cast<float>(mipLevels - 1U) : 0.0f;
-    };
-    textureSamplerInfo.maxLod = samplerMaxLod(
-        resourceOwner_.materialTextures.at(resourceOwner_.referenceMaterialTextureIndices[0]).mipLevels);
+    textureSamplerInfo.maxLod = VK_LOD_CLAMP_NONE;
     textureSamplerInfo.anisotropyEnable = resourceOwner_.samplerAnisotropyEnabled ? VK_TRUE : VK_FALSE;
     textureSamplerInfo.maxAnisotropy = resourceOwner_.maxSamplerAnisotropy;
     checkVk(vkCreateSampler(deviceOwner_.device, &textureSamplerInfo, nullptr, &resourceOwner_.textureSampler), "vkCreateSampler texture");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(resourceOwner_.textureSampler), "Linear Repeat Albedo Texture Sampler");
 
     VkSamplerCreateInfo normalSamplerInfo = textureSamplerInfo;
-    normalSamplerInfo.maxLod = samplerMaxLod(
-        resourceOwner_.materialTextures.at(resourceOwner_.referenceMaterialTextureIndices[1]).mipLevels);
     normalSamplerInfo.anisotropyEnable = VK_FALSE;
     normalSamplerInfo.maxAnisotropy = 1.0f;
     checkVk(vkCreateSampler(deviceOwner_.device, &normalSamplerInfo, nullptr, &resourceOwner_.normalTextureSampler), "vkCreateSampler normal texture");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(resourceOwner_.normalTextureSampler), "Linear Repeat Normal Texture Sampler");
     VkSamplerCreateInfo ormSamplerInfo = textureSamplerInfo;
-    ormSamplerInfo.maxLod = samplerMaxLod(
-        resourceOwner_.materialTextures.at(resourceOwner_.referenceMaterialTextureIndices[2]).mipLevels);
     checkVk(vkCreateSampler(deviceOwner_.device, &ormSamplerInfo, nullptr, &resourceOwner_.ormTextureSampler), "vkCreateSampler ORM texture");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(resourceOwner_.ormTextureSampler), "Linear Repeat ORM Texture Sampler");
 }
 
 void VulkanRenderer::Impl::createDescriptorLayouts() {
-    std::array<VkDescriptorSetLayoutBinding, 3> sceneBindings{};
+    const auto& limits = deviceOwner_.physicalDeviceProperties.limits;
+    const std::uint32_t descriptorLimit = std::min({
+        limits.maxDescriptorSetSampledImages,
+        limits.maxPerStageDescriptorSampledImages,
+        limits.maxDescriptorSetSamplers,
+        limits.maxPerStageDescriptorSamplers,
+        4096U});
+    if (resourceOwner_.materialTextures.size() >
+        std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("Material texture descriptor index range exhausted");
+    }
+    const std::uint32_t textureCount =
+        static_cast<std::uint32_t>(resourceOwner_.materialTextures.size());
+    resourceOwner_.bindlessMaterialsEnabled =
+        deviceOwner_.info.bindlessSampledImagesSupported &&
+        textureCount <= descriptorLimit;
+    if (!resourceOwner_.bindlessMaterialsEnabled &&
+        textureCount > vulkan_renderer_detail::kMaterialTextureCount) {
+        throw std::runtime_error(
+            "Scene requires bindless sampled images, but the device feature or descriptor limit is unavailable");
+    }
+    resourceOwner_.materialDescriptorCapacity =
+        resourceOwner_.bindlessMaterialsEnabled
+            ? descriptorLimit
+            : vulkan_renderer_detail::kMaterialTextureCount;
+    std::array<VkDescriptorSetLayoutBinding, 4> sceneBindings{};
     sceneBindings[0].binding = 0;
     sceneBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     sceneBindings[0].descriptorCount = 1;
     sceneBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    sceneBindings[1].binding = 1;
+    sceneBindings[1].binding = 3;
+    if (!resourceOwner_.bindlessMaterialsEnabled) {
+        for (const MaterialTextureBinding& binding :
+             resourceOwner_.materialTextureBindings) {
+            for (std::size_t role = 0; role < binding.textures.size(); ++role) {
+                if (binding.textures[role].valid() &&
+                    binding.textures[role].index !=
+                        resourceOwner_.referenceMaterialTextureIndices[role]) {
+                    throw std::runtime_error(
+                        "Fixed material descriptor fallback cannot represent this scene's texture bindings");
+                }
+            }
+        }
+    }
     sceneBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    sceneBindings[1].descriptorCount = vulkan_renderer_detail::kMaterialTextureCount;
+    sceneBindings[1].descriptorCount = resourceOwner_.materialDescriptorCapacity;
     sceneBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    sceneBindings[2].binding = 2;
+    sceneBindings[2].binding = 1;
     sceneBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     sceneBindings[2].descriptorCount = 1;
     sceneBindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    sceneBindings[3].binding = 2;
+    sceneBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    sceneBindings[3].descriptorCount = 1;
+    sceneBindings[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    std::array<VkDescriptorBindingFlags, 4> sceneBindingFlags{};
+    if (resourceOwner_.bindlessMaterialsEnabled) {
+        sceneBindingFlags[1] = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
+                               VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+    }
+    VkDescriptorSetLayoutBindingFlagsCreateInfo sceneBindingFlagsInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+    sceneBindingFlagsInfo.bindingCount =
+        static_cast<std::uint32_t>(sceneBindingFlags.size());
+    sceneBindingFlagsInfo.pBindingFlags = sceneBindingFlags.data();
 
     VkDescriptorSetLayoutCreateInfo sceneInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     sceneInfo.bindingCount = static_cast<std::uint32_t>(sceneBindings.size());
     sceneInfo.pBindings = sceneBindings.data();
+    if (resourceOwner_.bindlessMaterialsEnabled) {
+        sceneInfo.pNext = &sceneBindingFlagsInfo;
+    }
     checkVk(vkCreateDescriptorSetLayout(deviceOwner_.device, &sceneInfo, nullptr, &resourceOwner_.sceneSetLayout), "vkCreateDescriptorSetLayout scene");
     setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, handleToUint64(resourceOwner_.sceneSetLayout), "Scene Descriptor Set Layout");
 
@@ -389,16 +468,84 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     tonemapInfo.pBindings = &tonemapBinding;
     checkVk(vkCreateDescriptorSetLayout(deviceOwner_.device, &tonemapInfo, nullptr, &resourceOwner_.tonemapSetLayout), "vkCreateDescriptorSetLayout tonemap");
     setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, handleToUint64(resourceOwner_.tonemapSetLayout), "Tonemap Descriptor Set Layout");
+    std::array<VkDescriptorSetLayoutBinding, 8> cullBindings{};
+    for (std::uint32_t binding = 0; binding < 5U; ++binding) {
+        cullBindings[binding].binding = binding;
+        cullBindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        cullBindings[binding].descriptorCount = 1;
+        cullBindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    cullBindings[5].binding = 5;
+    cullBindings[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    cullBindings[5].descriptorCount = 1;
+    cullBindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    cullBindings[6].binding = 6;
+    cullBindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    cullBindings[6].descriptorCount = 1;
+    cullBindings[6].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    cullBindings[7].binding = 7;
+    cullBindings[7].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    cullBindings[7].descriptorCount = 1;
+    cullBindings[7].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutCreateInfo cullInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    cullInfo.bindingCount = static_cast<std::uint32_t>(cullBindings.size());
+    cullInfo.pBindings = cullBindings.data();
+    checkVk(vkCreateDescriptorSetLayout(deviceOwner_.device, &cullInfo, nullptr,
+                                        &resourceOwner_.cullSetLayout),
+            "vkCreateDescriptorSetLayout scene cull");
+    setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+                  handleToUint64(resourceOwner_.cullSetLayout),
+                  "Scene Cull Descriptor Set Layout");
+    std::array<VkDescriptorSetLayoutBinding, 2> depthPyramidBindings{};
+    depthPyramidBindings[0].binding = 0;
+    depthPyramidBindings[0].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    depthPyramidBindings[0].descriptorCount = 1;
+    depthPyramidBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    depthPyramidBindings[1].binding = 1;
+    depthPyramidBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    depthPyramidBindings[1].descriptorCount = 1;
+    depthPyramidBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutCreateInfo depthPyramidInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    depthPyramidInfo.bindingCount =
+        static_cast<std::uint32_t>(depthPyramidBindings.size());
+    depthPyramidInfo.pBindings = depthPyramidBindings.data();
+    checkVk(vkCreateDescriptorSetLayout(
+                deviceOwner_.device, &depthPyramidInfo, nullptr,
+                &resourceOwner_.depthPyramidSetLayout),
+            "vkCreateDescriptorSetLayout depth pyramid");
+    setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+                  handleToUint64(resourceOwner_.depthPyramidSetLayout),
+                  "Depth Pyramid Descriptor Set Layout");
 
     // Renderer-owned descriptor sets are allocated once at startup; the ImGui backend owns a
     // separate pool so scene/tonemap descriptor pressure stays fixed and free of frame-loop churn.
     constexpr std::uint32_t sceneSetCount = kMaxFramesInFlight;
     constexpr std::uint32_t tonemapSetCount = 1U;
-    constexpr std::uint32_t rendererSetCount = sceneSetCount + tonemapSetCount;
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sceneSetCount};
-    poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, (sceneSetCount * vulkan_renderer_detail::kMaterialTextureCount) + tonemapSetCount};
-    poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sceneSetCount};
+    constexpr std::uint32_t cullSetCount = kMaxFramesInFlight;
+    constexpr std::uint32_t depthPyramidSetCount =
+        static_cast<std::uint32_t>(kMaxDepthPyramidMipLevels);
+    constexpr std::uint32_t rendererSetCount =
+        sceneSetCount + tonemapSetCount + cullSetCount +
+        depthPyramidSetCount;
+    std::array<VkDescriptorPoolSize, 4> poolSizes{};
+    poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    sceneSetCount + cullSetCount};
+    const std::uint32_t descriptorsPerSceneSet =
+        resourceOwner_.bindlessMaterialsEnabled
+            ? textureCount
+            : vulkan_renderer_detail::kMaterialTextureCount;
+    poolSizes[1] = {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        sceneSetCount * descriptorsPerSceneSet + tonemapSetCount +
+            cullSetCount + depthPyramidSetCount};
+    poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                    sceneSetCount * 2U + cullSetCount * 6U};
+    poolSizes[3] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    depthPyramidSetCount};
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets = rendererSetCount;
     poolInfo.poolSizeCount = static_cast<std::uint32_t>(poolSizes.size());

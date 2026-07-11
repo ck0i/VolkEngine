@@ -1,14 +1,17 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#if VE_BINDLESS
+#extension GL_EXT_nonuniform_qualifier : require
+#endif
 
 #include "common/scene_uniforms.glsl"
 #include "common/pbr.glsl"
 
-layout(set = 0, binding = 1) uniform sampler2D materialTextures[3];
-
-const int kMaterialAlbedoTexture = 0;
-const int kMaterialNormalTexture = 1;
-const int kMaterialOrmTexture = 2;
+#if VE_BINDLESS
+layout(set = 0, binding = 3) uniform sampler2D materialTextures[];
+#else
+layout(set = 0, binding = 3) uniform sampler2D materialTextures[3];
+#endif
 
 
 layout(location = 0) in vec3 vWorldPosition;
@@ -18,16 +21,31 @@ layout(location = 3) flat in vec4 vAlbedoRoughness;
 layout(location = 4) flat in vec4 vEmissiveMetallic;
 layout(location = 5) flat in vec4 vMaterialFlags;
 layout(location = 6) in vec4 vWorldTangent;
+layout(location = 7) flat in uvec4 vTextureIndices;
 
 layout(location = 0) out vec4 outColor;
 
 
+vec4 sampleMaterialTexture(uint role) {
+#if VE_BINDLESS
+    return texture(materialTextures[nonuniformEXT(vTextureIndices[role])], vUv);
+#else
+    if (role == 0U) return texture(materialTextures[0], vUv);
+    if (role == 1U) return texture(materialTextures[1], vUv);
+    return texture(materialTextures[2], vUv);
+#endif
+}
+bool hasMaterialTexture(uint bit) {
+    return (vTextureIndices.w & bit) != 0U;
+}
+
+
 void main() {
     vec3 n = normalize(vWorldNormal);
-    if (vMaterialFlags.z > 0.5) {
+    if (hasMaterialTexture(2U)) {
         vec3 t = normalize(vWorldTangent.xyz - n * dot(n, vWorldTangent.xyz));
         vec3 b = cross(n, t) * vWorldTangent.w;
-        vec3 tangentNormal = texture(materialTextures[kMaterialNormalTexture], vUv).xyz * 2.0 - 1.0;
+        vec3 tangentNormal = sampleMaterialTexture(1U).xyz * 2.0 - 1.0;
         tangentNormal.xy *= clamp(vMaterialFlags.w, 0.0, 1.0);
         tangentNormal = normalize(tangentNormal);
         n = normalize(mat3(t, b, n) * tangentNormal);
@@ -40,9 +58,11 @@ void main() {
     float roughness = clamp(vAlbedoRoughness.a, 0.04, 1.0);
     float metallic = clamp(vEmissiveMetallic.a, 0.0, 1.0);
     float ambientOcclusion = 1.0;
-    if (vMaterialFlags.y > 0.5) {
-        albedo *= texture(materialTextures[kMaterialAlbedoTexture], vUv).rgb;
-        vec3 orm = texture(materialTextures[kMaterialOrmTexture], vUv).rgb;
+    if (hasMaterialTexture(1U)) {
+        albedo *= sampleMaterialTexture(0U).rgb;
+    }
+    if (hasMaterialTexture(4U)) {
+        vec3 orm = sampleMaterialTexture(2U).rgb;
         ambientOcclusion = clamp(orm.r, 0.0, 1.0);
         roughness = clamp(roughness * orm.g, 0.04, 1.0);
         metallic = clamp(metallic * orm.b, 0.0, 1.0);

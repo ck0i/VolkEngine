@@ -197,13 +197,69 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     VkShaderModule tonemapVert = VK_NULL_HANDLE;
     VkShaderModule tonemapFrag = VK_NULL_HANDLE;
     VkShaderModule depthPrepassVert = VK_NULL_HANDLE;
+    VkShaderModule cullCompute = VK_NULL_HANDLE;
+    VkShaderModule depthPyramidCompute = VK_NULL_HANDLE;
 
     try {
-        sceneVert = createShaderModule(shaderPaths[0]);
-        sceneFrag = createShaderModule(shaderPaths[1]);
+        sceneVert = createShaderModule(
+            shaderPaths[indirectSceneDrawsEnabled_ ? 7U : 0U]);
+        sceneFrag = createShaderModule(
+            shaderPaths[resourceOwner_.bindlessMaterialsEnabled ? 5U : 1U]);
         tonemapVert = createShaderModule(shaderPaths[2]);
         tonemapFrag = createShaderModule(shaderPaths[3]);
-        depthPrepassVert = createShaderModule(shaderPaths[4]);
+        depthPrepassVert = createShaderModule(
+            shaderPaths[indirectSceneDrawsEnabled_ ? 8U : 4U]);
+        cullCompute = createShaderModule(shaderPaths[6]);
+        depthPyramidCompute = createShaderModule(shaderPaths[9]);
+        VkPipelineLayoutCreateInfo cullLayoutInfo{
+            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        cullLayoutInfo.setLayoutCount = 1;
+        cullLayoutInfo.pSetLayouts = &resourceOwner_.cullSetLayout;
+        checkVk(vkCreatePipelineLayout(deviceOwner_.device, &cullLayoutInfo, nullptr,
+                                       &pipelines.cullLayout),
+                "vkCreatePipelineLayout scene cull");
+        VkComputePipelineCreateInfo cullInfo{
+            VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+        cullInfo.stage = shaderStage(VK_SHADER_STAGE_COMPUTE_BIT, cullCompute);
+        cullInfo.layout = pipelines.cullLayout;
+        checkVk(vkCreateComputePipelines(deviceOwner_.device, pipelineOwner_.cache,
+                                         1, &cullInfo, nullptr, &pipelines.cull),
+                "vkCreateComputePipelines scene cull");
+        setObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT,
+                      handleToUint64(pipelines.cullLayout),
+                      "Scene Cull Pipeline Layout");
+        setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.cull),
+                      "Scene Cull Pipeline");
+        VkPushConstantRange depthPyramidPushRange{};
+        depthPyramidPushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        depthPyramidPushRange.size = sizeof(DepthPyramidPushConstants);
+        VkPipelineLayoutCreateInfo depthPyramidLayoutInfo{
+            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        depthPyramidLayoutInfo.setLayoutCount = 1;
+        depthPyramidLayoutInfo.pSetLayouts =
+            &resourceOwner_.depthPyramidSetLayout;
+        depthPyramidLayoutInfo.pushConstantRangeCount = 1;
+        depthPyramidLayoutInfo.pPushConstantRanges =
+            &depthPyramidPushRange;
+        checkVk(vkCreatePipelineLayout(
+                    deviceOwner_.device, &depthPyramidLayoutInfo, nullptr,
+                    &pipelines.depthPyramidLayout),
+                "vkCreatePipelineLayout depth pyramid");
+        VkComputePipelineCreateInfo depthPyramidInfo{
+            VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+        depthPyramidInfo.stage =
+            shaderStage(VK_SHADER_STAGE_COMPUTE_BIT, depthPyramidCompute);
+        depthPyramidInfo.layout = pipelines.depthPyramidLayout;
+        checkVk(vkCreateComputePipelines(
+                    deviceOwner_.device, pipelineOwner_.cache, 1,
+                    &depthPyramidInfo, nullptr, &pipelines.depthPyramid),
+                "vkCreateComputePipelines depth pyramid");
+        setObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT,
+                      handleToUint64(pipelines.depthPyramidLayout),
+                      "Depth Pyramid Pipeline Layout");
+        setObjectName(VK_OBJECT_TYPE_PIPELINE,
+                      handleToUint64(pipelines.depthPyramid),
+                      "Depth Pyramid Pipeline");
 
         std::array<VkPipelineShaderStageCreateInfo, 2> sceneStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, sceneVert), shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, sceneFrag)};
         std::array<VkVertexInputBindingDescription, 1> bindings{};
@@ -346,6 +402,13 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         checkVk(vkCreateGraphicsPipelines(deviceOwner_.device, pipelineOwner_.cache, 1, &tonemapInfo, nullptr, &pipelines.tonemap), "vkCreateGraphicsPipelines tonemap");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.tonemap), "Tonemap Pipeline");
     } catch (...) {
+        if (depthPyramidCompute != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(deviceOwner_.device, depthPyramidCompute,
+                                  nullptr);
+        }
+        if (cullCompute != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(deviceOwner_.device, cullCompute, nullptr);
+        }
         if (depthPrepassVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr); }
         if (tonemapFrag != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, tonemapFrag, nullptr); }
         if (tonemapVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, tonemapVert, nullptr); }
@@ -355,6 +418,8 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         throw;
     }
 
+    vkDestroyShaderModule(deviceOwner_.device, depthPyramidCompute, nullptr);
+    vkDestroyShaderModule(deviceOwner_.device, cullCompute, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, tonemapFrag, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, tonemapVert, nullptr);
@@ -370,6 +435,10 @@ void VulkanRenderer::Impl::createPipelines() {
 }
 
 void VulkanRenderer::Impl::destroyPipelineSet(PipelineSet& pipelines) const {
+    if (pipelines.depthPyramid != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.depthPyramid, nullptr); pipelines.depthPyramid = VK_NULL_HANDLE; }
+    if (pipelines.depthPyramidLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.depthPyramidLayout, nullptr); pipelines.depthPyramidLayout = VK_NULL_HANDLE; }
+    if (pipelines.cull != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.cull, nullptr); pipelines.cull = VK_NULL_HANDLE; }
+    if (pipelines.cullLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.cullLayout, nullptr); pipelines.cullLayout = VK_NULL_HANDLE; }
     if (pipelines.tonemap != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.tonemap, nullptr); pipelines.tonemap = VK_NULL_HANDLE; }
     if (pipelines.tonemapLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.tonemapLayout, nullptr); pipelines.tonemapLayout = VK_NULL_HANDLE; }
     if (pipelines.depthPrepass != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.depthPrepass, nullptr); pipelines.depthPrepass = VK_NULL_HANDLE; }
@@ -386,6 +455,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelines.sceneNoPrepass = pipelineOwner_.sceneNoPrepass;
     pipelines.tonemapLayout = pipelineOwner_.tonemapLayout;
     pipelines.tonemap = pipelineOwner_.tonemap;
+    pipelines.cullLayout = pipelineOwner_.cullLayout;
+    pipelines.cull = pipelineOwner_.cull;
+    pipelines.depthPyramidLayout = pipelineOwner_.depthPyramidLayout;
+    pipelines.depthPyramid = pipelineOwner_.depthPyramid;
 
     pipelineOwner_.sceneLayout = VK_NULL_HANDLE;
     pipelineOwner_.depthPrepass = VK_NULL_HANDLE;
@@ -393,6 +466,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelineOwner_.sceneNoPrepass = VK_NULL_HANDLE;
     pipelineOwner_.tonemapLayout = VK_NULL_HANDLE;
     pipelineOwner_.tonemap = VK_NULL_HANDLE;
+    pipelineOwner_.cullLayout = VK_NULL_HANDLE;
+    pipelineOwner_.cull = VK_NULL_HANDLE;
+    pipelineOwner_.depthPyramidLayout = VK_NULL_HANDLE;
+    pipelineOwner_.depthPyramid = VK_NULL_HANDLE;
     return pipelines;
 }
 
@@ -426,6 +503,10 @@ void VulkanRenderer::Impl::installPipelineSet(const PipelineSet& pipelines) {
     pipelineOwner_.sceneNoPrepass = pipelines.sceneNoPrepass;
     pipelineOwner_.tonemapLayout = pipelines.tonemapLayout;
     pipelineOwner_.tonemap = pipelines.tonemap;
+    pipelineOwner_.cullLayout = pipelines.cullLayout;
+    pipelineOwner_.cull = pipelines.cull;
+    pipelineOwner_.depthPyramidLayout = pipelines.depthPyramidLayout;
+    pipelineOwner_.depthPyramid = pipelines.depthPyramid;
 }
 
 void VulkanRenderer::Impl::refreshShaderWriteTimes() {

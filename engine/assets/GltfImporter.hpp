@@ -2,6 +2,7 @@
 
 #include "assets/AssetDatabase.hpp"
 #include "renderer/Geometry.hpp"
+#include "renderer/MeshClusters.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -48,6 +49,7 @@ struct ImportedMaterial {
 struct ImportedMeshPrimitive {
     AssetId id;
     std::string name;
+    MeshClusterData clusters;
     MeshData mesh;
     AssetId material;
 };
@@ -77,7 +79,7 @@ struct ImportedAnimationClip {
 };
 
 struct ImportedGltfScene {
-    static constexpr std::uint32_t kMeshArtifactSchemaVersion = 2;
+    static constexpr std::uint32_t kMeshArtifactSchemaVersion = 3;
     static constexpr std::uint32_t kMaterialArtifactSchemaVersion = 2;
     static constexpr std::uint32_t kSceneArtifactSchemaVersion = 3;
     AssetId sceneId;

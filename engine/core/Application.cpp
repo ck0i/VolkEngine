@@ -26,22 +26,26 @@ const char* transferUploadSyncName(const TransferUploadSyncMode mode) noexcept {
     return "unknown";
 }
 
-RenderMaterial renderMaterial(const ImportedMaterial& material) {
+RenderMaterial renderMaterial(const ImportedMaterial& material,
+                              const VulkanRenderer& renderer) {
     RenderMaterial result{
         {material.baseColorFactor.x, material.baseColorFactor.y,
          material.baseColorFactor.z, material.roughnessFactor},
         {material.emissiveFactor.x, material.emissiveFactor.y,
          material.emissiveFactor.z, material.metallicFactor},
         {}};
+    result.textures = renderer.materialTextureHandles(material.id);
     float normalScale = 1.0f;
     for (const ImportedTextureReference& texture : material.textures) {
         switch (texture.role) {
-        case TextureRole::BaseColor: result.flags.x = 1.0f; break;
-        case TextureRole::Normal:
+        case TextureRole::BaseColor:
+        case TextureRole::MetallicRoughness:
             result.flags.y = 1.0f;
+            break;
+        case TextureRole::Normal:
+            result.flags.z = 1.0f;
             normalScale = texture.scale;
             break;
-        case TextureRole::MetallicRoughness: result.flags.z = 1.0f; break;
         case TextureRole::Occlusion:
         case TextureRole::Emissive: break;
         }
@@ -102,7 +106,7 @@ std::vector<SceneRenderItem> referenceDraws(const ImportedGltfScene& scene,
             const MeshBounds bounds = renderer.meshBounds(handle);
             draws.push_back({transformPoint(model, bounds.center),
                              bounds.radius * maximumScale(model), handle, model,
-                             renderMaterial(*material)});
+                             renderMaterial(*material, renderer)});
         }
     }
     return draws;
@@ -278,8 +282,12 @@ int Application::runInternal(World* world,
     const RenderDeviceInfo& finalDevice = renderer_.deviceInfo();
     std::array<char, 128> finalGpu{};
     if (finalStats.gpuTimestampsValid) {
-        std::snprintf(finalGpu.data(), finalGpu.size(), "%.3f ms (depth %.3f / HDR %.3f / final %.3f)",
-                      finalStats.gpuFrameMs, finalStats.gpuDepthPrepassMs, finalStats.gpuHdrSceneMs, finalStats.gpuFinalPassMs);
+        std::snprintf(
+            finalGpu.data(), finalGpu.size(),
+            "%.3f ms (cull %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
+            finalStats.gpuFrameMs, finalStats.gpuCullMs,
+            finalStats.gpuDepthPrepassMs, finalStats.gpuHdrSceneMs,
+            finalStats.gpuDepthPyramidMs, finalStats.gpuFinalPassMs);
     } else {
         std::snprintf(finalGpu.data(), finalGpu.size(), "pending/unavailable");
     }

@@ -19,6 +19,11 @@ MeshBounds VulkanRenderer::meshBounds(const MeshAssetHandle mesh) const {
     return impl_->meshBounds(mesh);
 }
 
+std::array<TextureAssetHandle, 3> VulkanRenderer::materialTextureHandles(
+    const AssetId material) const {
+    return impl_->materialTextureHandles(material);
+}
+
 RenderStats VulkanRenderer::stats() const {
     return impl_->stats();
 }

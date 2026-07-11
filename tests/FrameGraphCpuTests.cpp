@@ -166,6 +166,42 @@ int main() {
         expectThrowsRuntimeError("invalid frame-graph usage is rejected", [&] {
             graph.read(pass, image, static_cast<FrameGraphUsage>(0xff));
         });
+        const auto storageImage = graph.addResource(
+            {"Storage Image", ve::FrameGraphResourceKind::Image, true});
+        const auto storagePass = graph.addPass({"Storage Image Pass"});
+        expectNoThrow("storage image writes are valid", [&] {
+            graph.write(storagePass, storageImage,
+                        FrameGraphUsage::StorageImage);
+        });
+        const auto buffer = graph.addResource(
+            {"Storage Image Rejection Buffer",
+             ve::FrameGraphResourceKind::Buffer, true});
+        const auto bufferPass = graph.addPass({"Storage Image Rejection"});
+        expectThrowsRuntimeError("buffers reject storage-image usage", [&] {
+            graph.write(bufferPass, buffer, FrameGraphUsage::StorageImage);
+        });
+    }
+    {
+        FrameGraph graph;
+        const auto previousDepth = graph.addResource(
+            {"Temporal Depth Pyramid",
+             ve::FrameGraphResourceKind::Image, true});
+        const auto cullOutput = graph.addResource(
+            {"Cull Output", ve::FrameGraphResourceKind::Buffer, true});
+        const auto cull = graph.addPass({"Cull Previous Frame"});
+        const auto draw = graph.addPass({"Draw Current Frame"});
+        const auto build = graph.addPass({"Build Current Pyramid"});
+        graph.read(cull, previousDepth, FrameGraphUsage::SampledImage);
+        graph.write(cull, cullOutput, FrameGraphUsage::StorageBuffer);
+        graph.read(draw, cullOutput, FrameGraphUsage::IndirectBuffer);
+        graph.write(build, previousDepth, FrameGraphUsage::StorageImage);
+        graph.compile();
+        expectEqual("temporal Hi-Z cull executes before current draw",
+                    graph.executionOrder()[0].index, cull.index);
+        expectEqual("temporal Hi-Z draw consumes cull output",
+                    graph.executionOrder()[1].index, draw.index);
+        expectEqual("temporal Hi-Z rebuild follows current draw",
+                    graph.executionOrder()[2].index, build.index);
     }
 
     {

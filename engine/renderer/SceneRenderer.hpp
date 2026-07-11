@@ -5,6 +5,7 @@
 #include "core/World.hpp"
 #include "renderer/Geometry.hpp"
 
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +21,7 @@ struct alignas(16) RenderMaterial {
     Vec4 albedoRoughness;
     Vec4 emissiveMetallic;
     Vec4 flags;
+    std::array<TextureAssetHandle, 3> textures{};
 };
 
 struct SceneRenderItem {
@@ -30,7 +32,7 @@ struct SceneRenderItem {
     RenderMaterial material{};
 };
 
-static_assert(sizeof(SceneRenderItem) == 144, "SceneRenderItem layout changed; keep cull fields packed before model/material");
+static_assert(sizeof(SceneRenderItem) == 176, "SceneRenderItem layout changed; keep cull fields packed before model/material");
 static_assert(offsetof(SceneRenderItem, boundsCenter) == 0, "SceneRenderItem boundsCenter should stay first for culling");
 static_assert(offsetof(SceneRenderItem, boundsRadius) == 12, "SceneRenderItem boundsRadius should stay with boundsCenter");
 static_assert(offsetof(SceneRenderItem, mesh) == 16, "SceneRenderItem mesh should stay in the first cache line");

@@ -151,8 +151,11 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
         ImGui::Text("CPU phases: scene %.3f / prepare %.3f / record %.3f / submit %.3f ms",
                     stats_.cpuSceneBuildMs, stats_.cpuPrepareMs, stats_.cpuCommandRecordMs, stats_.cpuQueueSubmitMs);
         if (stats_.gpuTimestampsValid) {
-            ImGui::Text("GPU frame: %.3f ms (depth %.3f / HDR %.3f / final %.3f)",
-                        stats_.gpuFrameMs, stats_.gpuDepthPrepassMs, stats_.gpuHdrSceneMs, stats_.gpuFinalPassMs);
+            ImGui::Text(
+                "GPU frame: %.3f ms (cull %.3f / depth %.3f / HDR %.3f / Hi-Z %.3f / final %.3f)",
+                stats_.gpuFrameMs, stats_.gpuCullMs,
+                stats_.gpuDepthPrepassMs, stats_.gpuHdrSceneMs,
+                stats_.gpuDepthPyramidMs, stats_.gpuFinalPassMs);
         } else {
             ImGui::TextUnformatted("GPU frame: pending/unavailable");
         }
@@ -168,6 +171,16 @@ void VulkanRenderer::Impl::beginImGuiFrame(const double frameDeltaMs) {
         ImGui::Text("Scene: %u items, %u visible, %u mesh batches, %u scene passes, %s",
                     stats_.sceneItemCount, stats_.visibleItemCount, stats_.meshBatchCount, stats_.scenePassCount,
                     stats_.indirectSceneDraws ? "multi-draw indirect" : "direct batched");
+        ImGui::Text(
+            "Clusters: %u cooked, %u visible / %u tested, %u Hi-Z rejected, GPU cull %s%s",
+            stats_.sceneClusterCount, stats_.visibleClusterInstanceCount,
+            stats_.testedClusterInstanceCount,
+            stats_.occludedClusterInstanceCount,
+            stats_.gpuDrivenVisibility ? "on" : "off",
+            stats_.gpuVisibilityValidated ? " (CPU-validated)" : "");
+        ImGui::Text("Material descriptors: %u / %u",
+                    stats_.materialDescriptorCount,
+                    stats_.materialDescriptorCapacity);
         ImGui::Text("Upload sync: %s  max indirect draws: %u",
                     transferUploadSyncName(deviceOwner_.info.transferUploadSync), deviceOwner_.info.maxDrawIndirectCount);
         ImGui::Text("Instance storage: %u capacity (%.2f MiB)",

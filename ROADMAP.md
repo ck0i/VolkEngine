@@ -65,15 +65,16 @@ Implemented:
 - Vulkan 1.3 dynamic rendering with Vulkan Memory Allocator and two frames in flight.
 - HDR rendering, ACES tone mapping, reverse-Z, and an adaptive depth prepass.
 - Fixed albedo/normal/ORM PBR materials and one directional light.
-- CPU frustum/grid visibility, sphere LOD selection, direct draws, and multi-draw indirect submission.
-- Upload synchronization, pipeline caching, shader hot reload, per-pass GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
-- Executable frame-graph variants drive depth, HDR, tone-map, and screenshot work with explicit attachment policy, synchronization intents, logical lifetimes, deterministic transient slots, failure unwind, and machine-readable diagnostics.
+- CPU fallback visibility plus capability-gated GPU cluster frustum/LOD/temporal-occlusion culling, visible-instance compaction, and generated multi-draw indirect submission.
+- Capability-gated bindless sampled-image descriptors with stable material texture indices; fixed material sets remain the unsupported-device fallback.
+- Upload synchronization, pipeline caching, shader hot reload, cull/depth/HDR/Hi-Z/final GPU timestamps, renderer statistics, ImGui diagnostics, swapchain recovery, and PPM screenshots.
+- Executable frame-graph variants drive cull, depth, HDR, temporal depth-pyramid, tone-map, and screenshot work with explicit synchronization/lifetime contracts and machine-readable diagnostics.
 
 Current limits:
 
 - The renderer is single-view and forward-oriented, without scalable local lights, production shadows, image-based lighting, transparency, temporal antialiasing, upscaling, post effects, or robust device-loss policy.
-- Descriptor-indexing capabilities may be enabled, but materials still use a fixed three-texture descriptor array. This is not a bindless material system.
-- Visibility and LOD selection remain CPU-driven. There is no meshlet pipeline, GPU-generated draw stream, occlusion culling, or virtualized geometry.
+- GPU submission currently uses a flat bounded-cluster list; it does not yet traverse a cluster hierarchy or provide fine-grained mesh/cluster LOD beyond the existing sphere mesh tiers.
+- The temporal Hi-Z implementation is correctness-proven on one integrated Vulkan driver, but representative cross-driver crossover gates are not yet established.
 - The frame graph does not schedule multiple queues or physically alias Vulkan memory yet; current depth/HDR logical transients intentionally use separate allocation classes and are realized at swapchain scope.
 - There is no compressed/virtual texture pipeline, asynchronous residency system, scalable world renderer, hardware ray tracing, or production global illumination path.
 
@@ -86,8 +87,7 @@ Implemented:
 - Incremental reference-asset cooking and transactional reload; artifact-content keys avoid rebuilding byte-identical outputs and propagate only real dependency changes.
 - Versioned texture artifacts validate and preserve decoded RGBA8, linear RGBA32F HDR, and non-supercompressed KTX2 BC1/BC3/BC7 payloads with explicit role, color-space, dimensions, and mip metadata.
 - OBJ/procedural geometry and direct stb_image-backed texture overrides remain available alongside the authored glTF path.
-- Linux and Windows CMake presets with pinned bootstrap dependencies.
-- Twenty-one CPU test executables plus the sandbox help test.
+- Twenty-two CPU test executables plus the sandbox help test.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
 Current limits:
@@ -99,13 +99,13 @@ Current limits:
 ### Verified baseline
 
 Current local baseline (11 July 2026):
-
-- `ctest --preset linux-debug` passed all 22 registered tests.
+- `ctest --preset linux-debug` passed all 23 registered tests.
 - A 180-frame Vulkan smoke on Intel RPL-S graphics forced the depth prepass, enabled Khronos validation plus synchronization validation as required, resized 1280×720 → 1024×640 → 1280×720, recompiled graph variants three times, executed depth/HDR/tone-map/readback work, wrote a screenshot and schema-v2 summary, and passed the `resize-recompile-v1` regression gate.
 - A separate validated 24-frame fault-injection smoke recovered a post-acquire failure by restoring tracked state, replacing the acquire semaphore, recreating the swapchain/graph resources, writing a screenshot, and exiting cleanly.
 - A 24-frame authored-scene smoke resolved seven database records through the DDC, uploaded the cooked albedo/normal/ORM artifacts, rendered the three-node/two-primitive hierarchy through multi-draw indirect submission, wrote `s2-authored-scene.ppm` plus a schema-v2 run summary, and exited cleanly.
+- A validated 24-frame dense-scene smoke at the odd extent 1281×721 executed GPU cluster culling and temporal Hi-Z, rejected 6,350 of 22,921 tested cluster instances in its captured completed frame, rendered a screenshot, and emitted explicit cull/Hi-Z timings and descriptor pressure without validation errors. A matching no-occlusion GPU capture was pixel-identical.
 
-This baseline establishes S1's executable frame-graph/synchronization contract and S2's authored-asset workflow on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness or cross-hardware correctness.
+This baseline establishes S1's executable frame-graph/synchronization contract, S2's authored-asset workflow, and a validated S3 GPU-generated visibility slice on one local Vulkan driver. It is evidence of a working renderer and content foundation, not production readiness, representative crossover performance, or cross-hardware correctness.
 
 ## Milestone status
 
@@ -178,7 +178,7 @@ Current evidence:
 - CPU contracts cover cold/warm/independent cooks, selective animation and decoded-texture invalidation, equivalent-source cache reuse, missing/corrupt/cyclic/stale/incompatible failures, failed-reload preservation, artifact round-trips, and DDC corruption.
 - The maintained authored fixture contains a three-node hierarchy, two independently transformed mesh primitives, a metallic-roughness material with sRGB albedo plus linear normal/ORM roles, and validated animation metadata. Its live screenshot path consumes cooked artifacts rather than source image bytes.
 
-## S3. GPU-driven geometry and bindless material foundation — **Next**
+## S3. GPU-driven geometry and bindless material foundation — **Current**
 
 Build the prerequisites for dense worlds before attempting virtualized geometry.
 
@@ -190,6 +190,14 @@ Scope:
 - Add depth-pyramid occlusion after the generated draw path is correct and measurable.
 - Keep explicit fallbacks only where the Vulkan capability baseline requires them; do not preserve duplicate rendering architectures without evidence.
 - Report visible and rejected instances/clusters, generated work, bandwidth, descriptor pressure, and CPU submission cost.
+
+Current implementation:
+
+- Capability-gated bindless sampled-image descriptors use stable texture-table indices with a fixed-set fallback.
+- Mesh upload cooks bounded clusters/ranges; compute performs instance and cluster frustum tests, sphere LOD selection, visible-instance compaction, and indexed indirect-command generation.
+- Temporal occlusion reads the previous pyramid before current rendering, then conservatively reduces current reverse-Z depth into a half-resolution odd-extent-safe pyramid for the next submission.
+- CPU contracts cover storage-image usage/synchronization and temporal read-before-write graph order. GPU visibility validation compares completed generated counts/commands with a CPU reference when occlusion is intentionally disabled.
+- `RenderStats`, ImGui, and schema-v2 summaries expose descriptor pressure, cooked/visible/tested/occluded clusters, and separate cull/depth/HDR/Hi-Z/final timings.
 
 Exit criteria:
 

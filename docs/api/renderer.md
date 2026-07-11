@@ -57,7 +57,7 @@ Returns immutable backend/device metadata selected during initialization.
 | `timestampQueries` | Timestamp path enabled after support/config checks. |
 | `validationEnabled`, `debugMarkers` | Diagnostics state. |
 | `memoryBudget` | VMA memory budget support. |
-| `descriptorIndexing`, `bindlessSampledImagesSupported` | Descriptor-indexing features enabled when supported; the current material path uses a fixed combined-sampler descriptor array for albedo, normal, and ORM textures, with future resource tables able to grow from that shape. |
+| `descriptorIndexing`, `bindlessSampledImagesSupported` | Descriptor-indexing features and the capability-gated runtime sampled-image table. Unsupported devices retain the fixed material-set fallback. |
 | `multiDrawIndirect`, `drawIndirectFirstInstance` | Feature bits required for the indirect scene path. |
 | `samplerAnisotropy`, `maxSamplerAnisotropy` | Texture sampler capability actually enabled/selected. |
 | `transferUploadSync` | `SameQueueBarrier` or `QueueSemaphore` upload first-use path. |
@@ -70,7 +70,7 @@ Timing fields:
 - `cpuFrameMs`: render-submit CPU window.
 - `cpuSceneBuildMs`, `cpuPrepareMs`, `cpuCommandRecordMs`, `cpuQueueSubmitMs`: exclusive CPU buckets inside `cpuFrameMs`.
 - `frameDeltaMs`: wall-clock frame delta supplied by the app loop.
-- `gpuFrameMs`, `gpuDepthPrepassMs`, `gpuHdrSceneMs`, `gpuFinalPassMs`: timestamp-derived GPU intervals when valid.
+- `gpuFrameMs`, `gpuCullMs`, `gpuDepthPrepassMs`, `gpuHdrSceneMs`, `gpuDepthPyramidMs`, `gpuFinalPassMs`: timestamp-derived GPU intervals when valid.
 - `gpuTimestampsValid`: true only after completed query data was read.
 - `elapsedSeconds`: frame time source used for animation.
 
@@ -97,6 +97,8 @@ Submission/scene fields:
 - `indirectSceneDraws`
 - `sceneTriangleCount`: visible scene geometry before multiplying by depth/HDR scene passes.
 - `triangleCount`: submitted triangle work, preserving scene-pass multiplication and the fullscreen tonemap triangle.
+- `sceneClusterCount`, `visibleClusterInstanceCount`, `testedClusterInstanceCount`, `occludedClusterInstanceCount`: cooked cluster count and completed GPU visibility workload/rejection counters.
+- `materialDescriptorCount`, `materialDescriptorCapacity`: live bindless sampled-image pressure, or fixed-fallback occupancy/capacity.
 
 Grid/LOD fields:
 

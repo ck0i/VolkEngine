@@ -27,6 +27,7 @@ enum class FrameGraphUsage : std::uint8_t {
     ColorAttachment,
     DepthAttachment,
     SampledImage,
+    StorageImage,
     TransferSource,
     Present,
     UniformBuffer,
@@ -802,6 +803,7 @@ private:
         case FrameGraphResourceKind::Image:
             if (usage != FrameGraphUsage::ColorAttachment && usage != FrameGraphUsage::DepthAttachment &&
                 usage != FrameGraphUsage::SampledImage && usage != FrameGraphUsage::TransferSource &&
+                usage != FrameGraphUsage::StorageImage &&
                 usage != FrameGraphUsage::Present && usage != FrameGraphUsage::TransferDestination) {
                 throw std::runtime_error("FrameGraph image resource has a buffer-only usage");
             }
@@ -820,6 +822,7 @@ private:
         case FrameGraphUsage::ColorAttachment:
         case FrameGraphUsage::DepthAttachment:
         case FrameGraphUsage::StorageBuffer:
+        case FrameGraphUsage::StorageImage:
             return;
         case FrameGraphUsage::SampledImage:
         case FrameGraphUsage::TransferSource:

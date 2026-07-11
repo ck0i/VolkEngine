@@ -17,6 +17,10 @@ VulkanRenderer::Impl::Impl(Window& window, EngineConfig config,
     createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
+    if (config_.gpuVisibilityValidation && !indirectSceneDrawsEnabled_) {
+        throw std::runtime_error(
+            "GPU visibility validation requires indirect scene draws");
+    }
     createAllocator();
     loadDebugUtils();
     createCommandPools();
@@ -82,6 +86,9 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     destroyBuffer(readback_.buffer());
     destroyBuffer(resourceOwner_.sceneIndexBuffer);
     destroyBuffer(resourceOwner_.sceneVertexBuffer);
+    destroyBuffer(resourceOwner_.clusterHierarchy);
+    destroyBuffer(resourceOwner_.meshClusterRanges);
+    destroyBuffer(resourceOwner_.clusterData);
     for (ImageResource& texture : resourceOwner_.materialTextures) {
         destroyImage(texture);
     }
@@ -91,6 +98,10 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
         destroyFrameUploadWaitSemaphores(frame);
         destroyBuffer(frame.sceneUniforms);
         destroyBuffer(frame.instanceData);
+        destroyBuffer(frame.cullCandidates);
+        destroyBuffer(frame.cullUniforms);
+        destroyBuffer(frame.visibleInstanceIndices);
+        destroyBuffer(frame.cullCounters);
         if (frame.imageAvailable != VK_NULL_HANDLE) {
             vkDestroySemaphore(deviceOwner_.device, frame.imageAvailable, nullptr);
             frame.imageAvailable = VK_NULL_HANDLE;
@@ -136,6 +147,17 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
     if (resourceOwner_.descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(deviceOwner_.device, resourceOwner_.descriptorPool, nullptr);
         resourceOwner_.descriptorPool = VK_NULL_HANDLE;
+    }
+    if (resourceOwner_.cullSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(deviceOwner_.device,
+                                     resourceOwner_.cullSetLayout, nullptr);
+        resourceOwner_.cullSetLayout = VK_NULL_HANDLE;
+    }
+    if (resourceOwner_.depthPyramidSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(deviceOwner_.device,
+                                     resourceOwner_.depthPyramidSetLayout,
+                                     nullptr);
+        resourceOwner_.depthPyramidSetLayout = VK_NULL_HANDLE;
     }
     if (resourceOwner_.tonemapSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(deviceOwner_.device, resourceOwner_.tonemapSetLayout, nullptr);
@@ -197,9 +219,46 @@ void VulkanRenderer::Impl::cleanupResources(const bool persistPipelineCache) noe
 void VulkanRenderer::Impl::waitIdle() {
     if (deviceOwner_.device != VK_NULL_HANDLE) {
         checkVk(vkDeviceWaitIdle(deviceOwner_.device), "vkDeviceWaitIdle");
+        for (FrameResources& frame : frameOwner_.frames) {
+            validateGpuVisibility(frame);
+        }
+        const std::size_t lastFrameIndex =
+            (frameOwner_.currentFrame + kMaxFramesInFlight - 1U) %
+            kMaxFramesInFlight;
+        const FrameResources& lastFrame = frameOwner_.frames[lastFrameIndex];
+        if (indirectSceneDrawsEnabled_ &&
+            lastFrame.completedGpuCullCountersValid) {
+            stats_.sceneItemCount = lastFrame.submittedSceneItemCount;
+            stats_.visibleItemCount = lastFrame.completedVisibleItemCount;
+            stats_.culledItemCount =
+                lastFrame.submittedSceneItemCount -
+                std::min(lastFrame.submittedSceneItemCount,
+                         lastFrame.completedVisibleItemCount);
+            stats_.visibleClusterInstanceCount =
+                lastFrame.completedVisibleClusterInstanceCount;
+            stats_.testedClusterInstanceCount =
+                lastFrame.completedTestedClusterInstanceCount;
+            stats_.occludedClusterInstanceCount =
+                lastFrame.completedOccludedClusterInstanceCount;
+            stats_.sphereLodHighCount =
+                lastFrame.completedSphereLodCounts[0];
+            stats_.sphereLodMediumCount =
+                lastFrame.completedSphereLodCounts[1];
+            stats_.sphereLodLowCount =
+                lastFrame.completedSphereLodCounts[2];
+            stats_.sceneTriangleCount =
+                lastFrame.completedSceneTriangleCount;
+            stats_.triangleCount =
+                stats_.sceneTriangleCount *
+                    lastFrame.submittedScenePassCount +
+                1ULL;
+            stats_.gpuVisibilityValidated =
+                config_.gpuVisibilityValidation;
+        }
         if (frameOwner_.timestampsEnabled) {
-            const std::uint32_t lastFrameIndex = static_cast<std::uint32_t>((frameOwner_.currentFrame + kMaxFramesInFlight - 1U) % kMaxFramesInFlight);
-            readBackGpuTimestamp(lastFrameIndex);
+            const std::uint32_t timestampFrameIndex =
+                static_cast<std::uint32_t>(lastFrameIndex);
+            readBackGpuTimestamp(timestampFrameIndex);
         }
         const std::uint64_t validationErrorCount =
             deviceOwner_.validationMessages.errorCount.load(std::memory_order_relaxed);

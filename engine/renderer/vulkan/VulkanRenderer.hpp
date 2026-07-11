@@ -24,6 +24,8 @@ public:
     void draw(const Camera& camera, const SceneRenderList& scene, double sceneBuildMs,
               double elapsedSeconds, double frameDeltaMs) override;
     [[nodiscard]] MeshBounds meshBounds(MeshAssetHandle mesh) const;
+    [[nodiscard]] std::array<TextureAssetHandle, 3> materialTextureHandles(
+        AssetId material) const;
     [[nodiscard]] RenderStats stats() const override;
     [[nodiscard]] const RenderDeviceInfo& deviceInfo() const override;
     void requestScreenshot(std::filesystem::path path);

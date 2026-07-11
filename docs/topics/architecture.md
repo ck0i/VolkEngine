@@ -88,4 +88,4 @@ Its private `Impl` keeps Vulkan internals isolated from application code, which 
 - The renderer interface is intentionally small: `draw`, `stats`, and `deviceInfo` (plus explicit screenshot/idle hooks).
 - The frame graph executes passes and owns backend-neutral barrier, lifetime, and transient-slot contracts. Vulkan resource realization and command emission remain private backend responsibilities.
 - World-to-scene extraction is explicit and CPU-side; it is an ECS bridge, not yet a general streaming scene system.
-- Descriptor indexing support is reported as capability metadata, but bindless descriptors are not enabled until the resource model needs them.
+- Descriptor indexing enables a capability-gated bindless sampled-image table with stable texture indices; the Vulkan baseline retains a fixed descriptor fallback for unsupported devices.

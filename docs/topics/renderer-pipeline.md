@@ -82,12 +82,12 @@ Swapchain images are preferred as UNORM because `tonemap.frag` normally applies 
 
 - Generated and imported CPU meshes are triangle lists that keep full-float position/normal/uv/tangent data for import and tangent generation, then write compact Vulkan `GpuVertex` records directly into one mapped staging buffer: full-float position/UV plus SNORM16 normal/tangent attributes. All batches share one vertex buffer and one index buffer; indices are reordered for post-transform vertex-cache locality, then vertices are remapped to first-use order for vertex-fetch locality while `loadObjMesh()` keeps source OBJ fan order until upload.
 - `GpuMesh` records carry offset/count values only.
-- `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds; command recording expands each visible item into GPU instance data with model and CPU-precomputed normal-matrix columns.
-- Scene descriptors bind per-frame uniforms, one fixed combined-sampler material texture array (`albedo`, `normal`, `ORM`), and per-frame instance data.
-- Visibility planning extracts frustum planes from the camera view-projection matrix, culls bounding spheres, applies optional material-grid acceleration, and counts visible mesh work.
-- Command recording assigns each mesh a contiguous mapped instance range. Depth-prepass frames write visible instances directly into those ranges because both scene passes share the same stable order; single-pass opaque frames instead emit compact `{depth,index}` keys, sort front-to-back for early-Z locality, and scatter the ordered instances sequentially into their mapped ranges.
-- If `multiDrawIndirect`, `drawIndirectFirstInstance`, and `maxDrawIndirectCount` allow it, one `vkCmdDrawIndexedIndirect` submits all visible mesh batches per pass.
-- Otherwise the renderer records direct `vkCmdDrawIndexed` per visible mesh batch.
+- `SceneRenderItem` records carry mesh ID, model matrix, material constants, and bounds. The GPU path uploads compact cull candidates and instance records; the direct fallback retains CPU materialization.
+- Capability-gated bindless scene descriptors use stable texture-table indices for albedo, normal, and ORM roles. Devices without the required descriptor-indexing features retain fixed material descriptor sets.
+- Meshes are cooked into bounded clusters with bounds and per-mesh ranges. A compute pass performs instance/cluster frustum tests, sphere LOD selection, temporal depth-pyramid occlusion, visible-instance compaction, and indirect-command generation.
+- The temporal Hi-Z pass reads the previous completed pyramid during culling, renders the current depth/HDR work, then conservatively reduces current reverse-Z depth into a half-resolution R32 pyramid for the next submission. Proportional footprints retain odd-extent edge texels.
+- The frame graph declares cull buffers and the depth pyramid explicitly; same-queue submission order and graph barriers carry the temporal image from the current build to the next frame's read.
+- `vkCmdDrawIndexedIndirect` submits the generated cluster commands when `multiDrawIndirect`, `drawIndirectFirstInstance`, and `maxDrawIndirectCount` allow it. `--no-indirect-draws` selects the direct indexed fallback.
 
 ## Swapchain and resize
 

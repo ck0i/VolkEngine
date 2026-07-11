@@ -52,8 +52,10 @@ struct RenderStats {
     double cpuQueueSubmitMs = 0.0;
     double frameDeltaMs = 0.0;
     double gpuFrameMs = 0.0;
+    double gpuCullMs = 0.0;
     double gpuDepthPrepassMs = 0.0;
     double gpuHdrSceneMs = 0.0;
+    double gpuDepthPyramidMs = 0.0;
     double gpuFinalPassMs = 0.0;
     bool gpuTimestampsValid = false;
     double elapsedSeconds = 0.0;
@@ -64,6 +66,14 @@ struct RenderStats {
     unsigned sceneInstanceCapacity = 0;
     double sceneInstanceBufferMiB = 0.0;
     unsigned meshBatchCount = 0;
+    unsigned sceneClusterCount = 0;
+    unsigned visibleClusterInstanceCount = 0;
+    unsigned testedClusterInstanceCount = 0;
+    unsigned occludedClusterInstanceCount = 0;
+    unsigned materialDescriptorCount = 0;
+    unsigned materialDescriptorCapacity = 0;
+    bool gpuDrivenVisibility = false;
+    bool gpuVisibilityValidated = false;
     unsigned drawCalls = 0;
     unsigned culledItemCount = 0;
     unsigned gridTileCount = 0;

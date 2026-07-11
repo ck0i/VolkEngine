@@ -60,8 +60,17 @@ struct VulkanBufferSyncState {
             throw std::runtime_error("Sampled image frame-graph usage must be read-only");
         }
         return {VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT};
+    case FrameGraphUsage::StorageImage:
+        return {
+            VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            access == FrameGraphAccess::Write
+                ? VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT
+                : VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
     case FrameGraphUsage::TransferSource:
         if (access != FrameGraphAccess::Read) {
             throw std::runtime_error("Transfer-source image usage must be read-only");
@@ -99,14 +108,17 @@ struct VulkanBufferSyncState {
         if (access != FrameGraphAccess::Read) {
             throw std::runtime_error("Uniform-buffer usage must be read-only");
         }
-        return {VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        return {VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_UNIFORM_READ_BIT};
     case FrameGraphUsage::StorageBuffer:
         return {VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 access == FrameGraphAccess::Write
-                    ? VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT
+                    ? VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT
                     : VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
     case FrameGraphUsage::IndirectBuffer:
         if (access != FrameGraphAccess::Read) {
@@ -128,6 +140,7 @@ struct VulkanBufferSyncState {
             throw std::runtime_error("Host-read buffer usage must be read-only");
         }
         return {VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT};
+    case FrameGraphUsage::StorageImage:
     case FrameGraphUsage::ColorAttachment:
     case FrameGraphUsage::DepthAttachment:
     case FrameGraphUsage::SampledImage:

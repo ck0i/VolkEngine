@@ -7,7 +7,7 @@
 layout(location = 0) in vec3 inPosition;
 
 void main() {
-    SceneInstance instance = instanceData.instances[gl_InstanceIndex];
+    SceneInstance instance = sceneInstance();
     vec4 world = instance.model * vec4(inPosition, 1.0);
     gl_Position = scene.viewProjection * world;
 }

@@ -17,9 +17,10 @@ layout(location = 3) flat out vec4 vAlbedoRoughness;
 layout(location = 4) flat out vec4 vEmissiveMetallic;
 layout(location = 5) flat out vec4 vMaterialFlags;
 layout(location = 6) out vec4 vWorldTangent;
+layout(location = 7) flat out uvec4 vTextureIndices;
 
 void main() {
-    SceneInstance instance = instanceData.instances[gl_InstanceIndex];
+    SceneInstance instance = sceneInstance();
     vec4 world = instance.model * vec4(inPosition, 1.0);
     vWorldPosition = world.xyz;
     mat3 normalMatrix = mat3(instance.normalMatrix0.xyz, instance.normalMatrix1.xyz, instance.normalMatrix2.xyz);
@@ -29,5 +30,6 @@ void main() {
     vAlbedoRoughness = instance.albedoRoughness;
     vEmissiveMetallic = instance.emissiveMetallic;
     vMaterialFlags = instance.materialFlags;
+    vTextureIndices = instance.textureIndices;
     gl_Position = scene.viewProjection * world;
 }

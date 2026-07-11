@@ -148,6 +148,8 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << ",\"height\":" << summary.config.initialHeight << "},\"variants\":{\"depth_prepass\":";
     appendEscaped(output, depthModeName(summary.config.depthPrepassMode));
     output << ",\"indirect_draws\":" << summary.config.indirectSceneDraws
+           << ",\"gpu_visibility_validation\":"
+           << summary.config.gpuVisibilityValidation
            << ",\"resize_smoke\":" << summary.options.resizeSmoke
            << ",\"acquire_recovery_smoke\":" << summary.options.acquireRecoverySmoke
            << ",\"screenshot\":" << !summary.options.screenshotPath.empty()
@@ -157,7 +159,21 @@ std::string serializeRunSummary(const RunSummary& summary) {
            << ",\"scene_triangles\":" << summary.stats.sceneTriangleCount
            << ",\"instances\":" << summary.stats.sceneItemCount
            << ",\"visible_instances\":" << summary.stats.visibleItemCount
+           << ",\"clusters\":" << summary.stats.sceneClusterCount
+           << ",\"visible_cluster_instances\":"
+           << summary.stats.visibleClusterInstanceCount
+           << ",\"tested_cluster_instances\":"
+           << summary.stats.testedClusterInstanceCount
+           << ",\"occluded_cluster_instances\":"
+           << summary.stats.occludedClusterInstanceCount
            << ",\"host_device_memory\":{\"available\":false,\"reason\":\"allocator budget is not exposed by the public renderer contract\"}},\n"
+           << "  \"gpu_visibility\":{\"enabled\":"
+           << summary.stats.gpuDrivenVisibility
+           << ",\"validated\":" << summary.stats.gpuVisibilityValidated
+           << ",\"material_descriptors\":"
+           << summary.stats.materialDescriptorCount
+           << ",\"material_descriptor_capacity\":"
+           << summary.stats.materialDescriptorCapacity << "},\n"
            << "  \"frame_graph\":{\"passes\":" << summary.stats.graphPassCount
            << ",\"logical_resources\":" << summary.stats.graphResourceCount
            << ",\"barriers\":" << summary.stats.graphBarrierCount
@@ -189,12 +205,27 @@ std::string serializeRunSummary(const RunSummary& summary) {
     appendMetric(output, "gpu_frame", summary.stats.gpuFrameMs, "ms", summary.stats.gpuTimestampsValid,
                  "GPU timestamp result unavailable");
     output << ',';
+    appendMetric(output, "gpu_cluster_cull", summary.stats.gpuCullMs, "ms",
+                 summary.stats.gpuTimestampsValid &&
+                     summary.stats.gpuDrivenVisibility,
+                 summary.stats.gpuDrivenVisibility
+                     ? "GPU timestamp result unavailable"
+                     : "pass disabled");
+    output << ',';
     appendMetric(output, "gpu_depth_prepass", summary.stats.gpuDepthPrepassMs, "ms",
                  summary.stats.gpuTimestampsValid && summary.stats.depthPrepassEnabled,
                  summary.stats.depthPrepassEnabled ? "GPU timestamp result unavailable" : "pass disabled");
     output << ',';
     appendMetric(output, "gpu_hdr_scene", summary.stats.gpuHdrSceneMs, "ms", summary.stats.gpuTimestampsValid,
                  "GPU timestamp result unavailable");
+    output << ',';
+    appendMetric(output, "gpu_depth_pyramid",
+                 summary.stats.gpuDepthPyramidMs, "ms",
+                 summary.stats.gpuTimestampsValid &&
+                     summary.stats.gpuDrivenVisibility,
+                 summary.stats.gpuDrivenVisibility
+                     ? "GPU timestamp result unavailable"
+                     : "pass disabled");
     output << ',';
     appendMetric(output, "gpu_tone_map", summary.stats.gpuFinalPassMs, "ms", summary.stats.gpuTimestampsValid,
                  "GPU timestamp result unavailable");

@@ -1,0 +1,33 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D sourceDepth;
+layout(r32f, set = 0, binding = 1) uniform writeonly image2D destinationDepth;
+
+layout(push_constant) uniform BuildData {
+    uvec2 sourceExtent;
+} build;
+
+void main() {
+    const uvec2 destination = gl_GlobalInvocationID.xy;
+    const uvec2 destinationExtent = uvec2(imageSize(destinationDepth));
+    if (any(greaterThanEqual(destination, destinationExtent))) {
+        return;
+    }
+
+    const uvec2 sourceBegin =
+        destination * build.sourceExtent / destinationExtent;
+    const uvec2 sourceEnd =
+        ((destination + uvec2(1)) * build.sourceExtent +
+         destinationExtent - uvec2(1)) /
+        destinationExtent;
+    float farthestDepth = 1.0;
+    for (uint y = sourceBegin.y; y < sourceEnd.y; ++y) {
+        for (uint x = sourceBegin.x; x < sourceEnd.x; ++x) {
+            farthestDepth = min(
+                farthestDepth,
+                texelFetch(sourceDepth, ivec2(x, y), 0).r);
+        }
+    }
+    imageStore(destinationDepth, ivec2(destination), vec4(farthestDepth));
+}

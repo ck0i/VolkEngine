@@ -109,10 +109,6 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
             throw std::runtime_error("Scene mesh index count exceeds uint32 range");
         }
     }
-    for (MeshData& mesh : meshes) {
-        optimizeTriangleIndexOrderForVertexCache(mesh.indices, mesh.vertices.size());
-        optimizeVertexFetchOrder(mesh);
-    }
     std::size_t vertexCount = 0;
     std::size_t indexCount = 0;
     for (const MeshData& mesh : meshes) {
@@ -195,6 +191,10 @@ const ReferenceAssetBundle& VulkanRenderer::Impl::referenceAssets() {
 
 void VulkanRenderer::Impl::createMeshes() {
     MeshUpload meshUpload{};
+    std::vector<GpuCluster> gpuClusters;
+    std::vector<GpuClusterNode> gpuHierarchy;
+    std::vector<std::uint32_t> gpuRoots;
+    std::vector<GpuMeshClusterRange> gpuMeshRanges;
     try {
         const ReferenceAssetBundle& authored = referenceAssets();
         if (authored.scene.meshes.empty()) {
@@ -202,11 +202,23 @@ void VulkanRenderer::Impl::createMeshes() {
         }
         std::vector<MeshData> meshes(kBaseSceneMeshBatchOrder.size() +
                                      authored.scene.meshes.size());
+        if (meshes.size() >
+            static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+            throw std::runtime_error("Scene mesh count exceeds uint32 range");
+        }
+        std::vector<MeshClusterData> meshClusters(meshes.size());
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::Cube)] = createCubeMesh();
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh)] = createUvSphereMesh(32, 64);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(16, 32);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(8, 16);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = createPlaneMesh(12.0f, 12.0f);
+        for (std::size_t meshIndex = 0; meshIndex < kBaseSceneMeshBatchOrder.size();
+             ++meshIndex) {
+            optimizeTriangleIndexOrderForVertexCache(
+                meshes[meshIndex].indices, meshes[meshIndex].vertices.size());
+            optimizeVertexFetchOrder(meshes[meshIndex]);
+            meshClusters[meshIndex] = buildMeshClusters(meshes[meshIndex]);
+        }
         stats_.assetCookMs = authored.metrics.cookMilliseconds;
         stats_.assetRecordCount = static_cast<unsigned>(authored.database.records().size());
         stats_.assetCacheHits = authored.metrics.cacheHits;
@@ -218,12 +230,54 @@ void VulkanRenderer::Impl::createMeshes() {
         for (std::size_t index = 0; index < authored.scene.meshes.size(); ++index) {
             meshes[kBaseSceneMeshBatchOrder.size() + index] =
                 authored.scene.meshes[index].mesh;
+            meshClusters[kBaseSceneMeshBatchOrder.size() + index] =
+                authored.scene.meshes[index].clusters;
+            validateMeshClusters(
+                meshes[kBaseSceneMeshBatchOrder.size() + index],
+                meshClusters[kBaseSceneMeshBatchOrder.size() + index]);
         }
         resourceOwner_.sceneMeshBounds.resize(meshes.size());
         for (std::size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex) {
             resourceOwner_.sceneMeshBounds[meshIndex] = meshes[meshIndex].bounds;
         }
         meshUpload = stageMeshUpload(meshes);
+        gpuRoots.resize(meshes.size());
+        gpuMeshRanges.resize(meshes.size());
+        for (std::size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex) {
+            if (gpuClusters.size() > std::numeric_limits<std::uint32_t>::max() ||
+                gpuHierarchy.size() > std::numeric_limits<std::uint32_t>::max()) {
+                throw std::runtime_error("Scene cluster metadata exceeds uint32 range");
+            }
+            const std::uint32_t clusterBase =
+                static_cast<std::uint32_t>(gpuClusters.size());
+            const std::uint32_t hierarchyBase =
+                static_cast<std::uint32_t>(gpuHierarchy.size());
+            gpuMeshRanges[meshIndex] = {
+                clusterBase,
+                static_cast<std::uint32_t>(
+                    meshClusters[meshIndex].clusters.size())};
+            const GpuMesh& gpuMesh = meshUpload.meshes[meshIndex];
+            for (const MeshCluster& cluster : meshClusters[meshIndex].clusters) {
+                gpuClusters.push_back({
+                    {cluster.bounds.center.x, cluster.bounds.center.y,
+                     cluster.bounds.center.z, cluster.bounds.radius},
+                    cluster.indexCount, gpuMesh.firstIndex + cluster.firstIndex,
+                    gpuMesh.vertexOffset, static_cast<std::uint32_t>(meshIndex)});
+            }
+            for (const MeshClusterNode& node : meshClusters[meshIndex].hierarchy) {
+                gpuHierarchy.push_back({
+                    {node.bounds.center.x, node.bounds.center.y,
+                     node.bounds.center.z, node.bounds.radius},
+                    node.left == kInvalidClusterNode
+                        ? kInvalidClusterNode : hierarchyBase + node.left,
+                    node.right == kInvalidClusterNode
+                        ? kInvalidClusterNode : hierarchyBase + node.right,
+                    node.cluster == kInvalidClusterNode
+                        ? kInvalidClusterNode : clusterBase + node.cluster,
+                    0U});
+            }
+            gpuRoots[meshIndex] = hierarchyBase + meshClusters[meshIndex].root;
+        }
         for (MeshData& mesh : meshes) {
             mesh = {};
         }
@@ -239,10 +293,141 @@ void VulkanRenderer::Impl::createMeshes() {
     resourceOwner_.sceneVertexBuffer = takeBuffer(meshUpload.vertices);
     resourceOwner_.sceneIndexBuffer = takeBuffer(meshUpload.indices);
     resourceOwner_.sceneMeshes = meshUpload.meshes;
+    resourceOwner_.sceneClusters = std::move(gpuClusters);
+    resourceOwner_.sceneClusterHierarchy = std::move(gpuHierarchy);
+    resourceOwner_.sceneClusterRoots = std::move(gpuRoots);
+    resourceOwner_.sceneMeshClusterRanges = std::move(gpuMeshRanges);
     resourceOwner_.sceneMeshTriangleCounts.resize(resourceOwner_.sceneMeshes.size());
     for (std::size_t meshIndex = 0; meshIndex < resourceOwner_.sceneMeshes.size(); ++meshIndex) {
         resourceOwner_.sceneMeshTriangleCounts[meshIndex] = resourceOwner_.sceneMeshes[meshIndex].indexCount / 3U;
     }
+    const VkDeviceSize clusterBytes =
+        static_cast<VkDeviceSize>(resourceOwner_.sceneClusters.size() *
+                                  sizeof(GpuCluster));
+    const VkDeviceSize hierarchyBytes =
+        static_cast<VkDeviceSize>(resourceOwner_.sceneClusterHierarchy.size() *
+                                  sizeof(GpuClusterNode));
+    const VkDeviceSize rangeBytes =
+        static_cast<VkDeviceSize>(
+            resourceOwner_.sceneMeshClusterRanges.size() *
+            sizeof(GpuMeshClusterRange));
+    if (clusterBytes == 0U || hierarchyBytes == 0U || rangeBytes == 0U ||
+        hierarchyBytes > std::numeric_limits<VkDeviceSize>::max() - clusterBytes ||
+        rangeBytes > std::numeric_limits<VkDeviceSize>::max() -
+                         clusterBytes - hierarchyBytes) {
+        throw std::runtime_error("Scene cluster upload size is invalid");
+    }
+    Buffer clusterStaging;
+    VkCommandBuffer clusterUploadCommands = VK_NULL_HANDLE;
+    try {
+        clusterStaging = createBuffer(
+            clusterBytes + hierarchyBytes + rangeBytes,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        {
+            ScopedVmaMap stagingMap{deviceOwner_.allocator, clusterStaging.allocation,
+                                    "vmaMapMemory cluster staging"};
+            auto* bytes = static_cast<std::byte*>(stagingMap.get());
+            std::memcpy(bytes, resourceOwner_.sceneClusters.data(),
+                        static_cast<std::size_t>(clusterBytes));
+            std::memcpy(bytes + static_cast<std::size_t>(clusterBytes),
+                        resourceOwner_.sceneClusterHierarchy.data(),
+                        static_cast<std::size_t>(hierarchyBytes));
+            std::memcpy(
+                bytes + static_cast<std::size_t>(clusterBytes + hierarchyBytes),
+                resourceOwner_.sceneMeshClusterRanges.data(),
+                static_cast<std::size_t>(rangeBytes));
+        }
+        resourceOwner_.clusterData = createBuffer(
+            clusterBytes,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, true);
+        resourceOwner_.clusterHierarchy = createBuffer(
+            hierarchyBytes,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, true);
+        resourceOwner_.meshClusterRanges = createBuffer(
+            rangeBytes,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, true);
+        clusterUploadCommands = beginUploadCommands();
+        VkBufferCopy clusterCopy{};
+        clusterCopy.size = clusterBytes;
+        vkCmdCopyBuffer(clusterUploadCommands, clusterStaging.buffer,
+                        resourceOwner_.clusterData.buffer, 1, &clusterCopy);
+        VkBufferCopy hierarchyCopy{};
+        hierarchyCopy.srcOffset = clusterBytes;
+        hierarchyCopy.size = hierarchyBytes;
+        vkCmdCopyBuffer(clusterUploadCommands, clusterStaging.buffer,
+                        resourceOwner_.clusterHierarchy.buffer, 1, &hierarchyCopy);
+        VkBufferCopy rangeCopy{};
+        rangeCopy.srcOffset = clusterBytes + hierarchyBytes;
+        rangeCopy.size = rangeBytes;
+        vkCmdCopyBuffer(clusterUploadCommands, clusterStaging.buffer,
+                        resourceOwner_.meshClusterRanges.buffer, 1, &rangeCopy);
+        if (deviceOwner_.transferQueue == deviceOwner_.graphicsQueue) {
+            std::array<VkBufferMemoryBarrier2, 3> barriers{};
+            for (VkBufferMemoryBarrier2& barrier : barriers) {
+                barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.offset = 0U;
+                barrier.size = VK_WHOLE_SIZE;
+            }
+            barriers[0].buffer = resourceOwner_.clusterData.buffer;
+            barriers[1].buffer = resourceOwner_.clusterHierarchy.buffer;
+            barriers[2].buffer = resourceOwner_.meshClusterRanges.buffer;
+            VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dependency.bufferMemoryBarrierCount =
+                static_cast<std::uint32_t>(barriers.size());
+            dependency.pBufferMemoryBarriers = barriers.data();
+            vkCmdPipelineBarrier2(clusterUploadCommands, &dependency);
+        }
+        VkCommandBuffer submittedCommands = clusterUploadCommands;
+        clusterUploadCommands = VK_NULL_HANDLE;
+        submitTransferUpload(submittedCommands, takeBuffer(clusterStaging));
+    } catch (...) {
+        if (clusterUploadCommands != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(deviceOwner_.device, frameOwner_.transferCommandPool,
+                                 1, &clusterUploadCommands);
+        }
+        destroyBuffer(clusterStaging);
+        throw;
+    }
+    setObjectName(VK_OBJECT_TYPE_BUFFER,
+                  handleToUint64(resourceOwner_.clusterData.buffer),
+                  "Scene Cluster Data Buffer");
+    vmaSetAllocationName(deviceOwner_.allocator,
+                         resourceOwner_.clusterData.allocation,
+                         "Scene Cluster Data Allocation");
+    resourceOwner_.clusterData.resourceId =
+        resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, "Scene Cluster Data Buffer", clusterBytes);
+    setObjectName(VK_OBJECT_TYPE_BUFFER,
+                  handleToUint64(resourceOwner_.clusterHierarchy.buffer),
+                  "Scene Cluster Hierarchy Buffer");
+    vmaSetAllocationName(deviceOwner_.allocator,
+                         resourceOwner_.clusterHierarchy.allocation,
+                         "Scene Cluster Hierarchy Allocation");
+    resourceOwner_.clusterHierarchy.resourceId =
+        resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, "Scene Cluster Hierarchy Buffer",
+            hierarchyBytes);
+    setObjectName(VK_OBJECT_TYPE_BUFFER,
+                  handleToUint64(resourceOwner_.meshClusterRanges.buffer),
+                  "Scene Mesh Cluster Ranges Buffer");
+    vmaSetAllocationName(deviceOwner_.allocator,
+                         resourceOwner_.meshClusterRanges.allocation,
+                         "Scene Mesh Cluster Ranges Allocation");
+    resourceOwner_.meshClusterRanges.resourceId =
+        resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, "Scene Mesh Cluster Ranges Buffer",
+            rangeBytes);
 
     setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(resourceOwner_.sceneVertexBuffer.buffer), "Scene Geometry Vertex Buffer");
     vmaSetAllocationName(deviceOwner_.allocator, resourceOwner_.sceneVertexBuffer.allocation, "Scene Geometry Vertex Allocation");

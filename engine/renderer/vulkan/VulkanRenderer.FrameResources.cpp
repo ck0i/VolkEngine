@@ -52,11 +52,165 @@ void VulkanRenderer::Impl::updateFrameInstanceDataDescriptor(const std::size_t f
 
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = resourceOwner_.sceneDescriptorSets[frameIndex];
-    write.dstBinding = 2;
+    write.dstBinding = 1;
     write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     write.pBufferInfo = &instanceBufferInfo;
     vkUpdateDescriptorSets(deviceOwner_.device, 1, &write, 0, nullptr);
+}
+void VulkanRenderer::Impl::updateFrameVisibleInstanceDescriptor(
+    const std::size_t frameIndex) const {
+    const FrameResources& frame = frameOwner_.frames[frameIndex];
+    VkDescriptorBufferInfo info{
+        frame.visibleInstanceIndices.buffer, 0,
+        frame.visibleInstanceIndices.size};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = resourceOwner_.sceneDescriptorSets[frameIndex];
+    write.dstBinding = 2;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.pBufferInfo = &info;
+    vkUpdateDescriptorSets(deviceOwner_.device, 1, &write, 0, nullptr);
+}
+
+void VulkanRenderer::Impl::updateFrameCullDescriptors(
+    const std::size_t frameIndex) const {
+    const FrameResources& frame = frameOwner_.frames[frameIndex];
+    const std::array<VkDescriptorBufferInfo, 7> infos{{
+        {frame.cullCandidates.buffer, 0, frame.cullCandidates.size},
+        {frame.visibleInstanceIndices.buffer, 0,
+         frame.visibleInstanceIndices.size},
+        {frame.indirectCommands.buffer, 0, frame.indirectCommands.size},
+        {resourceOwner_.clusterData.buffer, 0, resourceOwner_.clusterData.size},
+        {resourceOwner_.meshClusterRanges.buffer, 0,
+         resourceOwner_.meshClusterRanges.size},
+        {frame.cullUniforms.buffer, 0, sizeof(GpuCullUniforms)},
+        {frame.cullCounters.buffer, 0, sizeof(GpuCullCounters)},
+    }};
+    std::array<VkWriteDescriptorSet, 7> writes{};
+    for (std::uint32_t binding = 0;
+         binding < static_cast<std::uint32_t>(writes.size()); ++binding) {
+        writes[binding] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        writes[binding].dstSet = resourceOwner_.cullDescriptorSets[frameIndex];
+        writes[binding].dstBinding = binding;
+        writes[binding].descriptorCount = 1;
+        writes[binding].descriptorType =
+            binding == 5U ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                          : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[binding].pBufferInfo = &infos[binding];
+    }
+    vkUpdateDescriptorSets(deviceOwner_.device,
+                           static_cast<std::uint32_t>(writes.size()),
+                           writes.data(), 0, nullptr);
+    VkDescriptorImageInfo depthPyramidInfo{
+        resourceOwner_.linearSampler, resourceOwner_.depthPyramid.view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet depthPyramidWrite{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    depthPyramidWrite.dstSet =
+        resourceOwner_.cullDescriptorSets[frameIndex];
+    depthPyramidWrite.dstBinding = 7;
+    depthPyramidWrite.descriptorCount = 1;
+    depthPyramidWrite.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    depthPyramidWrite.pImageInfo = &depthPyramidInfo;
+    vkUpdateDescriptorSets(deviceOwner_.device, 1, &depthPyramidWrite, 0,
+                           nullptr);
+}
+
+void VulkanRenderer::Impl::ensureGpuVisibilityCapacity(
+    FrameResources& frame, const std::size_t frameIndex,
+    const std::size_t candidateCount,
+    const std::size_t clusterInstanceCapacity) {
+    bool descriptorsChanged = false;
+    if (candidateCount > frame.candidateCapacity) {
+        std::size_t capacity = std::max(frame.candidateCapacity, std::size_t{1});
+        while (capacity < candidateCount) {
+            if (capacity > std::numeric_limits<std::size_t>::max() / 2U) {
+                capacity = candidateCount;
+                break;
+            }
+            capacity *= 2U;
+        }
+        if (capacity >
+            static_cast<std::size_t>(
+                deviceOwner_.physicalDeviceProperties.limits.maxStorageBufferRange /
+                sizeof(GpuCullCandidate))) {
+            throw std::runtime_error(
+                "GPU cull candidate storage exceeds Vulkan buffer limits");
+        }
+        Buffer replacement = createBuffer(
+            sizeof(GpuCullCandidate) * capacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        const std::string frameName = "Frame " + std::to_string(frameIndex);
+        setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(replacement.buffer),
+                      frameName + " Cull Candidate Buffer");
+        vmaSetAllocationName(deviceOwner_.allocator, replacement.allocation,
+                             (frameName + " Cull Candidate Allocation").c_str());
+        replacement.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, frameName + " Cull Candidate Buffer",
+            replacement.size);
+        try {
+            checkVk(vmaMapMemory(deviceOwner_.allocator, replacement.allocation,
+                                 &replacement.mapped),
+                    "vmaMapMemory cull candidates");
+        } catch (...) {
+            destroyBuffer(replacement);
+            throw;
+        }
+        destroyBuffer(frame.cullCandidates);
+        frame.cullCandidates = takeBuffer(replacement);
+        frame.candidateCapacity = capacity;
+        descriptorsChanged = true;
+    }
+    if (candidateCount > frame.instanceCapacity) {
+        ensureSceneInstanceCapacity(frame, frameIndex, candidateCount);
+        descriptorsChanged = true;
+    }
+    if (clusterInstanceCapacity > frame.visibleInstanceIndexCapacity) {
+        std::size_t capacity =
+            std::max(frame.visibleInstanceIndexCapacity, std::size_t{1});
+        while (capacity < clusterInstanceCapacity) {
+            if (capacity > std::numeric_limits<std::size_t>::max() / 2U) {
+                capacity = clusterInstanceCapacity;
+                break;
+            }
+            capacity *= 2U;
+        }
+        if (capacity >
+            static_cast<std::size_t>(
+                deviceOwner_.physicalDeviceProperties.limits
+                    .maxStorageBufferRange /
+                sizeof(std::uint32_t))) {
+            throw std::runtime_error(
+                "GPU visible instance index storage exceeds Vulkan limits");
+        }
+        Buffer replacement = createBuffer(
+            sizeof(std::uint32_t) * capacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        const std::string frameName = "Frame " + std::to_string(frameIndex);
+        setObjectName(VK_OBJECT_TYPE_BUFFER,
+                      handleToUint64(replacement.buffer),
+                      frameName + " Visible Instance Index Buffer");
+        vmaSetAllocationName(
+            deviceOwner_.allocator, replacement.allocation,
+            (frameName + " Visible Instance Index Allocation").c_str());
+        replacement.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer,
+            frameName + " Visible Instance Index Buffer", replacement.size);
+        destroyBuffer(frame.visibleInstanceIndices);
+        frame.visibleInstanceIndices = takeBuffer(replacement);
+        frame.visibleInstanceIndexCapacity = capacity;
+        updateFrameVisibleInstanceDescriptor(frameIndex);
+        descriptorsChanged = true;
+    }
+    frame.clusterInstanceCapacity = clusterInstanceCapacity;
+    if (descriptorsChanged) {
+        updateFrameCullDescriptors(frameIndex);
+    }
 }
 
 void VulkanRenderer::Impl::ensureSceneInstanceCapacity(FrameResources& frame, const std::size_t frameIndex, const std::size_t requiredCapacity) {
@@ -100,6 +254,66 @@ void VulkanRenderer::Impl::replaceFrameImageAvailableSemaphore(FrameResources& f
     frame.imageAvailable = replacement;
 }
 
+void VulkanRenderer::Impl::updateDepthPyramidDescriptors() const {
+    const std::size_t mipCount =
+        resourceOwner_.depthPyramidMipViews.size();
+    if (mipCount == 0U || mipCount > kMaxDepthPyramidMipLevels) {
+        throw std::runtime_error("Depth pyramid descriptor mip count is invalid");
+    }
+    for (std::size_t mip = 0; mip < mipCount; ++mip) {
+        const VkImageView sourceView =
+            mip == 0U ? resourceOwner_.depth.view
+                      : resourceOwner_.depthPyramidMipViews[mip - 1U];
+        const VkImageLayout sourceLayout =
+            mip == 0U ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                      : VK_IMAGE_LAYOUT_GENERAL;
+        const VkDescriptorImageInfo source{
+            resourceOwner_.linearSampler, sourceView, sourceLayout};
+        const VkDescriptorImageInfo destination{
+            VK_NULL_HANDLE, resourceOwner_.depthPyramidMipViews[mip],
+            VK_IMAGE_LAYOUT_GENERAL};
+        std::array<VkWriteDescriptorSet, 2> writes{};
+        writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        writes[0].dstSet =
+            resourceOwner_.depthPyramidDescriptorSets[mip];
+        writes[0].dstBinding = 0;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType =
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[0].pImageInfo = &source;
+        writes[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        writes[1].dstSet =
+            resourceOwner_.depthPyramidDescriptorSets[mip];
+        writes[1].dstBinding = 1;
+        writes[1].descriptorCount = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[1].pImageInfo = &destination;
+        vkUpdateDescriptorSets(deviceOwner_.device,
+                               static_cast<std::uint32_t>(writes.size()),
+                               writes.data(), 0, nullptr);
+    }
+    for (std::size_t frameIndex = 0; frameIndex < kMaxFramesInFlight;
+         ++frameIndex) {
+        updateFrameCullDescriptors(frameIndex);
+    }
+}
+
+void VulkanRenderer::Impl::createDepthPyramidDescriptorSets() {
+    std::array<VkDescriptorSetLayout, kMaxDepthPyramidMipLevels> layouts{};
+    layouts.fill(resourceOwner_.depthPyramidSetLayout);
+    VkDescriptorSetAllocateInfo allocInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    allocInfo.descriptorPool = resourceOwner_.descriptorPool;
+    allocInfo.descriptorSetCount =
+        static_cast<std::uint32_t>(layouts.size());
+    allocInfo.pSetLayouts = layouts.data();
+    checkVk(vkAllocateDescriptorSets(
+                deviceOwner_.device, &allocInfo,
+                resourceOwner_.depthPyramidDescriptorSets.data()),
+            "vkAllocateDescriptorSets depth pyramid");
+    updateDepthPyramidDescriptors();
+}
+
 void VulkanRenderer::Impl::createFrameResources() {
     std::array<VkDescriptorSetLayout, kMaxFramesInFlight> sceneLayouts{};
     sceneLayouts.fill(resourceOwner_.sceneSetLayout);
@@ -107,13 +321,72 @@ void VulkanRenderer::Impl::createFrameResources() {
     allocInfo.descriptorPool = resourceOwner_.descriptorPool;
     allocInfo.descriptorSetCount = static_cast<std::uint32_t>(sceneLayouts.size());
     allocInfo.pSetLayouts = sceneLayouts.data();
+    std::array<std::uint32_t, kMaxFramesInFlight> variableDescriptorCounts{};
+    VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescriptorInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO};
+    if (resourceOwner_.bindlessMaterialsEnabled) {
+        variableDescriptorCounts.fill(
+            static_cast<std::uint32_t>(resourceOwner_.materialTextures.size()));
+        variableDescriptorInfo.descriptorSetCount =
+            static_cast<std::uint32_t>(variableDescriptorCounts.size());
+        variableDescriptorInfo.pDescriptorCounts = variableDescriptorCounts.data();
+        allocInfo.pNext = &variableDescriptorInfo;
+    }
     checkVk(vkAllocateDescriptorSets(deviceOwner_.device, &allocInfo, resourceOwner_.sceneDescriptorSets.data()), "vkAllocateDescriptorSets scene");
+    std::array<VkDescriptorSetLayout, kMaxFramesInFlight> cullLayouts{};
+    cullLayouts.fill(resourceOwner_.cullSetLayout);
+    VkDescriptorSetAllocateInfo cullAllocInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    cullAllocInfo.descriptorPool = resourceOwner_.descriptorPool;
+    cullAllocInfo.descriptorSetCount =
+        static_cast<std::uint32_t>(cullLayouts.size());
+    cullAllocInfo.pSetLayouts = cullLayouts.data();
+    checkVk(vkAllocateDescriptorSets(
+                deviceOwner_.device, &cullAllocInfo,
+                resourceOwner_.cullDescriptorSets.data()),
+            "vkAllocateDescriptorSets scene cull");
+    const auto samplerForRole = [&](const TextureRole role) {
+        switch (role) {
+        case TextureRole::Normal: return resourceOwner_.normalTextureSampler;
+        case TextureRole::MetallicRoughness:
+        case TextureRole::Occlusion: return resourceOwner_.ormTextureSampler;
+        case TextureRole::BaseColor:
+        case TextureRole::Emissive: return resourceOwner_.textureSampler;
+        }
+        return resourceOwner_.textureSampler;
+    };
+    std::vector<VkDescriptorImageInfo> materialTextureInfos;
+    if (resourceOwner_.bindlessMaterialsEnabled) {
+        materialTextureInfos.reserve(resourceOwner_.materialTextures.size());
+        for (std::size_t index = 0; index < resourceOwner_.materialTextures.size(); ++index) {
+            materialTextureInfos.push_back({
+                samplerForRole(resourceOwner_.materialTextureRoles[index]),
+                resourceOwner_.materialTextures[index].view,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+        }
+    } else {
+        materialTextureInfos.reserve(vulkan_renderer_detail::kMaterialTextureCount);
+        constexpr std::array<TextureRole, vulkan_renderer_detail::kMaterialTextureCount>
+            roles{TextureRole::BaseColor, TextureRole::Normal,
+                  TextureRole::MetallicRoughness};
+        for (std::size_t role = 0; role < roles.size(); ++role) {
+            materialTextureInfos.push_back({
+                samplerForRole(roles[role]),
+                resourceOwner_.materialTextures.at(
+                    resourceOwner_.referenceMaterialTextureIndices[role]).view,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+        }
+    }
+
 
     const std::size_t initialInstanceCapacity = kInitialSceneInstanceCapacity;
     for (std::size_t i = 0; i < frameOwner_.frames.size(); ++i) {
         FrameResources& frame = frameOwner_.frames[i];
         const std::string frameName = "Frame " + std::to_string(i);
         setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, handleToUint64(resourceOwner_.sceneDescriptorSets[i]), frameName + " Scene Descriptor Set");
+        setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET,
+                      handleToUint64(resourceOwner_.cullDescriptorSets[i]),
+                      frameName + " Scene Cull Descriptor Set");
 
         VkCommandPoolCreateInfo framePoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         framePoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -135,12 +408,83 @@ void VulkanRenderer::Impl::createFrameResources() {
         frame.sceneUniforms.resourceId = resourceOwner_.registry.registerResource(GpuResourceKind::Buffer, uniformAllocationName, frame.sceneUniforms.size);
         checkVk(vmaMapMemory(deviceOwner_.allocator, frame.sceneUniforms.allocation, &frame.sceneUniforms.mapped), "vmaMapMemory scene uniforms");
 
+        frame.visibleInstanceIndices = createBuffer(
+            sizeof(std::uint32_t) * initialInstanceCapacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        frame.visibleInstanceIndexCapacity = initialInstanceCapacity;
+        setObjectName(VK_OBJECT_TYPE_BUFFER,
+                      handleToUint64(frame.visibleInstanceIndices.buffer),
+                      frameName + " Visible Instance Index Buffer");
+        vmaSetAllocationName(
+            deviceOwner_.allocator, frame.visibleInstanceIndices.allocation,
+            (frameName + " Visible Instance Index Allocation").c_str());
+        frame.visibleInstanceIndices.resourceId =
+            resourceOwner_.registry.registerResource(
+                GpuResourceKind::Buffer,
+                frameName + " Visible Instance Index Buffer",
+                frame.visibleInstanceIndices.size);
         createFrameInstanceDataBuffer(frame, i, initialInstanceCapacity);
+        frame.cullCandidates = createBuffer(
+            sizeof(GpuCullCandidate) * initialInstanceCapacity,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        frame.candidateCapacity = initialInstanceCapacity;
+        setObjectName(VK_OBJECT_TYPE_BUFFER,
+                      handleToUint64(frame.cullCandidates.buffer),
+                      frameName + " Cull Candidate Buffer");
+        vmaSetAllocationName(deviceOwner_.allocator,
+                             frame.cullCandidates.allocation,
+                             (frameName + " Cull Candidate Allocation").c_str());
+        frame.cullCandidates.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, frameName + " Cull Candidate Buffer",
+            frame.cullCandidates.size);
+        checkVk(vmaMapMemory(deviceOwner_.allocator,
+                             frame.cullCandidates.allocation,
+                             &frame.cullCandidates.mapped),
+                "vmaMapMemory cull candidates");
+        frame.cullUniforms = createBuffer(
+            sizeof(GpuCullUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        setObjectName(VK_OBJECT_TYPE_BUFFER,
+                      handleToUint64(frame.cullUniforms.buffer),
+                      frameName + " Cull Uniform Buffer");
+        vmaSetAllocationName(deviceOwner_.allocator, frame.cullUniforms.allocation,
+                             (frameName + " Cull Uniform Allocation").c_str());
+        frame.cullUniforms.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, frameName + " Cull Uniform Buffer",
+            frame.cullUniforms.size);
+        checkVk(vmaMapMemory(deviceOwner_.allocator, frame.cullUniforms.allocation,
+                             &frame.cullUniforms.mapped),
+                "vmaMapMemory cull uniforms");
+        frame.cullCounters = createBuffer(
+            sizeof(GpuCullCounters), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        setObjectName(VK_OBJECT_TYPE_BUFFER,
+                      handleToUint64(frame.cullCounters.buffer),
+                      frameName + " Cull Counter Buffer");
+        vmaSetAllocationName(deviceOwner_.allocator,
+                             frame.cullCounters.allocation,
+                             (frameName + " Cull Counter Allocation").c_str());
+        frame.cullCounters.resourceId = resourceOwner_.registry.registerResource(
+            GpuResourceKind::Buffer, frameName + " Cull Counter Buffer",
+            frame.cullCounters.size);
+        checkVk(vmaMapMemory(deviceOwner_.allocator,
+                             frame.cullCounters.allocation,
+                             &frame.cullCounters.mapped),
+                "vmaMapMemory cull counters");
 
         if (indirectSceneDrawsEnabled_) {
-            frame.indirectCommands = createBuffer(sizeof(VkDrawIndexedIndirectCommand) * resourceOwner_.sceneMeshes.size(),
-                                                  VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            frame.indirectCommands = createBuffer(
+                sizeof(VkDrawIndexedIndirectCommand) *
+                    resourceOwner_.sceneClusters.size(),
+                VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             setObjectName(VK_OBJECT_TYPE_BUFFER, handleToUint64(frame.indirectCommands.buffer), frameName + " Scene Indirect Commands Buffer");
             const std::string indirectAllocationName = frameName + " Scene Indirect Commands Allocation";
             vmaSetAllocationName(deviceOwner_.allocator, frame.indirectCommands.allocation, indirectAllocationName.c_str());
@@ -156,20 +500,11 @@ void VulkanRenderer::Impl::createFrameResources() {
         instanceBufferInfo.buffer = frame.instanceData.buffer;
         instanceBufferInfo.offset = 0;
         instanceBufferInfo.range = frame.instanceData.size;
-        std::array<VkDescriptorImageInfo, vulkan_renderer_detail::kMaterialTextureCount> materialTextureInfos{};
-        materialTextureInfos[0].sampler = resourceOwner_.textureSampler;
-        materialTextureInfos[0].imageView =
-            resourceOwner_.materialTextures.at(resourceOwner_.referenceMaterialTextureIndices[0]).view;
-        materialTextureInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        materialTextureInfos[1].sampler = resourceOwner_.normalTextureSampler;
-        materialTextureInfos[1].imageView =
-            resourceOwner_.materialTextures.at(resourceOwner_.referenceMaterialTextureIndices[1]).view;
-        materialTextureInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        materialTextureInfos[2].sampler = resourceOwner_.ormTextureSampler;
-        materialTextureInfos[2].imageView =
-            resourceOwner_.materialTextures.at(resourceOwner_.referenceMaterialTextureIndices[2]).view;
-        materialTextureInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        std::array<VkWriteDescriptorSet, 3> writes{};
+        VkDescriptorBufferInfo visibleIndexBufferInfo{};
+        visibleIndexBufferInfo.buffer = frame.visibleInstanceIndices.buffer;
+        visibleIndexBufferInfo.offset = 0;
+        visibleIndexBufferInfo.range = frame.visibleInstanceIndices.size;
+        std::array<VkWriteDescriptorSet, 4> writes{};
         writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[0].dstSet = resourceOwner_.sceneDescriptorSets[i];
         writes[0].dstBinding = 0;
@@ -178,17 +513,26 @@ void VulkanRenderer::Impl::createFrameResources() {
         writes[0].pBufferInfo = &sceneBufferInfo;
         writes[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[1].dstSet = resourceOwner_.sceneDescriptorSets[i];
-        writes[1].dstBinding = 1;
+        writes[1].dstBinding = 3;
         writes[1].descriptorCount = static_cast<std::uint32_t>(materialTextureInfos.size());
         writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[1].pImageInfo = materialTextureInfos.data();
         writes[2] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[2].dstSet = resourceOwner_.sceneDescriptorSets[i];
-        writes[2].dstBinding = 2;
+        writes[2].dstBinding = 1;
         writes[2].descriptorCount = 1;
         writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[2].pBufferInfo = &instanceBufferInfo;
+        writes[3] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        writes[3].dstSet = resourceOwner_.sceneDescriptorSets[i];
+        writes[3].dstBinding = 2;
+        writes[3].descriptorCount = 1;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[3].pBufferInfo = &visibleIndexBufferInfo;
         vkUpdateDescriptorSets(deviceOwner_.device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        if (indirectSceneDrawsEnabled_) {
+            updateFrameCullDescriptors(i);
+        }
 
         replaceFrameImageAvailableSemaphore(frame, i);
 
@@ -197,6 +541,7 @@ void VulkanRenderer::Impl::createFrameResources() {
         checkVk(vkCreateFence(deviceOwner_.device, &fenceInfo, nullptr, &frame.inFlight), "vkCreateFence");
         setObjectName(VK_OBJECT_TYPE_FENCE, handleToUint64(frame.inFlight), frameName + " In-Flight Fence");
     }
+    createDepthPyramidDescriptorSets();
 }
 
 void VulkanRenderer::Impl::createTimestampQueries() {
@@ -242,6 +587,54 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
             imageByteEstimate(swapchainOwner_.extent, VK_FORMAT_R16G16B16A16_SFLOAT), 1U, 2U});
         const FrameGraph::ResourceHandle swapchain = graph.addResource({
             "Swapchain Image", FrameGraphResourceKind::Image, true});
+        FrameGraph::ResourceHandle cullCandidates{};
+        FrameGraph::ResourceHandle cullCounters{};
+        FrameGraph::ResourceHandle cullUniforms{};
+        FrameGraph::ResourceHandle visibleInstances{};
+        FrameGraph::ResourceHandle sceneInstances{};
+        FrameGraph::ResourceHandle depthPyramid{};
+        FrameGraph::ResourceHandle indirectCommands{};
+        FrameGraph::ResourceHandle clusterData{};
+        FrameGraph::ResourceHandle meshClusterRanges{};
+        FrameGraph::PassHandle cullPass{};
+        if (indirectSceneDrawsEnabled_) {
+            depthPyramid = graph.addResource({
+                "Depth Pyramid", FrameGraphResourceKind::Image, true});
+            cullCandidates = graph.addResource({
+                "GPU Cull Candidates", FrameGraphResourceKind::Buffer, true});
+            cullCounters = graph.addResource({
+                "GPU Cull Counters", FrameGraphResourceKind::Buffer, true});
+            cullUniforms = graph.addResource({
+                "GPU Cull Uniforms", FrameGraphResourceKind::Buffer, true});
+            visibleInstances = graph.addResource({
+                "GPU Visible Instance Indices", FrameGraphResourceKind::Buffer, true});
+            sceneInstances = graph.addResource({
+                "GPU Scene Instances", FrameGraphResourceKind::Buffer, true});
+            indirectCommands = graph.addResource({
+                "GPU Indirect Commands", FrameGraphResourceKind::Buffer, true});
+            clusterData = graph.addResource({
+                "GPU Cluster Data", FrameGraphResourceKind::Buffer, true});
+            meshClusterRanges = graph.addResource({
+                "GPU Mesh Cluster Ranges", FrameGraphResourceKind::Buffer, true});
+            cullPass = graph.addPass({
+                "GPU Cluster Cull", {0.54f, 0.34f, 0.92f, 1.0f}});
+            graph.read(cullPass, cullCandidates,
+                       FrameGraphUsage::StorageBuffer);
+            graph.read(cullPass, cullUniforms,
+                       FrameGraphUsage::UniformBuffer);
+            graph.read(cullPass, depthPyramid,
+                       FrameGraphUsage::SampledImage);
+            graph.read(cullPass, clusterData, FrameGraphUsage::StorageBuffer);
+            graph.read(cullPass, meshClusterRanges,
+                       FrameGraphUsage::StorageBuffer);
+            graph.write(cullPass, visibleInstances,
+                        FrameGraphUsage::StorageBuffer);
+            graph.write(cullPass, indirectCommands,
+                        FrameGraphUsage::StorageBuffer);
+            graph.write(cullPass, cullCounters,
+                        FrameGraphUsage::StorageBuffer);
+            graph.setFinalUsage(cullCounters, FrameGraphUsage::HostRead);
+        }
 
         FrameGraph::PassHandle depthPass{};
         if (depthPrepass) {
@@ -249,6 +642,14 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
             graph.writeAttachment(depthPass, depth, FrameGraphUsage::DepthAttachment,
                                   FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Store);
         }
+        if (depthPrepass && indirectSceneDrawsEnabled_) {
+                graph.read(depthPass, visibleInstances,
+                           FrameGraphUsage::StorageBuffer);
+                graph.read(depthPass, sceneInstances,
+                           FrameGraphUsage::StorageBuffer);
+                graph.read(depthPass, indirectCommands,
+                           FrameGraphUsage::IndirectBuffer);
+            }
 
         const FrameGraph::PassHandle hdrPass = graph.addPass({"HDR Scene Pass", {0.18f, 0.32f, 0.95f, 1.0f}});
         if (depthPrepass) {
@@ -260,6 +661,23 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
         }
         graph.writeAttachment(hdrPass, hdr, FrameGraphUsage::ColorAttachment,
                               FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Store);
+        if (indirectSceneDrawsEnabled_) {
+            graph.read(hdrPass, visibleInstances,
+                       FrameGraphUsage::StorageBuffer);
+            graph.read(hdrPass, sceneInstances,
+                       FrameGraphUsage::StorageBuffer);
+            graph.read(hdrPass, indirectCommands,
+                       FrameGraphUsage::IndirectBuffer);
+        }
+        FrameGraph::PassHandle depthPyramidPass{};
+        if (indirectSceneDrawsEnabled_) {
+            depthPyramidPass = graph.addPass({
+                "Depth Pyramid Build", {0.28f, 0.72f, 0.88f, 1.0f}});
+            graph.read(depthPyramidPass, depth,
+                       FrameGraphUsage::SampledImage);
+            graph.write(depthPyramidPass, depthPyramid,
+                        FrameGraphUsage::StorageImage);
+        }
 
         const FrameGraph::PassHandle tonemapPass = graph.addPass({
             config_.debugOverlay ? "Tonemap + ImGui Pass" : "Tonemap Pass",
@@ -296,8 +714,25 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
             throw std::runtime_error("FrameGraph screenshot variant edges are missing");
         }
 
-        variant.resources = {depth, hdr, swapchain, screenshotReadback};
-        variant.passes = {depthPass, hdrPass, tonemapPass, screenshotPass};
+        variant.resources.depth = depth;
+        variant.resources.hdr = hdr;
+        variant.resources.swapchain = swapchain;
+        variant.resources.cullCandidates = cullCandidates;
+        variant.resources.cullCounters = cullCounters;
+        variant.resources.cullUniforms = cullUniforms;
+        variant.resources.visibleInstances = visibleInstances;
+        variant.resources.sceneInstances = sceneInstances;
+        variant.resources.indirectCommands = indirectCommands;
+        variant.resources.clusterData = clusterData;
+        variant.resources.meshClusterRanges = meshClusterRanges;
+        variant.resources.depthPyramid = depthPyramid;
+        variant.resources.screenshotReadback = screenshotReadback;
+        variant.passes.depthPrepass = depthPass;
+        variant.passes.hdrScene = hdrPass;
+        variant.passes.tonemap = tonemapPass;
+        variant.passes.gpuCull = cullPass;
+        variant.passes.depthPyramid = depthPyramidPass;
+        variant.passes.screenshotReadback = screenshotPass;
         return variant;
     };
 
@@ -392,14 +827,25 @@ void VulkanRenderer::Impl::readBackGpuTimestamp(const std::uint32_t frameIndex) 
             return ((end & mask) - (begin & mask)) & mask;
         };
         const double tickToMs = static_cast<double>(deviceOwner_.physicalDeviceProperties.limits.timestampPeriod) / 1'000'000.0;
+        stats_.gpuCullMs = static_cast<double>(
+            deltaTicks(timestamps[kTimestampFrameStart],
+                       timestamps[kTimestampCullEnd])) *
+            tickToMs;
         if (frameOwner_.frames[frameIndex].submittedDepthPrepass) {
-            stats_.gpuDepthPrepassMs = static_cast<double>(deltaTicks(timestamps[kTimestampFrameStart], timestamps[kTimestampDepthEnd])) * tickToMs;
+            stats_.gpuDepthPrepassMs = static_cast<double>(deltaTicks(timestamps[kTimestampCullEnd], timestamps[kTimestampDepthEnd])) * tickToMs;
             stats_.gpuHdrSceneMs = static_cast<double>(deltaTicks(timestamps[kTimestampDepthEnd], timestamps[kTimestampHdrEnd])) * tickToMs;
         } else {
             stats_.gpuDepthPrepassMs = 0.0;
-            stats_.gpuHdrSceneMs = static_cast<double>(deltaTicks(timestamps[kTimestampFrameStart], timestamps[kTimestampHdrEnd])) * tickToMs;
+            stats_.gpuHdrSceneMs = static_cast<double>(deltaTicks(timestamps[kTimestampCullEnd], timestamps[kTimestampHdrEnd])) * tickToMs;
         }
-        stats_.gpuFinalPassMs = static_cast<double>(deltaTicks(timestamps[kTimestampHdrEnd], timestamps[kTimestampFinalEnd])) * tickToMs;
+        stats_.gpuDepthPyramidMs = static_cast<double>(
+            deltaTicks(timestamps[kTimestampHdrEnd],
+                       timestamps[kTimestampDepthPyramidEnd])) *
+            tickToMs;
+        stats_.gpuFinalPassMs = static_cast<double>(
+            deltaTicks(timestamps[kTimestampDepthPyramidEnd],
+                       timestamps[kTimestampFinalEnd])) *
+            tickToMs;
         stats_.gpuFrameMs = static_cast<double>(deltaTicks(timestamps[kTimestampFrameStart], timestamps[kTimestampFinalEnd])) * tickToMs;
         stats_.gpuTimestampsValid = true;
     } else {
