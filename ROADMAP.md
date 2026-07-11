@@ -81,14 +81,17 @@ Current limits:
 
 Implemented:
 
-- OBJ and procedural geometry loading plus a fixed startup texture set.
+- Stable 128-bit asset identity, transactional dependency records, SHA-256 derived-data keys, versioned atomic artifacts, and generational runtime handles.
+- glTF 2.0 import for mesh primitives, scene hierarchy, metallic-roughness materials, texture roles/color spaces, bounds, and validated animation clip/channel metadata.
+- Incremental reference-asset cooking and transactional reload; artifact-content keys avoid rebuilding unchanged mesh/material outputs when animation-only scene metadata changes.
+- OBJ/procedural geometry and stb_image-backed texture ingestion remain available alongside the authored glTF path.
 - Linux and Windows CMake presets with pinned bootstrap dependencies.
-- Seventeen CPU test executables plus the sandbox help test.
+- Twenty-one CPU test executables plus the sandbox help test.
 - Documentation for the public API, architecture, renderer pipeline, performance model, shaders, and assets.
 
 Current limits:
 
-- No glTF/FBX production importer, stable asset identity, dependency database, derived-data cache, platform cooking, asynchronous streaming, animation import, or material database.
+- No FBX importer, animation sample-data artifact or runtime playback, general importer extension registry, platform packaging/cooking, asynchronous streaming, material database, or GPU-native compressed/HDR texture pipeline.
 - No scene editor, asset browser, viewport picking/gizmos, inspector, undo stack, play mode, project creation, packaging, installed SDK, plugin manifest, or package registry.
 - A self-hosted live-Vulkan workflow is defined, but coverage still depends on controlled runner availability; cross-driver visual/performance policy and a maintained external-style sample project remain incomplete.
 

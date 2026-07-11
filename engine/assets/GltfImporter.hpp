@@ -15,6 +15,8 @@ namespace ve {
 enum class TextureColorSpace : std::uint8_t { Linear, Srgb };
 enum class TextureRole : std::uint8_t { BaseColor, Normal, MetallicRoughness, Occlusion, Emissive };
 enum class MaterialAlphaMode : std::uint8_t { Opaque, Mask };
+enum class AnimationTarget : std::uint8_t { Translation, Rotation, Scale, Weights };
+enum class AnimationInterpolation : std::uint8_t { Linear, Step, CubicSpline };
 
 struct ImportedTextureReference {
     AssetId id;
@@ -56,13 +58,32 @@ struct ImportedSceneNode {
     MeshBounds localBounds{};
 };
 
+struct ImportedAnimationChannel {
+    std::uint32_t targetNode = std::numeric_limits<std::uint32_t>::max();
+    AnimationTarget target = AnimationTarget::Translation;
+    AnimationInterpolation interpolation = AnimationInterpolation::Linear;
+    std::uint32_t keyframeCount = 0;
+    float startTime = 0.0f;
+    float endTime = 0.0f;
+};
+
+struct ImportedAnimationClip {
+    AssetId id;
+    std::string name;
+    float duration = 0.0f;
+    std::vector<ImportedAnimationChannel> channels;
+};
+
 struct ImportedGltfScene {
-    static constexpr std::uint32_t kArtifactSchemaVersion = 2;
+    static constexpr std::uint32_t kMeshArtifactSchemaVersion = 2;
+    static constexpr std::uint32_t kMaterialArtifactSchemaVersion = 2;
+    static constexpr std::uint32_t kSceneArtifactSchemaVersion = 3;
     AssetId sceneId;
     std::filesystem::path sourcePath;
     std::vector<ImportedMaterial> materials;
     std::vector<ImportedMeshPrimitive> meshes;
     std::vector<ImportedSceneNode> nodes;
+    std::vector<ImportedAnimationClip> animations;
     std::vector<std::string> optionalFeatureDiagnostics;
 };
 
@@ -70,6 +91,8 @@ struct GltfImportOptions {
     std::size_t maximumSourceBytes = 256U * 1024U * 1024U;
     std::size_t maximumVertices = 16U * 1024U * 1024U;
     std::size_t maximumIndices = 64U * 1024U * 1024U;
+    std::size_t maximumAnimationKeyframes = 16U * 1024U * 1024U;
+    std::size_t maximumAnimationValues = 64U * 1024U * 1024U;
     bool generateMissingNormals = true;
     bool generateMissingTangents = true;
 };

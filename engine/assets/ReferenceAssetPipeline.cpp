@@ -22,9 +22,10 @@ std::vector<std::byte> readSource(const std::filesystem::path& path) {
 
 ContentHash sourceHash(const std::filesystem::path& path) { return hashBytes(readSource(path)); }
 
-ContentHash keyFor(const AssetRecord& record, const ArtifactType type,
-                   const std::vector<ContentHash>& dependencies, const std::string& target) {
-    return makeDerivedDataKey({record.sourceHash, record.importerId, record.importerVersion,
+ContentHash keyFor(const AssetRecord& record, const ContentHash payloadHash,
+                   const ArtifactType type, const std::vector<ContentHash>& dependencies,
+                   const std::string& target) {
+    return makeDerivedDataKey({payloadHash, record.importerId, record.importerVersion,
                                record.settingsHash, dependencies, type,
                                record.artifactSchemaVersion, target,
                                type == ArtifactType::Mesh ? "vertex48-index32" : "portable"});
@@ -77,7 +78,19 @@ AssetRecord baseRecord(const AssetId id, const AssetType type, std::filesystem::
     AssetRecord record;
     record.id = id;
     record.type = type;
-    record.artifactSchemaVersion = type == AssetType::Texture ? 1U : ImportedGltfScene::kArtifactSchemaVersion;
+    switch (type) {
+    case AssetType::Texture: record.artifactSchemaVersion = 1U; break;
+    case AssetType::Mesh:
+        record.artifactSchemaVersion = ImportedGltfScene::kMeshArtifactSchemaVersion;
+        break;
+    case AssetType::Material:
+        record.artifactSchemaVersion = ImportedGltfScene::kMaterialArtifactSchemaVersion;
+        break;
+    case AssetType::Scene:
+        record.artifactSchemaVersion = ImportedGltfScene::kSceneArtifactSchemaVersion;
+        break;
+    default: throw std::invalid_argument("Unsupported reference asset type");
+    }
     record.sourcePath = std::move(sourcePath);
     record.sourceHash = source;
     record.importerId = std::string{kImporterId};
@@ -156,7 +169,8 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
             AssetRecord textureRecord = baseRecord(texture.id, AssetType::Texture, textureSourcePath,
                                                    textureHash, settingsHash, targetPlatform);
             const std::vector<std::byte> texturePayload = readSource(assetRoot / textureSourcePath);
-            textureRecord.artifactKey = keyFor(textureRecord, ArtifactType::Texture, {}, targetPlatform);
+            textureRecord.artifactKey = keyFor(textureRecord, textureHash, ArtifactType::Texture,
+                                               {}, targetPlatform);
             accountPublication(cache.publish(textureRecord.artifactKey, ArtifactType::Texture,
                                              textureRecord.artifactSchemaVersion, texturePayload));
             textureRecord.artifactPath = cache.artifactPath(textureRecord.artifactKey, ArtifactType::Texture)
@@ -182,8 +196,9 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
             dependencyHashes.push_back(found->artifactKey);
         }
         const std::vector<std::byte> payload = serializeMaterialArtifact(material);
-        materialRecord.artifactKey = keyFor(materialRecord, ArtifactType::Material,
-                                            dependencyHashes, targetPlatform);
+        materialRecord.artifactKey = keyFor(materialRecord, hashBytes(payload),
+                                            ArtifactType::Material, dependencyHashes,
+                                            targetPlatform);
         accountPublication(cache.publish(materialRecord.artifactKey, ArtifactType::Material,
                                          materialRecord.artifactSchemaVersion, payload));
         materialRecord.artifactPath = cache.artifactPath(materialRecord.artifactKey, ArtifactType::Material)
@@ -202,7 +217,8 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
             dependencyHashes.push_back(found->artifactKey);
         }
         const std::vector<std::byte> payload = serializeMeshArtifact(mesh);
-        meshRecord.artifactKey = keyFor(meshRecord, ArtifactType::Mesh, dependencyHashes, targetPlatform);
+        meshRecord.artifactKey = keyFor(meshRecord, hashBytes(payload), ArtifactType::Mesh,
+                                        dependencyHashes, targetPlatform);
         accountPublication(cache.publish(meshRecord.artifactKey, ArtifactType::Mesh,
                                          meshRecord.artifactSchemaVersion, payload));
         meshRecord.artifactPath = cache.artifactPath(meshRecord.artifactKey, ArtifactType::Mesh)
@@ -221,7 +237,8 @@ ReferenceAssetBundle cookReferenceAssets(const std::filesystem::path& assetRoot,
     }
     std::ranges::sort(sceneRecord.dependencies);
     const std::vector<std::byte> scenePayload = serializeSceneArtifact(imported);
-    sceneRecord.artifactKey = keyFor(sceneRecord, ArtifactType::Scene, sceneDependencies, targetPlatform);
+    sceneRecord.artifactKey = keyFor(sceneRecord, hashBytes(scenePayload), ArtifactType::Scene,
+                                     sceneDependencies, targetPlatform);
     accountPublication(cache.publish(sceneRecord.artifactKey, ArtifactType::Scene,
                                      sceneRecord.artifactSchemaVersion, scenePayload));
     sceneRecord.artifactPath = cache.artifactPath(sceneRecord.artifactKey, ArtifactType::Scene)

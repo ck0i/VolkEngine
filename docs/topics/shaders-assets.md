@@ -65,6 +65,15 @@ The depth prepass uses `scene_depth.vert`, which keeps the same model/view-proje
 ## Assets
 
 Runtime assets are copied from `assets/` to `EngineConfig::assetDirectory`.
+The reference authored-scene path runs through `ReferenceAssetPipeline` before renderer upload:
+
+- `AssetId` supplies stable 128-bit identities; the transactional asset database records source/importer/settings hashes, dependencies, artifact keys, target, state, and diagnostics.
+- `GltfImporter` imports glTF 2.0 mesh primitives, hierarchy/local transforms, metallic-roughness materials, texture roles/color spaces, bounds, and animation clip/channel metadata. Animation metadata validates target nodes, interpolation, accessor shape, finite output values, strictly increasing non-negative keyframe times, and configured size limits; sample payloads and playback remain future work.
+- Mesh, material, and scene artifacts have independent schema versions. Derived-data keys use serialized artifact content plus dependency keys, so an animation-only source edit rebuilds the scene artifact without invalidating byte-identical mesh/material artifacts.
+- `DerivedDataCache` verifies headers, schema, payload sizes, and content hashes and publishes through atomic temporary files. `ReferenceAssetReloader` cooks a candidate bundle and publishes it only after the complete database and artifacts validate.
+- The sandbox resolves the cooked reference scene and authored textures through this path; cache/rebuild counts and cook latency are included in the machine-readable run summary.
+
+The direct `EngineConfig` texture and OBJ settings remain explicit fallback/override paths.
 
 Configured ground texture paths (`EngineConfig::groundAlbedoTexture`, `groundNormalTexture`, and `groundOrmTexture`) resolve relative to `EngineConfig::assetDirectory`; relative paths are normalized and rejected when they escape the asset root, while absolute paths remain accepted as direct overrides:
 

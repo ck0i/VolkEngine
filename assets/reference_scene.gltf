@@ -6,6 +6,11 @@
     {"name": "Root", "translation": [0.0, 0.0, -2.0], "children": [1]},
     {"name": "Textured Triangle", "mesh": 0, "translation": [0.0, -0.5, 0.0]}
   ],
+  "animations": [{
+    "name": "Triangle Move",
+    "samplers": [{"input": 4, "output": 5, "interpolation": "LINEAR"}],
+    "channels": [{"sampler": 0, "target": {"node": 1, "path": "translation"}}]
+  }],
   "meshes": [{"name": "Reference Triangle", "primitives": [{
     "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
     "indices": 3,
@@ -36,17 +41,24 @@
   "buffers": [{
     "byteLength": 102,
     "uri": "data:application/octet-stream;base64,AAAAvwAAAAAAAAAAAAAAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAD8AAIA/AAABAAIA"
+  }, {
+    "byteLength": 32,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAEAAAAAAAAAAvwAAAAAAAIA/AAAAvwAAAAA="
   }],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},
     {"buffer": 0, "byteOffset": 36, "byteLength": 36, "target": 34962},
     {"buffer": 0, "byteOffset": 72, "byteLength": 24, "target": 34962},
-    {"buffer": 0, "byteOffset": 96, "byteLength": 6, "target": 34963}
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6, "target": 34963},
+    {"buffer": 1, "byteOffset": 0, "byteLength": 8},
+    {"buffer": 1, "byteOffset": 8, "byteLength": 24}
   ],
   "accessors": [
     {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [-0.5, 0.0, 0.0], "max": [0.5, 1.0, 0.0]},
     {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
     {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
-    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"},
+    {"bufferView": 4, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0.0], "max": [2.0]},
+    {"bufferView": 5, "componentType": 5126, "count": 2, "type": "VEC3"}
   ]
 }

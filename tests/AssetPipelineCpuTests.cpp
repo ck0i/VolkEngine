@@ -131,6 +131,17 @@ int main() {
     assert(imported.materials[0].textures[1].colorSpace == ve::TextureColorSpace::Linear);
     assert(imported.materials[0].textures[2].role == ve::TextureRole::Normal);
     assert(imported.materials[0].textures[2].colorSpace == ve::TextureColorSpace::Linear);
+    assert(imported.animations.size() == 1U);
+    assert(imported.animations[0].name == "Triangle Move");
+    assert(imported.animations[0].duration == 2.0f);
+    assert(imported.animations[0].channels.size() == 1U);
+    assert(imported.animations[0].channels[0].targetNode == 1U);
+    assert(imported.animations[0].channels[0].target == ve::AnimationTarget::Translation);
+    assert(imported.animations[0].channels[0].interpolation ==
+           ve::AnimationInterpolation::Linear);
+    assert(imported.animations[0].channels[0].keyframeCount == 2U);
+    assert(imported.animations[0].channels[0].startTime == 0.0f);
+    assert(imported.animations[0].channels[0].endTime == 2.0f);
     const std::vector<std::byte> meshArtifact = ve::serializeMeshArtifact(imported.meshes[0]);
     const ve::ImportedMeshPrimitive meshRoundTrip = ve::deserializeMeshArtifact(meshArtifact);
     assert(meshRoundTrip.id == imported.meshes[0].id);
@@ -143,6 +154,10 @@ int main() {
     const ve::ImportedGltfScene sceneRoundTrip = ve::deserializeSceneArtifact(sceneArtifact);
     assert(sceneRoundTrip.sceneId == imported.sceneId);
     assert(sceneRoundTrip.nodes.size() == imported.nodes.size());
+    assert(sceneRoundTrip.animations.size() == imported.animations.size());
+    assert(sceneRoundTrip.animations[0].id == imported.animations[0].id);
+    assert(sceneRoundTrip.animations[0].channels[0].targetNode == 1U);
+    assert(sceneRoundTrip.animations[0].channels[0].endTime == 2.0f);
     std::vector<std::byte> truncatedMesh = meshArtifact;
     truncatedMesh.pop_back();
     assert(throwsRuntimeError([&] {
@@ -159,6 +174,26 @@ int main() {
         ("volkengine-asset-pipeline-" + std::to_string(reinterpret_cast<std::uintptr_t>(&database)));
     std::error_code error;
     std::filesystem::remove_all(temp, error);
+    std::filesystem::create_directories(temp);
+    const std::vector<std::byte> referenceSource = ve::readBinaryFile(referenceScene);
+    std::string corruptAnimationSource(
+        reinterpret_cast<const char*>(referenceSource.data()), referenceSource.size());
+    const std::string validAnimationPayload =
+        "AAAAAAAAAEAAAAAAAAAAvwAAAAAAAIA/AAAAvwAAAAA=";
+    const std::size_t animationPayloadOffset =
+        corruptAnimationSource.find(validAnimationPayload);
+    assert(animationPayloadOffset != std::string::npos);
+    corruptAnimationSource.replace(
+        animationPayloadOffset, validAnimationPayload.size(),
+        "AAAAAAAAAEAAAAAAAAAAvwAAAAAAAIA/AAAAvwAAwH8=");
+    const std::filesystem::path corruptAnimationPath = temp / "corrupt-animation.gltf";
+    ve::writeBinaryFileAtomic(
+        corruptAnimationPath,
+        std::as_bytes(std::span{
+            corruptAnimationSource.data(), corruptAnimationSource.size()}));
+    assert(throwsRuntimeError([&] {
+        static_cast<void>(ve::importGltfScene(corruptAnimationPath, scene));
+    }));
     const std::filesystem::path assetRoot{VOLKENGINE_TEST_ASSET_DIR};
     const ve::ReferenceAssetBundle coldCook =
         ve::cookReferenceAssets(assetRoot, temp / "cook-a", "test-x64");
@@ -193,6 +228,32 @@ int main() {
     const ve::ReferenceAssetBundle incrementalCold =
         ve::cookReferenceAssets(incrementalRoot, temp / "incremental-cache", "test-x64");
     assert(incrementalCold.metrics.cacheMisses == incrementalCold.database.records().size());
+    std::vector<std::byte> animationRenameBytes =
+        ve::readBinaryFile(incrementalRoot / "reference_scene.gltf");
+    std::string animationRename(
+        reinterpret_cast<const char*>(animationRenameBytes.data()), animationRenameBytes.size());
+    const std::size_t animationNameOffset = animationRename.find("Triangle Move");
+    assert(animationNameOffset != std::string::npos);
+    animationRename.replace(animationNameOffset, std::string_view{"Triangle Move"}.size(),
+                            "Triangle Shift");
+    ve::writeBinaryFileAtomic(
+        incrementalRoot / "reference_scene.gltf",
+        std::as_bytes(std::span{animationRename.data(), animationRename.size()}));
+    const ve::ReferenceAssetBundle animationOnlyReload =
+        ve::cookReferenceAssets(incrementalRoot, temp / "incremental-cache", "test-x64");
+    assert(animationOnlyReload.metrics.cacheMisses == 1U);
+    assert(animationOnlyReload.metrics.rebuiltAssets == 1U);
+    assert(animationOnlyReload.metrics.cacheHits + 1U ==
+           animationOnlyReload.database.records().size());
+    assert(animationOnlyReload.scene.animations[0].name == "Triangle Shift");
+    for (const ve::AssetRecord& previous : incrementalCold.database.records()) {
+        if (previous.type == ve::AssetType::Scene) continue;
+        const ve::AssetRecord* current = animationOnlyReload.database.find(previous.id);
+        assert(current != nullptr);
+        assert(current->artifactKey == previous.artifactKey);
+    }
+    ve::writeBinaryFileAtomic(incrementalRoot / "reference_scene.gltf",
+                              ve::readBinaryFile(assetRoot / "reference_scene.gltf"));
     std::vector<std::byte> changedAlbedo =
         ve::readBinaryFile(incrementalRoot / "textures/ground_albedo.png");
     changedAlbedo.push_back(std::byte{0x00});

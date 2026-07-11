@@ -55,6 +55,35 @@ Vec4 readVec4(const cgltf_accessor* accessor, const cgltf_size index, const char
     requireFinite(values.data(), values.size(), semantic);
     return {values[0], values[1], values[2], values[3]};
 }
+AnimationTarget animationTarget(const cgltf_animation_path_type path) {
+    switch (path) {
+    case cgltf_animation_path_type_translation: return AnimationTarget::Translation;
+    case cgltf_animation_path_type_rotation: return AnimationTarget::Rotation;
+    case cgltf_animation_path_type_scale: return AnimationTarget::Scale;
+    case cgltf_animation_path_type_weights: return AnimationTarget::Weights;
+    default: throw std::runtime_error("glTF animation channel has an invalid target path");
+    }
+}
+
+AnimationInterpolation animationInterpolation(const cgltf_interpolation_type interpolation) {
+    switch (interpolation) {
+    case cgltf_interpolation_type_linear: return AnimationInterpolation::Linear;
+    case cgltf_interpolation_type_step: return AnimationInterpolation::Step;
+    case cgltf_interpolation_type_cubic_spline: return AnimationInterpolation::CubicSpline;
+    default: throw std::runtime_error("glTF animation sampler has an invalid interpolation");
+    }
+}
+
+void validateAnimationChannel(const ImportedAnimationChannel& channel, const std::size_t nodeCount) {
+    if (channel.targetNode >= nodeCount || channel.keyframeCount == 0U ||
+        !std::isfinite(channel.startTime) || !std::isfinite(channel.endTime) ||
+        channel.startTime < 0.0f || channel.endTime < channel.startTime ||
+        channel.target > AnimationTarget::Weights ||
+        channel.interpolation > AnimationInterpolation::CubicSpline) {
+        throw std::runtime_error("Animation channel metadata is invalid");
+    }
+}
+
 
 void generateNormals(MeshData& mesh) {
     std::vector<Vec3> sums(mesh.vertices.size());
@@ -309,6 +338,80 @@ ImportedGltfScene importGltfScene(const std::filesystem::path& path, const Asset
         std::size_t parentHops = 0;
         for (const cgltf_node* parent = node.parent; parent != nullptr; parent = parent->parent) if (++parentHops > data->nodes_count) throw std::runtime_error("glTF node hierarchy contains a cycle");
     }
+    result.animations.reserve(data->animations_count);
+    for (cgltf_size animationIndex = 0; animationIndex < data->animations_count; ++animationIndex) {
+        const cgltf_animation& sourceAnimation = data->animations[animationIndex];
+        if (sourceAnimation.channels_count == 0U) {
+            throw std::runtime_error("glTF animation contains no channels");
+        }
+        ImportedAnimationClip clip;
+        clip.id = AssetId::derive(sceneId, "animation/" + std::to_string(animationIndex));
+        clip.name = sourceAnimation.name != nullptr
+            ? sourceAnimation.name
+            : "Animation " + std::to_string(animationIndex);
+        clip.channels.reserve(sourceAnimation.channels_count);
+        for (cgltf_size channelIndex = 0; channelIndex < sourceAnimation.channels_count; ++channelIndex) {
+            const cgltf_animation_channel& sourceChannel = sourceAnimation.channels[channelIndex];
+            if (sourceChannel.target_node == nullptr || sourceChannel.sampler == nullptr ||
+                sourceChannel.sampler->input == nullptr || sourceChannel.sampler->output == nullptr) {
+                throw std::runtime_error("glTF animation channel is incomplete");
+            }
+            const cgltf_accessor& input = *sourceChannel.sampler->input;
+            if (input.type != cgltf_type_scalar || input.component_type != cgltf_component_type_r_32f ||
+                input.count == 0U || input.count > options.maximumAnimationKeyframes ||
+                input.count > std::numeric_limits<std::uint32_t>::max()) {
+                throw std::runtime_error("glTF animation input accessor is invalid or exceeds the keyframe limit");
+            }
+            ImportedAnimationChannel channel;
+            channel.targetNode = static_cast<std::uint32_t>(sourceChannel.target_node - data->nodes);
+            channel.target = animationTarget(sourceChannel.target_path);
+            channel.interpolation = animationInterpolation(sourceChannel.sampler->interpolation);
+            channel.keyframeCount = static_cast<std::uint32_t>(input.count);
+            const cgltf_accessor& output = *sourceChannel.sampler->output;
+            const cgltf_type expectedOutputType = channel.target == AnimationTarget::Rotation
+                ? cgltf_type_vec4
+                : channel.target == AnimationTarget::Weights ? cgltf_type_scalar : cgltf_type_vec3;
+            const cgltf_size interpolationMultiplier =
+                channel.interpolation == AnimationInterpolation::CubicSpline ? 3U : 1U;
+            const cgltf_size minimumOutputCount = input.count * interpolationMultiplier;
+            const cgltf_size outputComponents = cgltf_num_components(output.type);
+            if (output.type != expectedOutputType ||
+                output.component_type != cgltf_component_type_r_32f ||
+                (channel.target == AnimationTarget::Weights
+                     ? output.count < minimumOutputCount ||
+                           output.count % minimumOutputCount != 0U
+                     : output.count != minimumOutputCount) ||
+                outputComponents == 0U ||
+                output.count > options.maximumAnimationValues / outputComponents) {
+                throw std::runtime_error(
+                    "glTF animation output accessor is incompatible with its target or exceeds the value limit");
+            }
+            std::array<float, 4> outputValue{};
+            for (cgltf_size value = 0; value < output.count; ++value) {
+                if (!cgltf_accessor_read_float(
+                        &output, value, outputValue.data(), outputComponents)) {
+                    throw std::runtime_error("Failed to read glTF animation output accessor");
+                }
+                requireFinite(outputValue.data(), outputComponents, "animation output");
+            }
+            float previous = 0.0f;
+            for (cgltf_size keyframe = 0; keyframe < input.count; ++keyframe) {
+                float time = 0.0f;
+                if (!cgltf_accessor_read_float(&input, keyframe, &time, 1U) || !std::isfinite(time) ||
+                    time < 0.0f || (keyframe != 0U && time <= previous)) {
+                    throw std::runtime_error("glTF animation keyframe times must be finite, non-negative, and strictly increasing");
+                }
+                if (keyframe == 0U) channel.startTime = time;
+                previous = time;
+            }
+            channel.endTime = previous;
+            validateAnimationChannel(channel, result.nodes.size());
+            clip.duration = std::max(clip.duration, channel.endTime);
+            clip.channels.push_back(channel);
+        }
+        result.animations.push_back(std::move(clip));
+    }
+
     return result;
 }
 
@@ -320,7 +423,7 @@ std::vector<std::byte> serializeMeshArtifact(const ImportedMeshPrimitive& mesh) 
     }
     BinaryWriter writer;
     writer.pod(kMeshMagic);
-    writer.pod(ImportedGltfScene::kArtifactSchemaVersion);
+    writer.pod(ImportedGltfScene::kMeshArtifactSchemaVersion);
     writeId(writer, mesh.id);
     writeId(writer, mesh.material);
     writer.string(mesh.name);
@@ -337,7 +440,7 @@ std::vector<std::byte> serializeMeshArtifact(const ImportedMeshPrimitive& mesh) 
 ImportedMeshPrimitive deserializeMeshArtifact(const std::span<const std::byte> bytes) {
     BinaryReader reader{bytes};
     if (reader.pod<std::uint32_t>() != kMeshMagic ||
-        reader.pod<std::uint32_t>() != ImportedGltfScene::kArtifactSchemaVersion) {
+        reader.pod<std::uint32_t>() != ImportedGltfScene::kMeshArtifactSchemaVersion) {
         throw std::runtime_error("Mesh artifact header is incompatible");
     }
     ImportedMeshPrimitive mesh;
@@ -377,7 +480,7 @@ std::vector<std::byte> serializeMaterialArtifact(const ImportedMaterial& materia
     }
     BinaryWriter writer;
     writer.pod(kMaterialMagic);
-    writer.pod(ImportedGltfScene::kArtifactSchemaVersion);
+    writer.pod(ImportedGltfScene::kMaterialArtifactSchemaVersion);
     writeId(writer, material.id);
     writer.string(material.name);
     writer.pod(material.baseColorFactor);
@@ -405,7 +508,7 @@ std::vector<std::byte> serializeMaterialArtifact(const ImportedMaterial& materia
 ImportedMaterial deserializeMaterialArtifact(const std::span<const std::byte> bytes) {
     BinaryReader reader{bytes};
     if (reader.pod<std::uint32_t>() != kMaterialMagic ||
-        reader.pod<std::uint32_t>() != ImportedGltfScene::kArtifactSchemaVersion) {
+        reader.pod<std::uint32_t>() != ImportedGltfScene::kMaterialArtifactSchemaVersion) {
         throw std::runtime_error("Material artifact header is incompatible");
     }
     ImportedMaterial material;
@@ -446,7 +549,7 @@ std::vector<std::byte> serializeSceneArtifact(const ImportedGltfScene& scene) {
     }
     BinaryWriter writer;
     writer.pod(kSceneMagic);
-    writer.pod(ImportedGltfScene::kArtifactSchemaVersion);
+    writer.pod(ImportedGltfScene::kSceneArtifactSchemaVersion);
     writeId(writer, scene.sceneId);
     writer.string(scene.sourcePath.generic_string());
     writer.pod(static_cast<std::uint64_t>(scene.nodes.size()));
@@ -460,13 +563,36 @@ std::vector<std::byte> serializeSceneArtifact(const ImportedGltfScene& scene) {
             writeId(writer, mesh);
         }
     }
+    if (scene.animations.size() > kMaximumArtifactElements) {
+        throw std::runtime_error("Scene artifact animation count exceeds limit");
+    }
+    writer.pod(static_cast<std::uint64_t>(scene.animations.size()));
+    for (const ImportedAnimationClip& clip : scene.animations) {
+        if (!clip.id.valid() || !std::isfinite(clip.duration) || clip.duration < 0.0f ||
+            clip.channels.empty() || clip.channels.size() > kMaximumArtifactElements) {
+            throw std::runtime_error("Scene artifact animation is invalid or oversized");
+        }
+        writeId(writer, clip.id);
+        writer.string(clip.name);
+        writer.pod(clip.duration);
+        writer.pod(static_cast<std::uint64_t>(clip.channels.size()));
+        for (const ImportedAnimationChannel& channel : clip.channels) {
+            validateAnimationChannel(channel, scene.nodes.size());
+            writer.pod(channel.targetNode);
+            writer.pod(static_cast<std::uint8_t>(channel.target));
+            writer.pod(static_cast<std::uint8_t>(channel.interpolation));
+            writer.pod(channel.keyframeCount);
+            writer.pod(channel.startTime);
+            writer.pod(channel.endTime);
+        }
+    }
     return std::move(writer.output);
 }
 
 ImportedGltfScene deserializeSceneArtifact(const std::span<const std::byte> bytes) {
     BinaryReader reader{bytes};
     if (reader.pod<std::uint32_t>() != kSceneMagic ||
-        reader.pod<std::uint32_t>() != ImportedGltfScene::kArtifactSchemaVersion) {
+        reader.pod<std::uint32_t>() != ImportedGltfScene::kSceneArtifactSchemaVersion) {
         throw std::runtime_error("Scene artifact header is incompatible");
     }
     ImportedGltfScene scene;
@@ -489,6 +615,37 @@ ImportedGltfScene deserializeSceneArtifact(const std::span<const std::byte> byte
         node.meshPrimitives.resize(meshCount);
         for (AssetId& mesh : node.meshPrimitives) {
             mesh = readId(reader);
+        }
+    }
+    const auto animationCount = reader.pod<std::uint64_t>();
+    if (animationCount > kMaximumArtifactElements) {
+        throw std::runtime_error("Scene artifact animation count exceeds limit");
+    }
+    scene.animations.resize(static_cast<std::size_t>(animationCount));
+    for (ImportedAnimationClip& clip : scene.animations) {
+        clip.id = readId(reader);
+        clip.name = reader.string();
+        clip.duration = reader.pod<float>();
+        const auto channelCount = reader.pod<std::uint64_t>();
+        if (!clip.id.valid() || !std::isfinite(clip.duration) || clip.duration < 0.0f ||
+            channelCount == 0U || channelCount > kMaximumArtifactElements) {
+            throw std::runtime_error("Scene artifact animation is invalid or oversized");
+        }
+        clip.channels.resize(static_cast<std::size_t>(channelCount));
+        float computedDuration = 0.0f;
+        for (ImportedAnimationChannel& channel : clip.channels) {
+            channel.targetNode = reader.pod<std::uint32_t>();
+            channel.target = static_cast<AnimationTarget>(reader.pod<std::uint8_t>());
+            channel.interpolation =
+                static_cast<AnimationInterpolation>(reader.pod<std::uint8_t>());
+            channel.keyframeCount = reader.pod<std::uint32_t>();
+            channel.startTime = reader.pod<float>();
+            channel.endTime = reader.pod<float>();
+            validateAnimationChannel(channel, scene.nodes.size());
+            computedDuration = std::max(computedDuration, channel.endTime);
+        }
+        if (clip.duration != computedDuration) {
+            throw std::runtime_error("Scene artifact animation duration is inconsistent");
         }
     }
     if (!reader.done()) {
