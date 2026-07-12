@@ -292,6 +292,10 @@ void SceneRenderList::clear() noexcept {
 
 void SceneRenderList::setLocalLights(std::vector<RenderLocalLight> lights) {
     validateLocalLights(lights);
+    for (RenderLocalLight& light : lights) {
+        light.parameters[2] =
+            std::min(light.parameters[2], 65535U);
+    }
     localLights_ = std::move(lights);
 }
 
