@@ -24,7 +24,7 @@ Performance work must name the workload, hardware, driver, build, settings, and 
 | Scene data | Reusable extraction and frame-slot arrays avoid rebuilding unchanged records where possible. |
 | Visibility | Capability-gated compute performs culling, LOD, Hi-Z rejection, compaction, counters, and command generation. |
 | Submission | The default GPU path emits one indirect command per mesh; direct submission remains the fallback. |
-| Lighting | Fixed tile and shadow-atlas partitions turn pressure into counters; opaque-only shadow sets bypass fragment shading. |
+| Lighting | Fixed tile and shadow-atlas partitions turn pressure into counters; shadow passes without alpha-masked casters bypass fragment shading. |
 | Uploads | Meshes and textures are packed into shared staging submissions; same-queue barriers avoid unnecessary semaphore chains. |
 | Frame graph | Cached variants derive pass order, hazards, lifetimes, and compatible transient slots. |
 | Diagnostics | Fixed timestamp ranges and bounded job/streaming traces expose cost without unbounded telemetry growth. |
