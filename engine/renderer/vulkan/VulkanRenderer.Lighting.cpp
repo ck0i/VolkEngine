@@ -255,18 +255,22 @@ void VulkanRenderer::Impl::updateFrameLightingDescriptors(
         resourceOwner_.environmentSampler,
         resourceOwner_.environmentMap.view,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    std::array<VkWriteDescriptorSet, 8> writes{};
+    const VkDescriptorImageInfo depthPyramidInfo{
+        resourceOwner_.linearSampler, resourceOwner_.depthPyramid.view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    std::array<VkWriteDescriptorSet, 9> writes{};
     for (std::uint32_t binding = 0U; binding < writes.size(); ++binding) {
         writes[binding] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         writes[binding].dstSet =
             resourceOwner_.lightingDescriptorSets[frameIndex];
         writes[binding].dstBinding = binding;
         writes[binding].descriptorCount = 1U;
-        if (binding == 5U || binding == 7U) {
+        if (binding == 5U || binding == 7U || binding == 8U) {
             writes[binding].descriptorType =
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[binding].pImageInfo =
-                binding == 5U ? &shadowInfo : &environmentInfo;
+            writes[binding].pImageInfo = binding == 5U ? &shadowInfo
+                : binding == 7U ? &environmentInfo
+                                : &depthPyramidInfo;
         } else {
             writes[binding].descriptorType =
                 binding == 3U ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
@@ -639,7 +643,7 @@ void VulkanRenderer::Impl::prepareLighting(
 
 void VulkanRenderer::Impl::recordLightAssignment(
     const VkCommandBuffer commandBuffer, const std::uint32_t tileColumns,
-    const std::uint32_t tileRows) const {
+    const std::uint32_t tileRows, const bool depthBoundsEnabled) const {
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       pipelineOwner_.lightAssignment);
     const VkDescriptorSet descriptorSet =
@@ -647,6 +651,10 @@ void VulkanRenderer::Impl::recordLightAssignment(
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             pipelineOwner_.lightAssignmentLayout, 1U, 1U,
                             &descriptorSet, 0U, nullptr);
+    const LightAssignmentPushConstants push{
+        depthBoundsEnabled ? 1U : 0U};
+    vkCmdPushConstants(commandBuffer, pipelineOwner_.lightAssignmentLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0U, sizeof(push), &push);
     vkCmdDispatch(commandBuffer, (tileColumns + 7U) / 8U,
                   (tileRows + 7U) / 8U, 1U);
 }

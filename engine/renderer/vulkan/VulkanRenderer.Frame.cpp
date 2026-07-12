@@ -829,10 +829,17 @@ void VulkanRenderer::Impl::recordLightAssignmentGraphPass(
         resources.edge(context.variant->resources.lightTileIndices));
     static_cast<void>(
         resources.edge(context.variant->resources.lightListCounters));
+    const bool depthBoundsEnabled =
+        context.useDepthPrepass && indirectSceneDrawsEnabled_;
+    if (depthBoundsEnabled) {
+        static_cast<void>(
+            resources.edge(context.variant->resources.depthPyramid));
+    }
     const DebugLabelScope label{*this, context.frame->commandBuffer, desc.name,
                                 desc.debugColor};
     recordLightAssignment(context.frame->commandBuffer,
-                          context.lightTileColumns, context.lightTileRows);
+                          context.lightTileColumns, context.lightTileRows,
+                          depthBoundsEnabled);
     if (frameOwner_.timestampsEnabled) {
         const std::uint32_t queryBase =
             static_cast<std::uint32_t>(frameOwner_.currentFrame) *

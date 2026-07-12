@@ -795,7 +795,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     checkVk(vkCreateDescriptorSetLayout(deviceOwner_.device, &sceneInfo, nullptr, &resourceOwner_.sceneSetLayout), "vkCreateDescriptorSetLayout scene");
     setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, handleToUint64(resourceOwner_.sceneSetLayout), "Scene Descriptor Set Layout");
 
-    std::array<VkDescriptorSetLayoutBinding, 8> lightingBindings{};
+    std::array<VkDescriptorSetLayoutBinding, 9> lightingBindings{};
     for (std::uint32_t binding = 0; binding < 3U; ++binding) {
         lightingBindings[binding].binding = binding;
         lightingBindings[binding].descriptorType =
@@ -828,6 +828,11 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     lightingBindings[7].descriptorCount = 1U;
     lightingBindings[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    lightingBindings[8].binding = 8U;
+    lightingBindings[8].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    lightingBindings[8].descriptorCount = 1U;
+    lightingBindings[8].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     VkDescriptorSetLayoutCreateInfo lightingInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     lightingInfo.bindingCount =
@@ -927,7 +932,7 @@ void VulkanRenderer::Impl::createDescriptorLayouts() {
     poolSizes[1] = {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         sceneSetCount * descriptorsPerSceneSet + tonemapSetCount +
-            cullSetCount + depthPyramidSetCount + lightingSetCount * 2U};
+            cullSetCount + depthPyramidSetCount + lightingSetCount * 3U};
     poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                     sceneSetCount * 2U + cullSetCount * 6U +
                         lightingSetCount * 5U};

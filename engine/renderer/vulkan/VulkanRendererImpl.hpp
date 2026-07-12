@@ -849,6 +849,9 @@ private:
         std::uint32_t sourceHeight = 0;
         std::uint32_t useReductionSampler = 0;
     };
+    struct LightAssignmentPushConstants {
+        std::uint32_t depthBoundsEnabled = 0;
+    };
     struct alignas(16) GpuLightingUniforms {
     Mat4 viewProjection;
     RenderDirectionalLight directional;
@@ -959,6 +962,7 @@ private:
     static_assert(offsetof(GpuLightingUniforms, reflectionProbes) == 1504);
     static_assert(sizeof(GpuLightListCounters) == 16);
     static_assert(sizeof(ShadowPushConstants) == 4);
+    static_assert(sizeof(LightAssignmentPushConstants) == 4);
 
     void createInstance();
     void createDebugMessenger();
@@ -1089,7 +1093,8 @@ private:
                        const Mat4 &viewProjection);
   void recordLightAssignment(VkCommandBuffer commandBuffer,
                              std::uint32_t tileColumns,
-                             std::uint32_t tileRows) const;
+                             std::uint32_t tileRows,
+                             bool depthBoundsEnabled) const;
   void ensureShadowCasterCapacity(FrameResources &frame, std::size_t frameIndex,
                                   std::size_t requiredInstanceCount);
   void prepareShadowCasters(FrameResources &frame, std::size_t frameIndex,

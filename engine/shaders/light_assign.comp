@@ -2,6 +2,11 @@
 #extension GL_GOOGLE_include_directive : require
 #define VE_LIGHT_ASSIGNMENT 1
 #include "common/lighting.glsl"
+layout(set = 1, binding = 8) uniform sampler2D depthPyramid;
+layout(push_constant) uniform LightAssignmentPush {
+    uint depthBoundsEnabled;
+} pushData;
+
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -118,6 +123,8 @@ void main() {
     uint tileIndex =
         validTile ? tile.y * lighting.counts.y + tile.x : 0U;
     uint offset = tileIndex * MAXIMUM_LIGHTS_PER_TILE;
+    vec4 farDepthPlane;
+    bool farDepthValid = false;
     uint count = 0U;
     uint overflow = 0U;
     uint lightCount = min(lighting.counts.x, MAXIMUM_LOCAL_LIGHTS);
@@ -145,6 +152,24 @@ void main() {
             rowX - minimumNdc.x * rowW);
         tilePlanes[1] = normalizedPlane(
             maximumNdc.x * rowW - rowX);
+        if (pushData.depthBoundsEnabled != 0U) {
+            // Pyramid mip zero reduces 2x2 depth; mip three covers one 16x16 tile.
+            int lightTileDepthMip =
+                min(3, textureQueryLevels(depthPyramid) - 1);
+            ivec2 depthCoordinate = min(
+                ivec2(tile), textureSize(
+                    depthPyramid, lightTileDepthMip) - 1);
+            float farthestDepth = texelFetch(
+                depthPyramid, depthCoordinate, lightTileDepthMip).r;
+            if (farthestDepth > 0.0) {
+                vec4 rowZ = vec4(
+                    viewProjection[0][2], viewProjection[1][2],
+                    viewProjection[2][2], viewProjection[3][2]);
+                farDepthPlane = normalizedPlane(
+                    rowZ - farthestDepth * rowW);
+                farDepthValid = true;
+            }
+        }
         tilePlanes[2] = normalizedPlane(
             rowY - minimumNdc.y * rowW);
         tilePlanes[3] = normalizedPlane(
@@ -177,6 +202,11 @@ void main() {
                         lightBounds[batchIndex], tilePlanes))
                     continue;
                 vec4 cone = lightCones[batchIndex];
+                if (farDepthValid &&
+                    dot(farDepthPlane,
+                        vec4(lightBounds[batchIndex].xyz, 1.0)) <
+                        -lightBounds[batchIndex].w)
+                    continue;
                 if (cone.w >= 0.0 && !coneTouchesTileFrustum(
                         localLights[lightIndex], cone, tilePlanes))
                     continue;

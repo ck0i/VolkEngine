@@ -235,11 +235,17 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         }
         const std::array<VkDescriptorSetLayout, 2> lightingLayouts{
             resourceOwner_.sceneSetLayout, resourceOwner_.lightingSetLayout};
+        const VkPushConstantRange lightAssignmentPushRange{
+            VK_SHADER_STAGE_COMPUTE_BIT, 0U,
+            sizeof(LightAssignmentPushConstants)};
         VkPipelineLayoutCreateInfo lightAssignmentLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         lightAssignmentLayoutInfo.setLayoutCount =
             static_cast<std::uint32_t>(lightingLayouts.size());
         lightAssignmentLayoutInfo.pSetLayouts = lightingLayouts.data();
+        lightAssignmentLayoutInfo.pushConstantRangeCount = 1U;
+        lightAssignmentLayoutInfo.pPushConstantRanges =
+            &lightAssignmentPushRange;
         checkVk(vkCreatePipelineLayout(
                     deviceOwner_.device, &lightAssignmentLayoutInfo, nullptr,
                     &pipelines.lightAssignmentLayout),

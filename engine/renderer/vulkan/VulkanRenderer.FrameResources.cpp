@@ -296,11 +296,12 @@ void VulkanRenderer::Impl::updateDepthPyramidDescriptors() const {
                                static_cast<std::uint32_t>(writes.size()),
                                writes.data(), 0, nullptr);
     }
-    if (indirectSceneDrawsEnabled_) {
-        for (std::size_t frameIndex = 0;
-             frameIndex < kMaxFramesInFlight; ++frameIndex) {
+    for (std::size_t frameIndex = 0;
+         frameIndex < kMaxFramesInFlight; ++frameIndex) {
+        if (indirectSceneDrawsEnabled_) {
             updateFrameCullDescriptors(frameIndex);
         }
+        updateFrameLightingDescriptors(frameIndex);
     }
 }
 
@@ -705,19 +706,6 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
             "Light Tile Indices", FrameGraphResourceKind::Buffer, true});
         const FrameGraph::ResourceHandle lightListCounters = graph.addResource({
             "Light List Counters", FrameGraphResourceKind::Buffer, true});
-        const FrameGraph::PassHandle lightAssignmentPass = graph.addPass({
-            "Forward+ Light Assignment", {0.98F, 0.75F, 0.18F, 1.0F}});
-        graph.read(lightAssignmentPass, localLights,
-                   FrameGraphUsage::StorageBuffer);
-        graph.read(lightAssignmentPass, lightingUniforms,
-                   FrameGraphUsage::UniformBuffer);
-        graph.write(lightAssignmentPass, lightTileHeaders,
-                    FrameGraphUsage::StorageBuffer);
-        graph.write(lightAssignmentPass, lightTileIndices,
-                    FrameGraphUsage::StorageBuffer);
-        graph.write(lightAssignmentPass, lightListCounters,
-                    FrameGraphUsage::StorageBuffer);
-        graph.setFinalUsage(lightListCounters, FrameGraphUsage::HostRead);
         const FrameGraph::ResourceHandle shadowAtlas = graph.addResource({
             "Shadow Atlas", FrameGraphResourceKind::Image, true});
         const FrameGraph::ResourceHandle shadowInstances = graph.addResource({
@@ -780,11 +768,13 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
 
         FrameGraph::PassHandle depthPass{};
         if (depthPrepass) {
-            depthPass = graph.addPass({"Depth Prepass", {0.16f, 0.42f, 0.18f, 1.0f}});
-            graph.writeAttachment(depthPass, depth, FrameGraphUsage::DepthAttachment,
-                                  FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Store);
-        }
-        if (depthPrepass && indirectSceneDrawsEnabled_) {
+            depthPass = graph.addPass({
+                "Depth Prepass", {0.16f, 0.42f, 0.18f, 1.0f}});
+            graph.writeAttachment(
+                depthPass, depth, FrameGraphUsage::DepthAttachment,
+                FrameGraphAttachmentLoad::Clear,
+                FrameGraphAttachmentStore::Store);
+            if (indirectSceneDrawsEnabled_) {
                 graph.read(depthPass, visibleInstances,
                            FrameGraphUsage::StorageBuffer);
                 graph.read(depthPass, sceneInstances,
@@ -792,17 +782,53 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
                 graph.read(depthPass, indirectCommands,
                            FrameGraphUsage::IndirectBuffer);
             }
-
-        const FrameGraph::PassHandle hdrPass = graph.addPass({"HDR Scene Pass", {0.18f, 0.32f, 0.95f, 1.0f}});
-        if (depthPrepass) {
-            graph.readAttachment(hdrPass, depth, FrameGraphUsage::DepthAttachment,
-                                 FrameGraphAttachmentLoad::Load, FrameGraphAttachmentStore::Discard);
-        } else {
-            graph.writeAttachment(hdrPass, depth, FrameGraphUsage::DepthAttachment,
-                                  FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Discard);
         }
-        graph.writeAttachment(hdrPass, hdr, FrameGraphUsage::ColorAttachment,
-                              FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Store);
+
+        FrameGraph::PassHandle depthPyramidPass{};
+        if (depthPrepass && indirectSceneDrawsEnabled_) {
+            depthPyramidPass = graph.addPass({
+                "Depth Pyramid Build", {0.28f, 0.72f, 0.88f, 1.0f}});
+            graph.read(depthPyramidPass, depth,
+                       FrameGraphUsage::SampledImage);
+            graph.write(depthPyramidPass, depthPyramid,
+                        FrameGraphUsage::StorageImage);
+        }
+
+        const FrameGraph::PassHandle lightAssignmentPass = graph.addPass({
+            "Forward+ Light Assignment", {0.98F, 0.75F, 0.18F, 1.0F}});
+        graph.read(lightAssignmentPass, localLights,
+                   FrameGraphUsage::StorageBuffer);
+        graph.read(lightAssignmentPass, lightingUniforms,
+                   FrameGraphUsage::UniformBuffer);
+        if (depthPrepass && indirectSceneDrawsEnabled_) {
+            graph.read(lightAssignmentPass, depthPyramid,
+                       FrameGraphUsage::SampledImage);
+        }
+        graph.write(lightAssignmentPass, lightTileHeaders,
+                    FrameGraphUsage::StorageBuffer);
+        graph.write(lightAssignmentPass, lightTileIndices,
+                    FrameGraphUsage::StorageBuffer);
+        graph.write(lightAssignmentPass, lightListCounters,
+                    FrameGraphUsage::StorageBuffer);
+        graph.setFinalUsage(lightListCounters, FrameGraphUsage::HostRead);
+
+        const FrameGraph::PassHandle hdrPass = graph.addPass({
+            "HDR Scene Pass", {0.18f, 0.32f, 0.95f, 1.0f}});
+        if (depthPrepass) {
+            graph.readAttachment(
+                hdrPass, depth, FrameGraphUsage::DepthAttachment,
+                FrameGraphAttachmentLoad::Load,
+                FrameGraphAttachmentStore::Discard);
+        } else {
+            graph.writeAttachment(
+                hdrPass, depth, FrameGraphUsage::DepthAttachment,
+                FrameGraphAttachmentLoad::Clear,
+                FrameGraphAttachmentStore::Discard);
+        }
+        graph.writeAttachment(
+            hdrPass, hdr, FrameGraphUsage::ColorAttachment,
+            FrameGraphAttachmentLoad::Clear,
+            FrameGraphAttachmentStore::Store);
         if (indirectSceneDrawsEnabled_) {
             graph.read(hdrPass, visibleInstances,
                        FrameGraphUsage::StorageBuffer);
@@ -812,12 +838,15 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
                        FrameGraphUsage::IndirectBuffer);
         }
         graph.read(hdrPass, localLights, FrameGraphUsage::StorageBuffer);
-        graph.read(hdrPass, lightingUniforms, FrameGraphUsage::UniformBuffer);
-        graph.read(hdrPass, lightTileHeaders, FrameGraphUsage::StorageBuffer);
-        graph.read(hdrPass, lightTileIndices, FrameGraphUsage::StorageBuffer);
+        graph.read(hdrPass, lightingUniforms,
+                   FrameGraphUsage::UniformBuffer);
+        graph.read(hdrPass, lightTileHeaders,
+                   FrameGraphUsage::StorageBuffer);
+        graph.read(hdrPass, lightTileIndices,
+                   FrameGraphUsage::StorageBuffer);
         graph.read(hdrPass, shadowAtlas, FrameGraphUsage::SampledImage);
-        FrameGraph::PassHandle depthPyramidPass{};
-        if (indirectSceneDrawsEnabled_) {
+
+        if (!depthPrepass && indirectSceneDrawsEnabled_) {
             depthPyramidPass = graph.addPass({
                 "Depth Pyramid Build", {0.28f, 0.72f, 0.88f, 1.0f}});
             graph.read(depthPyramidPass, depth,
@@ -995,40 +1024,62 @@ void VulkanRenderer::Impl::readBackGpuTimestamp(const std::uint32_t frameIndex) 
             return ((end & mask) - (begin & mask)) & mask;
         };
         const double tickToMs = static_cast<double>(deviceOwner_.physicalDeviceProperties.limits.timestampPeriod) / 1'000'000.0;
-        stats_.gpuLightAssignmentMs = static_cast<double>(
-            deltaTicks(timestamps[kTimestampFrameStart],
-                       timestamps[kTimestampLightAssignmentEnd])) *
-            tickToMs;
-        stats_.gpuCullMs = static_cast<double>(
-            deltaTicks(timestamps[kTimestampLightAssignmentEnd],
-                       timestamps[kTimestampCullEnd])) *
-            tickToMs;
-        stats_.gpuShadowMs = static_cast<double>(
-            deltaTicks(timestamps[kTimestampCullEnd],
-                       timestamps[kTimestampShadowEnd])) *
-            tickToMs;
-        if (frameOwner_.frames[frameIndex].submittedDepthPrepass) {
+        const FrameResources& frame = frameOwner_.frames[frameIndex];
+        if (indirectSceneDrawsEnabled_) {
+            stats_.gpuCullMs = static_cast<double>(
+                deltaTicks(timestamps[kTimestampFrameStart],
+                           timestamps[kTimestampCullEnd])) *
+                tickToMs;
+            stats_.gpuShadowMs = static_cast<double>(
+                deltaTicks(timestamps[kTimestampCullEnd],
+                           timestamps[kTimestampShadowEnd])) *
+                tickToMs;
+        } else {
+            stats_.gpuCullMs = 0.0;
+            stats_.gpuShadowMs = static_cast<double>(
+                deltaTicks(timestamps[kTimestampFrameStart],
+                           timestamps[kTimestampShadowEnd])) *
+                tickToMs;
+        }
+        if (frame.submittedDepthPrepass) {
             stats_.gpuDepthPrepassMs = static_cast<double>(
                 deltaTicks(timestamps[kTimestampShadowEnd],
                            timestamps[kTimestampDepthEnd])) *
                 tickToMs;
-            stats_.gpuHdrSceneMs = static_cast<double>(
-                deltaTicks(timestamps[kTimestampDepthEnd],
-                           timestamps[kTimestampHdrEnd])) *
+            const std::uint32_t lightBegin = indirectSceneDrawsEnabled_
+                ? kTimestampDepthPyramidEnd : kTimestampDepthEnd;
+            stats_.gpuDepthPyramidMs = indirectSceneDrawsEnabled_
+                ? static_cast<double>(
+                      deltaTicks(timestamps[kTimestampDepthEnd],
+                                 timestamps[kTimestampDepthPyramidEnd])) *
+                      tickToMs
+                : 0.0;
+            stats_.gpuLightAssignmentMs = static_cast<double>(
+                deltaTicks(timestamps[lightBegin],
+                           timestamps[kTimestampLightAssignmentEnd])) *
                 tickToMs;
         } else {
             stats_.gpuDepthPrepassMs = 0.0;
-            stats_.gpuHdrSceneMs = static_cast<double>(
+            stats_.gpuLightAssignmentMs = static_cast<double>(
                 deltaTicks(timestamps[kTimestampShadowEnd],
-                           timestamps[kTimestampHdrEnd])) *
+                           timestamps[kTimestampLightAssignmentEnd])) *
                 tickToMs;
+            stats_.gpuDepthPyramidMs = indirectSceneDrawsEnabled_
+                ? static_cast<double>(
+                      deltaTicks(timestamps[kTimestampHdrEnd],
+                                 timestamps[kTimestampDepthPyramidEnd])) *
+                      tickToMs
+                : 0.0;
         }
-        stats_.gpuDepthPyramidMs = static_cast<double>(
-            deltaTicks(timestamps[kTimestampHdrEnd],
-                       timestamps[kTimestampDepthPyramidEnd])) *
+        stats_.gpuHdrSceneMs = static_cast<double>(
+            deltaTicks(timestamps[kTimestampLightAssignmentEnd],
+                       timestamps[kTimestampHdrEnd])) *
             tickToMs;
+        const std::uint32_t finalBegin =
+            !frame.submittedDepthPrepass && indirectSceneDrawsEnabled_
+                ? kTimestampDepthPyramidEnd : kTimestampHdrEnd;
         stats_.gpuFinalPassMs = static_cast<double>(
-            deltaTicks(timestamps[kTimestampDepthPyramidEnd],
+            deltaTicks(timestamps[finalBegin],
                        timestamps[kTimestampFinalEnd])) *
             tickToMs;
         stats_.gpuFrameMs = static_cast<double>(deltaTicks(timestamps[kTimestampFrameStart], timestamps[kTimestampFinalEnd])) * tickToMs;

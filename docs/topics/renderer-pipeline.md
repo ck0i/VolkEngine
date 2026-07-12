@@ -48,11 +48,13 @@ Work independent of the acquired image runs before acquisition. If pre-submit wo
 The graph selects depth-prepass on/off and screenshot on/off variants. The normal order is:
 
 ```text
-Forward+ assignment / GPU visibility
-              ↓
-shadow atlas → optional depth → HDR atmosphere and scene
+GPU visibility → shadow atlas → optional depth
                                       ↓
                               reverse-Z Hi-Z build
+                                      ↓
+                             Forward+ assignment
+                                      ↓
+                          HDR atmosphere and scene
                                       ↓
                                exposure + ACES
                                       ↓
@@ -63,7 +65,7 @@ shadow atlas → optional depth → HDR atmosphere and scene
 
 Depth is reverse-Z: near maps to 1, far to 0, clear depth is 0, and tests use `GREATER` or `GREATER_OR_EQUAL`. Dynamic rendering is used instead of render-pass/framebuffer objects.
 
-Forward+ uses 16×16 tiles, up to 256 local lights, and 64 light indices per tile. The 2048² shadow atlas has sixteen 512² slots: three directional cascades, then scene-ordered shadow-casting spot lights. Overflow is counted rather than reallocating during the frame.
+Forward+ uses 16×16 tiles, up to 256 local lights, and 64 light indices per tile. Tile-side frusta, spotlight sectors, and the current prepass's farthest opaque depth reject non-contributing lights; no-prepass and direct modes retain conservative frustum assignment. The 2048² shadow atlas has sixteen 512² slots: three directional cascades, then scene-ordered shadow-casting spot lights. Overflow is counted rather than reallocating during the frame.
 
 The HDR path uses GGX/Smith/Schlick lighting, a complete equirectangular environment mip chain, up to four reflection probes, packed material classes, analytic atmosphere, and material-specific foliage/landscape/water branches. The terminal 1×1 environment radiance is uploaded with lighting uniforms for diffuse reuse; roughness selects directional specular mips. Tonemapping applies exposure, ACES, and exactly one sRGB encoding step.
 
