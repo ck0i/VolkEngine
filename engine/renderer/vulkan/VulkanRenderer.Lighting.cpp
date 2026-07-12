@@ -13,6 +13,7 @@ namespace ve {
 namespace {
 
 constexpr float kShadowGuardPixels = 2.0F;
+constexpr float kInverseTau = 1.0F / (2.0F * 3.14159265359F);
 
 [[nodiscard]] Vec4 transformPoint(const Mat4& matrix,
                                   const Vec3 point) noexcept {
@@ -634,6 +635,7 @@ void VulkanRenderer::Impl::prepareLighting(
         uniforms.directional.parameters[0] = 0U;
     }
     uniforms.environment = renderItems.environment();
+    uniforms.environment.parameters.y *= kInverseTau;
     const auto premultiplyIntensity = [](Vec4& value) noexcept {
         value.x *= value.w;
         value.y *= value.w;

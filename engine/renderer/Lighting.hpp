@@ -59,7 +59,7 @@ struct alignas(16) RenderDirectionalLight {
 struct alignas(16) RenderEnvironment {
     Vec4 skyColorIntensity{1.0F, 1.0F, 1.0F, 1.0F};
     Vec4 groundColorIntensity{0.72F, 0.66F, 0.58F, 0.8F};
-    Vec4 parameters{1.0F, 0.0F, 0.0F, 0.0F}; // exposure compensation, rotation, probe count, max LOD
+    Vec4 parameters{1.0F, 0.0F, 0.0F, 0.0F}; // exposure compensation, rotation radians, probe count, max LOD
 };
 struct alignas(16) RenderReflectionProbe {
     Vec4 positionRadius{}; // xyz world position, w blend radius
