@@ -1,22 +1,19 @@
 const float PI = 3.14159265359;
 
-float distributionGGX(vec3 n, vec3 h, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
+float distributionGGX(vec3 n, vec3 h, float alphaSquared) {
     float ndoth = max(dot(n, h), 0.0);
     float ndoth2 = ndoth * ndoth;
-    float denom = ndoth2 * (a2 - 1.0) + 1.0;
-    return a2 / max(PI * denom * denom, 0.0001);
+    float denom = ndoth2 * (alphaSquared - 1.0) + 1.0;
+    return alphaSquared / max(PI * denom * denom, 0.0001);
 }
 
-float geometrySchlickGGX(float ndotv, float roughness) {
-    float r = roughness + 1.0;
-    float k = (r * r) / 8.0;
+float geometrySchlickGGX(float ndotv, float k) {
     return ndotv / max(ndotv * (1.0 - k) + k, 0.0001);
 }
 
-float geometrySmith(float ndotv, float ndotl, float roughness) {
-    return geometrySchlickGGX(ndotv, roughness) * geometrySchlickGGX(ndotl, roughness);
+float geometrySmith(float ndotv, float ndotl, float k) {
+    return geometrySchlickGGX(ndotv, k) *
+           geometrySchlickGGX(ndotl, k);
 }
 
 float pow5(float value) {

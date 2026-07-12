@@ -196,7 +196,7 @@ vec3 environmentRadiance(vec3 direction, vec3 radiance,
 
 
 vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
-                         vec3 albedo, float roughness, float metallic,
+                         vec3 albedo, vec2 brdfParameters, float metallic,
                          vec3 f0) {
     uint model = materialClass();
     float rawNdotL = dot(n, l);
@@ -205,8 +205,8 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
     float ndotv = max(dot(n, v), 0.0);
     vec3 result = vec3(0.0);
     if (ndotl > 0.0) {
-        float d = distributionGGX(n, h, roughness);
-        float g = geometrySmith(ndotv, ndotl, roughness);
+        float d = distributionGGX(n, h, brdfParameters.x);
+        float g = geometrySmith(ndotv, ndotl, brdfParameters.y);
         vec3 f = fresnelSchlick(max(dot(h, v), 0.0), f0);
         vec3 specular =
             (d * g * f) / max(4.0 * ndotv * ndotl, 0.0001);
@@ -216,9 +216,13 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
     float strength = clamp(vMaterialFlags.z, 0.0, 1.0);
     if (model == MATERIAL_CLEAR_COAT && ndotl > 0.0) {
         float coatRoughness = mix(0.18, 0.04, strength);
+        float coatAlpha = coatRoughness * coatRoughness;
+        float coatR = coatRoughness + 1.0;
         vec3 coatF = fresnelSchlick(max(dot(h, v), 0.0), vec3(0.04));
-        float coatD = distributionGGX(n, h, coatRoughness);
-        float coatG = geometrySmith(ndotv, ndotl, coatRoughness);
+        float coatD = distributionGGX(
+            n, h, coatAlpha * coatAlpha);
+        float coatG = geometrySmith(
+            ndotv, ndotl, coatR * coatR * 0.125);
         vec3 coat = coatD * coatG * coatF /
                     max(4.0 * ndotv * ndotl, 0.0001);
         result = result * (1.0 - 0.25 * strength) +
@@ -247,7 +251,8 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
 }
 
 vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
-                        vec3 albedo, float roughness, float metallic, vec3 f0) {
+                        vec3 albedo, vec2 brdfParameters, float metallic,
+                        vec3 f0) {
     vec3 toLight = light.positionRange.xyz - worldPosition;
     float distanceSquared = dot(toLight, toLight);
     float range = light.positionRange.w;
@@ -290,7 +295,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
                     light.colorIntensity.a * attenuation;
     float visibility =
         localShadowVisibility(light, worldPosition, n, l);
-    return evaluateDirectLight(n, v, l, radiance, albedo, roughness,
+    return evaluateDirectLight(n, v, l, radiance, albedo, brdfParameters,
                                metallic, f0) * visibility;
 }
 
@@ -344,6 +349,10 @@ void main() {
     }
 
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
+    float alpha = roughness * roughness;
+    float geometryR = roughness + 1.0;
+    vec2 brdfParameters = vec2(
+        alpha * alpha, geometryR * geometryR * 0.125);
     vec3 directionalL =
         -lighting.directionalDirectionIntensity.xyz;
     float directionalVisibility =
@@ -352,7 +361,7 @@ void main() {
         n, v, directionalL,
         lighting.directionalColor.rgb *
             lighting.directionalDirectionIntensity.w,
-        albedo, roughness, metallic, f0) * directionalVisibility;
+        albedo, brdfParameters, metallic, f0) * directionalVisibility;
     uvec2 tile = uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE;
     LightTileHeader header =
         lightTileHeaders[tile.y * lighting.counts.y + tile.x];
@@ -361,7 +370,7 @@ void main() {
         uint lightIndex = lightTileIndices[header.offset + index];
         local += evaluateLocalLight(localLights[lightIndex],
                                     vWorldPosition, n, v, albedo,
-                                    roughness, metallic, f0);
+                                    brdfParameters, metallic, f0);
     }
 
     float ndotv = max(dot(n, v), 0.0);
