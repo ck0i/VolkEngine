@@ -7,11 +7,13 @@
 #include "common/foliage_wind.glsl"
 
 layout(location = 0) in vec3 inPosition;
+#if !VE_SHADOW_OPAQUE
 layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec2 vUv;
 layout(location = 1) flat out vec4 vMaterialFlags;
 layout(location = 2) flat out uvec4 vTextureIndices;
+#endif
 
 layout(push_constant) uniform ShadowPushConstants {
     uint shadowViewIndex;
@@ -24,7 +26,9 @@ void main() {
     vec4 world = instance.model * vec4(localPosition, 1.0);
     gl_Position =
         lighting.shadowViewProjection[pushData.shadowViewIndex] * world;
+#if !VE_SHADOW_OPAQUE
     vUv = inUv;
     vMaterialFlags = instance.materialFlags;
     vTextureIndices = instance.textureIndices;
+#endif
 }

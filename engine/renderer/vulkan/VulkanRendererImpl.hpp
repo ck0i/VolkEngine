@@ -496,7 +496,7 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
   }
 }
 
-inline std::array<std::filesystem::path, 16>
+inline std::array<std::filesystem::path, 17>
 shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
   return {
       shaderDirectory / "scene.vert.spv",
@@ -514,6 +514,7 @@ shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
         shaderDirectory / "shadow.vert.spv",
         shaderDirectory / "shadow.frag.spv",
         shaderDirectory / "shadow_bindless.frag.spv",
+        shaderDirectory / "shadow_opaque.vert.spv",
       shaderDirectory / "atmosphere.frag.spv",
     };
 }
@@ -1371,7 +1372,7 @@ private:
         VkPipeline shadowOpaque = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 16> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 17> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };

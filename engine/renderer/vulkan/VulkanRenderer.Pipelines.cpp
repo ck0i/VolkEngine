@@ -207,6 +207,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     VkShaderModule depthPyramidCompute = VK_NULL_HANDLE;
     VkShaderModule lightAssignmentCompute = VK_NULL_HANDLE;
     VkShaderModule shadowVert = VK_NULL_HANDLE;
+    VkShaderModule shadowOpaqueVert = VK_NULL_HANDLE;
     VkShaderModule shadowFrag = VK_NULL_HANDLE;
 
     try {
@@ -216,13 +217,14 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             shaderPaths[resourceOwner_.bindlessMaterialsEnabled ? 5U : 1U]);
         tonemapVert = createShaderModule(shaderPaths[2]);
         tonemapFrag = createShaderModule(shaderPaths[3]);
-    atmosphereFrag = createShaderModule(shaderPaths[15]);
+    atmosphereFrag = createShaderModule(shaderPaths[16]);
         depthPrepassVert = createShaderModule(
             shaderPaths[indirectSceneDrawsEnabled_ ? 8U : 4U]);
         cullCompute = createShaderModule(shaderPaths[6]);
         depthPyramidCompute = createShaderModule(shaderPaths[9]);
         lightAssignmentCompute = createShaderModule(shaderPaths[11]);
         shadowVert = createShaderModule(shaderPaths[12]);
+        shadowOpaqueVert = createShaderModule(shaderPaths[15]);
         shadowFrag = createShaderModule(shaderPaths[
             resourceOwner_.bindlessMaterialsEnabled ? 14U : 13U]);
         if (deviceOwner_.info.computeSubgroupBallot) {
@@ -341,6 +343,9 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         VkPipelineVertexInputStateCreateInfo depthVertexInput = vertexInput;
         depthVertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(depthAttributes.size());
         depthVertexInput.pVertexAttributeDescriptions = depthAttributes.data();
+        VkPipelineVertexInputStateCreateInfo opaqueShadowVertexInput =
+            depthVertexInput;
+        opaqueShadowVertexInput.vertexAttributeDescriptionCount = 1U;
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
@@ -459,7 +464,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             "Shadow Pipeline Layout");
         const std::array<VkPipelineShaderStageCreateInfo, 1>
             opaqueShadowStages{
-                shaderStage(VK_SHADER_STAGE_VERTEX_BIT, shadowVert)};
+                shaderStage(VK_SHADER_STAGE_VERTEX_BIT, shadowOpaqueVert)};
         const std::array<VkPipelineShaderStageCreateInfo, 2> shadowStages{
             shaderStage(VK_SHADER_STAGE_VERTEX_BIT, shadowVert),
             shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, shadowFrag)};
@@ -477,7 +482,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
                 shadowRasterizer, depthPrepassDepth, noColorBlend,
                 pipelines.shadowLayout),
             makeGraphicsPipelineInfo(
-                shadowRendering, opaqueShadowStages, depthVertexInput,
+                shadowRendering, opaqueShadowStages, opaqueShadowVertexInput,
                 shadowRasterizer, depthPrepassDepth, noColorBlend,
                 pipelines.shadowLayout)};
         std::array<VkPipeline, 2> shadowHandles{};
@@ -537,6 +542,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         if (shadowFrag != VK_NULL_HANDLE) {
             vkDestroyShaderModule(deviceOwner_.device, shadowFrag, nullptr);
         }
+        if (shadowOpaqueVert != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(
+                deviceOwner_.device, shadowOpaqueVert, nullptr);
+        }
         if (shadowVert != VK_NULL_HANDLE) {
             vkDestroyShaderModule(deviceOwner_.device, shadowVert, nullptr);
         }
@@ -569,6 +578,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
 
   vkDestroyShaderModule(deviceOwner_.device, atmosphereFrag, nullptr);
   vkDestroyShaderModule(deviceOwner_.device, shadowFrag, nullptr);
+    vkDestroyShaderModule(deviceOwner_.device, shadowOpaqueVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, shadowVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, lightAssignmentCompute, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, depthPyramidCompute, nullptr);
