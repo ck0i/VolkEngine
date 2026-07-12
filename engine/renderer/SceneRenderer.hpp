@@ -106,6 +106,10 @@ public:
     [[nodiscard]] std::uint64_t materialGridTileRevision() const noexcept {
         return materialGridTileRevision_;
     }
+    [[nodiscard]] std::uint64_t materialGridContentRevision() const noexcept {
+        return materialGridContentRevision_;
+    }
+
 
     void setLocalLights(std::vector<RenderLocalLight> lights);
     [[nodiscard]] std::span<const RenderLocalLight> localLights() const noexcept {
@@ -133,6 +137,7 @@ private:
     SceneGridRange materialGridRange_{};
     bool materialGridTilesCoverRange_ = false;
     std::uint64_t materialGridTileRevision_ = 0;
+    std::uint64_t materialGridContentRevision_ = 0;
     std::vector<SceneGridTile> materialGridTiles_{};
     std::vector<RenderLocalLight> localLights_;
     RenderDirectionalLight directionalLight_{};

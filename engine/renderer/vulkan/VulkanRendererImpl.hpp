@@ -716,6 +716,7 @@ private:
         std::size_t instanceCapacity = 0;
         std::vector<SceneRenderItem> cachedGpuRenderItems;
         bool gpuRenderItemCacheValid = false;
+        std::uint64_t cachedGpuMaterialGridContentRevision = 0;
         bool submittedOnce = false;
         bool submittedDepthPrepass = false;
         std::uint32_t submittedScenePassCount = 0;

@@ -1,6 +1,7 @@
 #include "renderer/SceneRenderer.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -20,6 +21,8 @@
 
 namespace ve {
 namespace {
+std::atomic<std::uint64_t> nextMaterialGridContentRevision{1U};
+
 
 [[nodiscard]] bool finiteVec3(const Vec3 value) noexcept {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -410,6 +413,8 @@ void SceneRenderList::invalidateMaterialGridTiles() noexcept {
     materialGridTiles_.clear();
     materialGridTilesCoverRange_ = false;
     ++materialGridTileRevision_;
+    materialGridContentRevision_ =
+        nextMaterialGridContentRevision.fetch_add(1U, std::memory_order_relaxed);
 }
 
 bool SceneRenderList::indexInMaterialGridRange(const std::size_t index) const noexcept {

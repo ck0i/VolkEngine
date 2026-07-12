@@ -114,6 +114,23 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     bool renderItemsChanged = updateAllRenderItems;
     bool shadowCasterLayoutChanged = updateAllRenderItems;
     frame.hasAlphaMaskedRenderItems = false;
+    const SceneGridRange& gridRange = renderItems.materialGridRange();
+    const bool gridRangeFits =
+        gridRange.valid && gridRange.firstItem <= renderItems.size() &&
+        gridRange.rows != 0U &&
+        static_cast<std::size_t>(gridRange.columns) <=
+            (renderItems.size() - gridRange.firstItem) / gridRange.rows;
+    const std::size_t gridEnd =
+        gridRangeFits
+            ? gridRange.firstItem +
+                  static_cast<std::size_t>(gridRange.rows) * gridRange.columns
+            : 0U;
+    const bool reuseCachedGridItems =
+        !updateAllRenderItems && gridRangeFits &&
+        renderItems.materialGridTilesCoverRange() &&
+        frame.cachedGpuMaterialGridContentRevision ==
+            renderItems.materialGridContentRevision();
+
 
     auto* candidates =
         static_cast<GpuCullCandidate*>(frame.cullCandidates.mapped);
@@ -129,12 +146,16 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         frame.hasAlphaMaskedRenderItems |=
             (static_cast<std::uint32_t>(item.material.flags.x) &
              MaterialFeatureAlphaMask) != 0U;
+        const bool cachedGridItem =
+            reuseCachedGridItems && index >= gridRange.firstItem &&
+            index < gridEnd;
         const std::size_t materialClass = static_cast<std::size_t>(
             std::clamp(std::lround(item.material.flags.y), 0L,
-                   static_cast<long>(kRenderMaterialClassCount - 1U)));
+                       static_cast<long>(kRenderMaterialClassCount - 1U)));
         ++plan.materialClassCounts[materialClass];
-        if (updateAllRenderItems ||
-            !sameRenderItem(frame.cachedGpuRenderItems[index], item)) {
+        if (!cachedGridItem &&
+            (updateAllRenderItems ||
+             !sameRenderItem(frame.cachedGpuRenderItems[index], item))) {
             shadowCasterLayoutChanged =
                 shadowCasterLayoutChanged ||
                 !sameShadowCasterLayout(
@@ -161,6 +182,8 @@ VulkanRenderer::Impl::prepareGpuVisibility(
             resourceOwner_.sceneMeshTriangleCounts[triangleMesh];
     }
     frame.gpuRenderItemCacheValid = true;
+    frame.cachedGpuMaterialGridContentRevision =
+        renderItems.materialGridContentRevision();
     frame.gpuRenderItemsChangedThisFrame = renderItemsChanged;
     frame.shadowCasterLayoutChangedThisFrame =
         shadowCasterLayoutChanged;
