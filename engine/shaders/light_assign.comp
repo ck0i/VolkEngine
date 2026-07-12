@@ -48,6 +48,19 @@ bool lightTouchesTile(ivec4 tileRange, uvec2 tile) {
     return all(greaterThanEqual(coordinate, tileRange.xy)) &&
            all(lessThanEqual(coordinate, tileRange.zw));
 }
+vec4 normalizedPlane(vec4 plane) {
+    return plane * inversesqrt(dot(plane.xyz, plane.xyz));
+}
+
+bool sphereTouchesTileFrustum(LocalLight light, vec4 planes[4]) {
+    vec4 center = vec4(light.positionRange.xyz, 1.0);
+    float negativeRadius = -light.positionRange.w;
+    return dot(planes[0], center) >= negativeRadius &&
+           dot(planes[1], center) >= negativeRadius &&
+           dot(planes[2], center) >= negativeRadius &&
+           dot(planes[3], center) >= negativeRadius;
+}
+
 
 void main() {
     uvec2 tile = gl_GlobalInvocationID.xy;
@@ -59,6 +72,35 @@ void main() {
     uint count = 0U;
     uint overflow = 0U;
     uint lightCount = min(lighting.counts.x, MAXIMUM_LOCAL_LIGHTS);
+    vec4 tilePlanes[4];
+    if (validTile) {
+        vec2 minimumNdc =
+            vec2(tile * LIGHT_TILE_SIZE) /
+                lighting.viewport.xy * 2.0 - 1.0;
+        vec2 maximumNdc =
+            min(vec2((tile + 1U) * LIGHT_TILE_SIZE),
+                lighting.viewport.xy) /
+                lighting.viewport.xy * 2.0 - 1.0;
+        // Transform the tile's clip inequalities into world-space planes.
+        mat4 viewProjection = lighting.viewProjection;
+        vec4 rowX = vec4(
+            viewProjection[0][0], viewProjection[1][0],
+            viewProjection[2][0], viewProjection[3][0]);
+        vec4 rowY = vec4(
+            viewProjection[0][1], viewProjection[1][1],
+            viewProjection[2][1], viewProjection[3][1]);
+        vec4 rowW = vec4(
+            viewProjection[0][3], viewProjection[1][3],
+            viewProjection[2][3], viewProjection[3][3]);
+        tilePlanes[0] = normalizedPlane(
+            rowX - minimumNdc.x * rowW);
+        tilePlanes[1] = normalizedPlane(
+            maximumNdc.x * rowW - rowX);
+        tilePlanes[2] = normalizedPlane(
+            rowY - minimumNdc.y * rowW);
+        tilePlanes[3] = normalizedPlane(
+            maximumNdc.y * rowW - rowY);
+    }
 
     for (uint base = 0U; base < lightCount;
          base += LIGHTS_PER_BATCH) {
@@ -77,6 +119,9 @@ void main() {
                 if (!lightTouchesTile(lightTileRanges[batchIndex], tile))
                     continue;
                 uint lightIndex = base + batchIndex;
+                if (!sphereTouchesTileFrustum(
+                        localLights[lightIndex], tilePlanes))
+                    continue;
                 if (count < MAXIMUM_LIGHTS_PER_TILE) {
                     lightTileIndices[offset + count] = lightIndex;
                     ++count;
