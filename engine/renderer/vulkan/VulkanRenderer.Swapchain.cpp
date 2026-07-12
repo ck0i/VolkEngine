@@ -173,6 +173,25 @@ VkFormat VulkanRenderer::Impl::findShadowDepthFormat() const {
     }
     throw std::runtime_error("No supported shadow depth format found");
 }
+VkFormat VulkanRenderer::Impl::findHdrFormat() const {
+    constexpr std::array<VkFormat, 2> candidates{
+        VK_FORMAT_B10G11R11_UFLOAT_PACK32,
+        VK_FORMAT_R16G16B16A16_SFLOAT};
+    constexpr VkFormatFeatureFlags required =
+        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    for (const VkFormat format : candidates) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(
+            deviceOwner_.physicalDevice, format, &properties);
+        if ((properties.optimalTilingFeatures & required) == required) {
+            return format;
+        }
+    }
+    throw std::runtime_error("No supported HDR color format found");
+}
+
 
 
 void VulkanRenderer::Impl::realizeFrameGraphResources() {
@@ -194,7 +213,7 @@ void VulkanRenderer::Impl::realizeFrameGraphResources() {
             imageByteEstimate(replacementDepth.extent, replacementDepth.format));
 
         replacementHdr = createImage(
-            swapchainOwner_.extent, VK_FORMAT_R16G16B16A16_SFLOAT,
+            swapchainOwner_.extent, findHdrFormat(),
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT);
         setObjectName(VK_OBJECT_TYPE_IMAGE, handleToUint64(replacementHdr.image), "HDR Color Image");

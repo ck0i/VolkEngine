@@ -678,12 +678,13 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
         FrameGraphVariant variant{};
         FrameGraph& graph = variant.graph;
         const VkFormat depthFormat = findDepthFormat();
+        const VkFormat hdrFormat = findHdrFormat();
         const FrameGraph::ResourceHandle depth = graph.addResource({
             "Depth Image", FrameGraphResourceKind::Image, false,
             imageByteEstimate(swapchainOwner_.extent, depthFormat), 1U, 1U});
         const FrameGraph::ResourceHandle hdr = graph.addResource({
             "HDR Color Image", FrameGraphResourceKind::Image, false,
-            imageByteEstimate(swapchainOwner_.extent, VK_FORMAT_R16G16B16A16_SFLOAT), 1U, 2U});
+            imageByteEstimate(swapchainOwner_.extent, hdrFormat), 1U, 2U});
         const FrameGraph::ResourceHandle swapchain = graph.addResource({
             "Swapchain Image", FrameGraphResourceKind::Image, true});
         FrameGraph::ResourceHandle cullCandidates{};
