@@ -56,6 +56,30 @@ std::uint16_t floatToHalf(const float value) noexcept {
         sign | (static_cast<std::uint32_t>(halfExponent) << 10U) |
         (mantissa >> 13U));
 }
+float halfToFloat(const std::uint16_t value) noexcept {
+    const std::uint32_t sign =
+        static_cast<std::uint32_t>(value & 0x8000U) << 16U;
+    std::int32_t exponent = static_cast<std::int32_t>(
+        (value >> 10U) & 0x1FU);
+    std::uint32_t mantissa = value & 0x03FFU;
+    std::uint32_t bits = 0U;
+    if (exponent == 0) {
+        if (mantissa == 0U) return std::bit_cast<float>(sign);
+        exponent = 1;
+        while ((mantissa & 0x0400U) == 0U) {
+            mantissa <<= 1U;
+            --exponent;
+        }
+        mantissa &= 0x03FFU;
+    } else if (exponent == 31) {
+        bits = sign | 0x7F800000U | (mantissa << 13U);
+        return std::bit_cast<float>(bits);
+    }
+    bits = sign |
+           (static_cast<std::uint32_t>(exponent + 112) << 23U) |
+           (mantissa << 13U);
+    return std::bit_cast<float>(bits);
+}
 
 struct EnvironmentMip {
     std::uint32_t width = 0U;
@@ -480,6 +504,17 @@ void VulkanRenderer::Impl::createTextureResources() {
 void VulkanRenderer::Impl::createEnvironmentResources() {
     std::vector<EnvironmentMip> mips = buildProceduralEnvironmentMap();
     const VkExtent2D extent{mips.front().width, mips.front().height};
+    const EnvironmentMip& diffuseMip = mips.back();
+    if (diffuseMip.width != 1U || diffuseMip.height != 1U ||
+        diffuseMip.pixels.size() != 4U) {
+        throw std::runtime_error(
+            "HDR environment terminal mip must contain one texel");
+    }
+    const Vec4 diffuseRadiance{
+        halfToFloat(floatToHalf(diffuseMip.pixels[0])),
+        halfToFloat(floatToHalf(diffuseMip.pixels[1])),
+        halfToFloat(floatToHalf(diffuseMip.pixels[2])),
+        halfToFloat(floatToHalf(diffuseMip.pixels[3]))};
     constexpr VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT;
     VkFormatProperties properties{};
     vkGetPhysicalDeviceFormatProperties(
@@ -567,6 +602,7 @@ void VulkanRenderer::Impl::createEnvironmentResources() {
         commands = VK_NULL_HANDLE;
         submitGraphicsUpload(submitted, takeBuffer(staging));
         resourceOwner_.environmentMap = takeImage(environment);
+        resourceOwner_.environmentDiffuseRadiance = diffuseRadiance;
         logger()->info(
             "Created procedural HDR environment {}x{} with {} mips",
             extent.width, extent.height,

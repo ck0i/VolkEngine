@@ -604,6 +604,8 @@ void VulkanRenderer::Impl::prepareLighting(
         uniforms.directional.parameters[0] = 0U;
     }
     uniforms.environment = renderItems.environment();
+    uniforms.environmentDiffuseRadiance =
+        resourceOwner_.environmentDiffuseRadiance;
     uniforms.environment.parameters.z =
         static_cast<float>(probes.size());
     std::copy(probes.begin(), probes.end(),

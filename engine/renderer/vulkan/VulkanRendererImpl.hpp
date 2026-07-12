@@ -848,6 +848,7 @@ private:
     Mat4 viewProjection;
     RenderDirectionalLight directional;
     RenderEnvironment environment;
+    Vec4 environmentDiffuseRadiance{};
     std::array<std::uint32_t, 4>
         counts{};    // lights, tile columns, tile rows, reserved
     Vec4 viewport{}; // width, height, reciprocal width, reciprocal height
@@ -938,16 +939,18 @@ private:
                   "GpuCullCounters.sphereLodCounts offset mismatch");
   static_assert(offsetof(GpuCullCounters, visibleMaterialClassCounts) == 32,
                 "GpuCullCounters.visibleMaterialClassCounts offset mismatch");
-    static_assert(sizeof(GpuLightingUniforms) == 1616,
+    static_assert(sizeof(GpuLightingUniforms) == 1632,
                   "GpuLightingUniforms must match GLSL LightingData layout");
     static_assert(offsetof(GpuLightingUniforms, directional) == 64);
     static_assert(offsetof(GpuLightingUniforms, environment) == 112);
-    static_assert(offsetof(GpuLightingUniforms, counts) == 160);
-    static_assert(offsetof(GpuLightingUniforms, viewport) == 176);
-    static_assert(offsetof(GpuLightingUniforms, shadowViewProjection) == 192);
-    static_assert(offsetof(GpuLightingUniforms, shadowUvScaleBias) == 1216);
-    static_assert(offsetof(GpuLightingUniforms, cascadeSplits) == 1472);
-    static_assert(offsetof(GpuLightingUniforms, reflectionProbes) == 1488);
+    static_assert(offsetof(GpuLightingUniforms,
+                           environmentDiffuseRadiance) == 160);
+    static_assert(offsetof(GpuLightingUniforms, counts) == 176);
+    static_assert(offsetof(GpuLightingUniforms, viewport) == 192);
+    static_assert(offsetof(GpuLightingUniforms, shadowViewProjection) == 208);
+    static_assert(offsetof(GpuLightingUniforms, shadowUvScaleBias) == 1232);
+    static_assert(offsetof(GpuLightingUniforms, cascadeSplits) == 1488);
+    static_assert(offsetof(GpuLightingUniforms, reflectionProbes) == 1504);
     static_assert(sizeof(GpuLightListCounters) == 16);
     static_assert(sizeof(ShadowPushConstants) == 4);
 
@@ -1294,6 +1297,7 @@ private:
         ImageResource depth;
         ImageResource shadowAtlas;
         ImageResource environmentMap;
+        Vec4 environmentDiffuseRadiance{};
         std::vector<TextureRole> materialTextureRoles;
         ImageResource depthPyramid;
         std::vector<VkImageView> depthPyramidMipViews;

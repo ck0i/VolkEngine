@@ -176,10 +176,8 @@ vec4 environmentProbeWeights(vec3 worldPosition) {
     return weights;
 }
 
-vec3 environmentRadiance(vec3 direction, vec2 uv, float lod,
+vec3 environmentRadiance(vec3 direction, vec3 radiance,
                          vec4 probeWeights) {
-    vec3 radiance =
-        textureLod(environmentMap, uv, lod).rgb;
     float skyWeight =
         clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 globalTint = mix(
@@ -377,11 +375,13 @@ void main() {
     vec4 probeWeights =
         environmentProbeWeights(vWorldPosition);
     vec3 diffuseEnvironment = environmentRadiance(
-        n, vec2(0.5), maximumEnvironmentLod, probeWeights);
+        n, lighting.environmentDiffuseRadiance.rgb, probeWeights);
     vec3 reflectionDirection = reflect(-v, n);
+    vec3 specularRadiance = textureLod(
+        environmentMap, environmentUv(reflectionDirection),
+        roughness * maximumEnvironmentLod).rgb;
     vec3 specularEnvironment = environmentRadiance(
-        reflectionDirection, environmentUv(reflectionDirection),
-        roughness * maximumEnvironmentLod, probeWeights);
+        reflectionDirection, specularRadiance, probeWeights);
     vec3 ambientDiffuse =
         ambientKd * albedo * diffuseEnvironment;
     vec3 ambientSpecular = ambientF * specularEnvironment;

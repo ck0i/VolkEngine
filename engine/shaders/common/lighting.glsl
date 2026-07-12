@@ -55,6 +55,7 @@ layout(set = 1, binding = 3) uniform LightingData {
     vec4 environmentSky;
     vec4 environmentGround;
     vec4 environmentParameters;
+    vec4 environmentDiffuseRadiance;
     uvec4 counts;
     vec4 viewport;
     mat4 shadowViewProjection[16];

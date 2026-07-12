@@ -65,7 +65,7 @@ Depth is reverse-Z: near maps to 1, far to 0, clear depth is 0, and tests use `G
 
 Forward+ uses 16×16 tiles, up to 256 local lights, and 64 light indices per tile. The 2048² shadow atlas has sixteen 512² slots: three directional cascades, then scene-ordered shadow-casting spot lights. Overflow is counted rather than reallocating during the frame.
 
-The HDR path uses GGX/Smith/Schlick lighting, a complete equirectangular environment mip chain, up to four reflection probes, packed material classes, analytic atmosphere, and material-specific foliage/landscape/water branches. Diffuse lighting samples the terminal 1×1 environment mip directly; roughness selects directional specular mips. Tonemapping applies exposure, ACES, and exactly one sRGB encoding step.
+The HDR path uses GGX/Smith/Schlick lighting, a complete equirectangular environment mip chain, up to four reflection probes, packed material classes, analytic atmosphere, and material-specific foliage/landscape/water branches. The terminal 1×1 environment radiance is uploaded with lighting uniforms for diffuse reuse; roughness selects directional specular mips. Tonemapping applies exposure, ACES, and exactly one sRGB encoding step.
 
 ## Scene submission
 
