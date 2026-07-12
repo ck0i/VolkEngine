@@ -652,6 +652,18 @@ void VulkanRenderer::Impl::prepareLighting(
     uniforms.shadowViewProjection = shadowPlan.matrices;
     uniforms.shadowUvScaleBias = shadowPlan.atlasRects;
     uniforms.cascadeSplits = shadowPlan.cascadeSplits;
+    const std::array<float, 3> cascadeSplits{
+        shadowPlan.cascadeSplits.x, shadowPlan.cascadeSplits.y,
+        shadowPlan.cascadeSplits.z};
+    float previousSplit = 0.0F;
+    for (std::size_t cascade = 0U; cascade < cascadeSplits.size();
+         ++cascade) {
+        const float split = cascadeSplits[cascade];
+        uniforms.directional.parameters[cascade + 1U] =
+            std::bit_cast<std::uint32_t>(
+                previousSplit + (split - previousSplit) * 0.9F);
+        previousSplit = split;
+    }
     frame.shadowViewCount = shadowPlan.viewCount;
     std::memcpy(frame.lightingUniforms.mapped, &uniforms, sizeof(uniforms));
     std::memset(frame.lightListCounters.mapped, 0,

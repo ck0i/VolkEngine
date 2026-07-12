@@ -51,7 +51,7 @@ layout(set = 1, binding = 3) uniform LightingData {
     mat4 viewProjection;
     vec4 directionalDirectionIntensity;
     vec4 directionalColor;
-    uvec4 directionalParameters;
+    uvec4 directionalParameters; // enabled, three blend-start float bit patterns
     vec4 environmentSky;
     vec4 environmentGround;
     vec4 environmentParameters;
