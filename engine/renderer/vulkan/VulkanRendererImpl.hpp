@@ -695,7 +695,10 @@ private:
         Buffer shadowIndirectCommands;
         std::size_t shadowInstanceIndexCapacity = 0;
         std::uint32_t shadowAtlasOverflowCount = 0;
-        std::uint32_t shadowCommandCount = 0;
+        std::array<std::uint32_t, kShadowAtlasSlotCount>
+            shadowCommandOffsets{};
+        std::array<std::uint32_t, kShadowAtlasSlotCount>
+            shadowCommandCounts{};
         bool shadowHasAlphaMaskedCasters = false;
         std::uint32_t shadowViewCount = 0;
         std::vector<std::uint32_t> shadowIndexScratch;

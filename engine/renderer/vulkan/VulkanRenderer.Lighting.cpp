@@ -402,7 +402,7 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     const Camera&, const SceneRenderList& renderItems) {
     if (!indirectSceneDrawsEnabled_ || !config_.shadows ||
         frame.shadowViewCount == 0U) {
-        frame.shadowCommandCount = 0U;
+        frame.shadowCommandCounts.fill(0U);
         frame.shadowViewCount = 0U;
         frame.shadowHasAlphaMaskedCasters = false;
         frame.shadowCasterCacheValid = false;
@@ -443,6 +443,7 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
         frame.shadowIndirectCommands.mapped);
     std::size_t nextIndex = 0U;
+    std::size_t nextCommand = 0U;
     frame.shadowHasAlphaMaskedCasters = false;
 
     const auto meshIndexFor = [&](const SceneRenderItem& item) {
@@ -452,6 +453,8 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     };
     for (std::uint32_t viewIndex = 0U;
          viewIndex < frame.shadowViewCount; ++viewIndex) {
+        frame.shadowCommandOffsets[viewIndex] =
+            static_cast<std::uint32_t>(nextCommand);
         const Frustum frustum =
             extractFrustumPlanes(lighting->shadowViewProjection[viewIndex]);
         std::fill(frame.shadowCountScratch.begin(),
@@ -521,15 +524,16 @@ void VulkanRenderer::Impl::prepareShadowCasters(
         }
 
         for (std::size_t meshIndex = 0U; meshIndex < meshCount; ++meshIndex) {
+            const std::uint32_t instanceCount =
+                frame.shadowCountScratch[meshIndex];
+            if (instanceCount == 0U) continue;
             const GpuMesh& mesh = resourceOwner_.sceneMeshes[meshIndex];
             frame.shadowCursorScratch[meshIndex] =
                 static_cast<std::uint32_t>(nextIndex);
-            commands[static_cast<std::size_t>(viewIndex) * meshCount +
-                     meshIndex] = {
-                mesh.indexCount, frame.shadowCountScratch[meshIndex],
-                mesh.firstIndex, mesh.vertexOffset,
-                static_cast<std::uint32_t>(nextIndex)};
-            nextIndex += frame.shadowCountScratch[meshIndex];
+            commands[nextCommand++] = {
+                mesh.indexCount, instanceCount, mesh.firstIndex,
+                mesh.vertexOffset, static_cast<std::uint32_t>(nextIndex)};
+            nextIndex += instanceCount;
         }
         for (const std::uint32_t itemIndex :
              frame.shadowVisibleItemScratch) {
@@ -537,6 +541,9 @@ void VulkanRenderer::Impl::prepareShadowCasters(
             frame.shadowIndexScratch[
                 frame.shadowCursorScratch[meshIndexFor(item)]++] = itemIndex;
         }
+        frame.shadowCommandCounts[viewIndex] =
+            static_cast<std::uint32_t>(
+                nextCommand - frame.shadowCommandOffsets[viewIndex]);
     }
 
     frame.shadowIndexScratch.resize(nextIndex);
@@ -553,7 +560,6 @@ void VulkanRenderer::Impl::prepareShadowCasters(
         VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT};
     frame.shadowInstanceIndices.syncState = hostWrite;
     frame.shadowIndirectCommands.syncState = hostWrite;
-    frame.shadowCommandCount = static_cast<std::uint32_t>(meshCount);
     frame.shadowCasterCacheValid = true;
 }
 

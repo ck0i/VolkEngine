@@ -938,16 +938,17 @@ void VulkanRenderer::Impl::recordShadowGraphPass(
         vkCmdPushConstants(
             context.frame->commandBuffer, pipelineOwner_.shadowLayout,
             VK_SHADER_STAGE_VERTEX_BIT, 0U, sizeof(push), &push);
-        if (context.frame->shadowCommandCount > 0U) {
+        const std::uint32_t commandCount =
+            context.frame->shadowCommandCounts[viewIndex];
+        if (commandCount > 0U) {
             const VkDeviceSize commandOffset =
-                static_cast<VkDeviceSize>(viewIndex) *
-                context.frame->shadowCommandCount *
+                static_cast<VkDeviceSize>(
+                    context.frame->shadowCommandOffsets[viewIndex]) *
                 sizeof(VkDrawIndexedIndirectCommand);
             vkCmdDrawIndexedIndirect(
                 context.frame->commandBuffer,
                 context.frame->shadowIndirectCommands.buffer, commandOffset,
-                context.frame->shadowCommandCount,
-                sizeof(VkDrawIndexedIndirectCommand));
+                commandCount, sizeof(VkDrawIndexedIndirectCommand));
         }
     }
     vkCmdEndRendering(context.frame->commandBuffer);
