@@ -603,6 +603,19 @@ void VulkanRenderer::Impl::prepareLighting(
         const float range = gpuLights[index].positionRange.w;
         gpuLights[index].parameters[1] =
             std::bit_cast<std::uint32_t>(1.0F / (range * range));
+        if (gpuLights[index].parameters[0] ==
+            static_cast<std::uint32_t>(LocalLightType::Spot)) {
+            const float innerCosine =
+                static_cast<float>(gpuLights[index].parameters[2]) / 65535.0F;
+            const float coneWidth =
+                innerCosine - gpuLights[index].directionOuterCone.w;
+            const float inverseConeWidth =
+                coneWidth > 0.0F
+                    ? 1.0F / coneWidth
+                    : std::numeric_limits<float>::max();
+            gpuLights[index].parameters[2] =
+                std::bit_cast<std::uint32_t>(inverseConeWidth);
+        }
         const std::int32_t slot =
             shadowPlan.assignment.localLightSlots[index];
         gpuLights[index].parameters[3] =

@@ -283,9 +283,12 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
         rangeWindow * rangeWindow * inverseFalloffDistance;
     if (light.parameters.x == 1U) {
         float coneCosine = dot(-l, light.directionOuterCone.xyz);
-        float innerCosine = float(light.parameters.z) / 65535.0;
-        attenuation *= smoothstep(light.directionOuterCone.w, innerCosine,
-                                  coneCosine);
+        float coneWeight = clamp(
+            (coneCosine - light.directionOuterCone.w) *
+                uintBitsToFloat(light.parameters.z),
+            0.0, 1.0);
+        attenuation *=
+            coneWeight * coneWeight * (3.0 - 2.0 * coneWeight);
     }
     if (attenuation <= 0.0) return vec3(0.0);
     vec3 radiance = light.colorIntensity.rgb *

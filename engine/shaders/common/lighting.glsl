@@ -6,7 +6,7 @@ struct LocalLight {
     vec4 positionRange;
     vec4 colorIntensity;
     vec4 directionOuterCone;
-    uvec4 parameters; // type, inverse-range² bits, inner cosine, shadow slot
+    uvec4 parameters; // type, inverse-range² bits, inverse-cone bits, shadow slot
 };
 
 struct LightTileHeader {
