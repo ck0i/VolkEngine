@@ -399,6 +399,7 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     if (!indirectSceneDrawsEnabled_ || !config_.shadows) {
         frame.shadowCommandCount = 0U;
         frame.shadowViewCount = 0U;
+        frame.shadowHasAlphaMaskedCasters = false;
         return;
     }
     ensureShadowCasterCapacity(frame, frameIndex, renderItems.size());
@@ -408,6 +409,11 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     }
 
     const std::size_t meshCount = resourceOwner_.sceneMeshes.size();
+    frame.shadowHasAlphaMaskedCasters = std::any_of(
+        renderItems.begin(), renderItems.end(), [](const SceneRenderItem& item) {
+            return (static_cast<std::uint32_t>(item.material.flags.x) &
+                    MaterialFeatureAlphaMask) != 0U;
+        });
     std::vector<std::uint32_t> counts(meshCount, 0U);
     for (const SceneRenderItem& item : renderItems) {
         const std::size_t meshIndex =

@@ -688,6 +688,7 @@ private:
         std::size_t shadowInstanceIndexCapacity = 0;
         std::uint32_t shadowAtlasOverflowCount = 0;
         std::uint32_t shadowCommandCount = 0;
+        bool shadowHasAlphaMaskedCasters = false;
         std::uint32_t shadowViewCount = 0;
         std::vector<std::uint32_t> shadowIndexScratch;
         bool shadowCasterCacheValid = false;
@@ -875,6 +876,7 @@ private:
         VkPipeline lightAssignment = VK_NULL_HANDLE;
         VkPipelineLayout shadowLayout = VK_NULL_HANDLE;
         VkPipeline shadow = VK_NULL_HANDLE;
+        VkPipeline shadowOpaque = VK_NULL_HANDLE;
     };
     struct RetiredPipelineSet {
         PipelineSet pipelines;
@@ -1356,6 +1358,7 @@ private:
         VkPipeline lightAssignment = VK_NULL_HANDLE;
         VkPipelineLayout shadowLayout = VK_NULL_HANDLE;
         VkPipeline shadow = VK_NULL_HANDLE;
+        VkPipeline shadowOpaque = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
         std::array<std::filesystem::file_time_type, 16> shaderWriteTimes{};

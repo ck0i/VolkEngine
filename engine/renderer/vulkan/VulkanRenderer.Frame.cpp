@@ -878,9 +878,11 @@ void VulkanRenderer::Impl::recordShadowGraphPass(
     rendering.layerCount = 1U;
     rendering.pDepthAttachment = &attachment;
     vkCmdBeginRendering(context.frame->commandBuffer, &rendering);
-    vkCmdBindPipeline(context.frame->commandBuffer,
-                      VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      pipelineOwner_.shadow);
+    vkCmdBindPipeline(
+        context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        context.frame->shadowHasAlphaMaskedCasters
+            ? pipelineOwner_.shadow
+            : pipelineOwner_.shadowOpaque);
     const std::array<VkDescriptorSet, 2> descriptorSets{
         resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame],
         resourceOwner_.lightingDescriptorSets[frameOwner_.currentFrame]};

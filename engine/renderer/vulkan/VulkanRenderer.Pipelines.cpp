@@ -457,6 +457,9 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             VK_OBJECT_TYPE_PIPELINE_LAYOUT,
             handleToUint64(pipelines.shadowLayout),
             "Shadow Pipeline Layout");
+        const std::array<VkPipelineShaderStageCreateInfo, 1>
+            opaqueShadowStages{
+                shaderStage(VK_SHADER_STAGE_VERTEX_BIT, shadowVert)};
         const std::array<VkPipelineShaderStageCreateInfo, 2> shadowStages{
             shaderStage(VK_SHADER_STAGE_VERTEX_BIT, shadowVert),
             shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, shadowFrag)};
@@ -468,18 +471,29 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         shadowRasterizer.depthBiasEnable = VK_TRUE;
         shadowRasterizer.depthBiasConstantFactor = -1.25F;
         shadowRasterizer.depthBiasSlopeFactor = -1.75F;
-        VkGraphicsPipelineCreateInfo shadowInfo =
+        const std::array<VkGraphicsPipelineCreateInfo, 2> shadowInfos{
             makeGraphicsPipelineInfo(
                 shadowRendering, shadowStages, depthVertexInput,
                 shadowRasterizer, depthPrepassDepth, noColorBlend,
-                pipelines.shadowLayout);
-        checkVk(vkCreateGraphicsPipelines(
-                    deviceOwner_.device, pipelineOwner_.cache, 1U,
-                    &shadowInfo, nullptr, &pipelines.shadow),
-                "vkCreateGraphicsPipelines shadow");
+                pipelines.shadowLayout),
+            makeGraphicsPipelineInfo(
+                shadowRendering, opaqueShadowStages, depthVertexInput,
+                shadowRasterizer, depthPrepassDepth, noColorBlend,
+                pipelines.shadowLayout)};
+        std::array<VkPipeline, 2> shadowHandles{};
+        const VkResult shadowResult = vkCreateGraphicsPipelines(
+            deviceOwner_.device, pipelineOwner_.cache,
+            static_cast<std::uint32_t>(shadowInfos.size()),
+            shadowInfos.data(), nullptr, shadowHandles.data());
+        pipelines.shadow = shadowHandles[0];
+        pipelines.shadowOpaque = shadowHandles[1];
+        checkVk(shadowResult, "vkCreateGraphicsPipelines shadow set");
         setObjectName(VK_OBJECT_TYPE_PIPELINE,
                       handleToUint64(pipelines.shadow),
-                      "Shadow Atlas Pipeline");
+                      "Alpha-Masked Shadow Atlas Pipeline");
+        setObjectName(VK_OBJECT_TYPE_PIPELINE,
+                      handleToUint64(pipelines.shadowOpaque),
+                      "Opaque Shadow Atlas Pipeline");
 
         std::array<VkPipelineShaderStageCreateInfo, 2> tonemapStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, tonemapVert), shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, tonemapFrag)};
         VkPipelineVertexInputStateCreateInfo emptyVertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
@@ -578,6 +592,7 @@ void VulkanRenderer::Impl::createPipelines() {
 }
 
 void VulkanRenderer::Impl::destroyPipelineSet(PipelineSet& pipelines) const {
+    if (pipelines.shadowOpaque != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.shadowOpaque, nullptr); pipelines.shadowOpaque = VK_NULL_HANDLE; }
     if (pipelines.shadow != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.shadow, nullptr); pipelines.shadow = VK_NULL_HANDLE; }
     if (pipelines.shadowLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.shadowLayout, nullptr); pipelines.shadowLayout = VK_NULL_HANDLE; }
     if (pipelines.lightAssignment != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.lightAssignment, nullptr); pipelines.lightAssignment = VK_NULL_HANDLE; }
@@ -617,6 +632,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelines.lightAssignment = pipelineOwner_.lightAssignment;
     pipelines.shadowLayout = pipelineOwner_.shadowLayout;
     pipelines.shadow = pipelineOwner_.shadow;
+    pipelines.shadowOpaque = pipelineOwner_.shadowOpaque;
 
     pipelineOwner_.sceneLayout = VK_NULL_HANDLE;
     pipelineOwner_.depthPrepass = VK_NULL_HANDLE;
@@ -634,6 +650,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     pipelineOwner_.lightAssignment = VK_NULL_HANDLE;
     pipelineOwner_.shadowLayout = VK_NULL_HANDLE;
     pipelineOwner_.shadow = VK_NULL_HANDLE;
+    pipelineOwner_.shadowOpaque = VK_NULL_HANDLE;
     return pipelines;
 }
 
@@ -677,6 +694,7 @@ void VulkanRenderer::Impl::installPipelineSet(const PipelineSet& pipelines) {
     pipelineOwner_.lightAssignment = pipelines.lightAssignment;
     pipelineOwner_.shadowLayout = pipelines.shadowLayout;
     pipelineOwner_.shadow = pipelines.shadow;
+    pipelineOwner_.shadowOpaque = pipelines.shadowOpaque;
 }
 
 void VulkanRenderer::Impl::refreshShaderWriteTimes() {
