@@ -4,7 +4,7 @@ const uint MAXIMUM_LIGHTS_PER_TILE = 64U;
 
 struct LocalLight {
     vec4 positionRange;
-    vec4 colorIntensity;
+    vec4 colorIntensity; // premultiplied radiance RGB, alpha 1
     vec4 directionOuterCone;
     uvec4 parameters; // type, inverse-range² bits, inverse-cone bits, shadow slot
 };

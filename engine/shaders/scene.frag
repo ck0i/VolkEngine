@@ -283,8 +283,8 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
             coneWeight * coneWeight * (3.0 - 2.0 * coneWeight);
     }
     if (attenuation <= 0.0) return vec3(0.0);
-    vec3 radiance = light.colorIntensity.rgb *
-                    light.colorIntensity.a * attenuation;
+    vec3 radiance =
+        light.colorIntensity.rgb * attenuation;
     float visibility =
         localShadowVisibility(light, worldPosition, n, l);
     return evaluateDirectLight(n, v, l, rawNdotL, radiance, albedo,

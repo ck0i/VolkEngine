@@ -595,10 +595,17 @@ void VulkanRenderer::Impl::prepareLighting(
     const ShadowMatrixPlan shadowPlan = buildShadowMatrixPlan(
         camera, renderItems.directionalLight(), lights,
         indirectSceneDrawsEnabled_ && config_.shadows);
+    const auto premultiplyIntensity = [](Vec4& value) noexcept {
+        value.x *= value.w;
+        value.y *= value.w;
+        value.z *= value.w;
+        value.w = 1.0F;
+    };
     auto* gpuLights =
         static_cast<RenderLocalLight*>(frame.localLights.mapped);
     for (std::size_t index = 0; index < lights.size(); ++index) {
         gpuLights[index] = lights[index];
+        premultiplyIntensity(gpuLights[index].colorIntensity);
         // GPU ABI: parameters.y replaces the consumed authoring shadow flag
         // with the invariant needed by the fragment-light loop.
         const float range = gpuLights[index].positionRange.w;
@@ -636,12 +643,6 @@ void VulkanRenderer::Impl::prepareLighting(
     }
     uniforms.environment = renderItems.environment();
     uniforms.environment.parameters.y *= kInverseTau;
-    const auto premultiplyIntensity = [](Vec4& value) noexcept {
-        value.x *= value.w;
-        value.y *= value.w;
-        value.z *= value.w;
-        value.w = 1.0F;
-    };
     premultiplyIntensity(uniforms.environment.skyColorIntensity);
     premultiplyIntensity(uniforms.environment.groundColorIntensity);
     uniforms.environmentDiffuseRadiance =
