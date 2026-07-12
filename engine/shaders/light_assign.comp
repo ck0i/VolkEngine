@@ -6,14 +6,15 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 const uint LIGHTS_PER_BATCH = 64U;
-shared vec4 lightBounds[LIGHTS_PER_BATCH];
+shared ivec4 lightTileRanges[LIGHTS_PER_BATCH];
 
-vec4 projectLightBounds(LocalLight light) {
+ivec4 projectLightTileRange(LocalLight light) {
+    ivec2 maximumTile = ivec2(lighting.counts.yz) - ivec2(1);
     vec4 clip = lighting.viewProjection *
                 vec4(light.positionRange.xyz, 1.0);
     float range = light.positionRange.w;
-    if (clip.w + range <= 0.0) return vec4(0.0, 0.0, -2.0, 0.0);
-    if (clip.w <= range) return vec4(0.0, 0.0, -1.0, 0.0);
+    if (clip.w + range <= 0.0) return ivec4(1, 1, 0, 0);
+    if (clip.w <= range) return ivec4(0, 0, maximumTile);
 
     vec2 center = (clip.xy / clip.w * 0.5 + 0.5) *
                   lighting.viewport.xy;
@@ -22,16 +23,30 @@ vec4 projectLightBounds(LocalLight light) {
                            lighting.viewProjection[1][1])) *
                   range / conservativeDepth * 0.5 *
                   lighting.viewport.xy;
-    return vec4(center, radius);
+    vec2 minimumPosition = center - radius;
+    vec2 maximumPosition = center + radius;
+    if (any(lessThan(maximumPosition, vec2(0.0))) ||
+        any(greaterThanEqual(minimumPosition,
+                             lighting.viewport.xy))) {
+        return ivec4(1, 1, 0, 0);
+    }
+    ivec2 minimum = clamp(
+        ivec2(floor(clamp(minimumPosition, vec2(0.0),
+                          lighting.viewport.xy) /
+                    float(LIGHT_TILE_SIZE))),
+        ivec2(0), maximumTile);
+    ivec2 maximum = clamp(
+        ivec2(floor(clamp(maximumPosition, vec2(0.0),
+                          lighting.viewport.xy) /
+                    float(LIGHT_TILE_SIZE))),
+        ivec2(0), maximumTile);
+    return ivec4(minimum, maximum);
 }
 
-bool lightTouchesTile(vec4 bounds, uvec2 tile) {
-    if (bounds.z < 0.0) return bounds.z == -1.0;
-    vec2 tileMinimum = vec2(tile * LIGHT_TILE_SIZE);
-    vec2 tileMaximum = min(tileMinimum + vec2(LIGHT_TILE_SIZE),
-                           lighting.viewport.xy);
-    return all(greaterThanEqual(bounds.xy + bounds.zw, tileMinimum)) &&
-           all(lessThan(bounds.xy - bounds.zw, tileMaximum));
+bool lightTouchesTile(ivec4 tileRange, uvec2 tile) {
+    ivec2 coordinate = ivec2(tile);
+    return all(greaterThanEqual(coordinate, tileRange.xy)) &&
+           all(lessThanEqual(coordinate, tileRange.zw));
 }
 
 void main() {
@@ -49,8 +64,8 @@ void main() {
          base += LIGHTS_PER_BATCH) {
         uint loadedLightIndex = base + gl_LocalInvocationIndex;
         if (loadedLightIndex < lightCount) {
-            lightBounds[gl_LocalInvocationIndex] =
-                projectLightBounds(localLights[loadedLightIndex]);
+            lightTileRanges[gl_LocalInvocationIndex] =
+                projectLightTileRange(localLights[loadedLightIndex]);
         }
         barrier();
 
@@ -59,7 +74,7 @@ void main() {
                 min(LIGHTS_PER_BATCH, lightCount - base);
             for (uint batchIndex = 0U;
                  batchIndex < batchCount; ++batchIndex) {
-                if (!lightTouchesTile(lightBounds[batchIndex], tile))
+                if (!lightTouchesTile(lightTileRanges[batchIndex], tile))
                     continue;
                 uint lightIndex = base + batchIndex;
                 if (count < MAXIMUM_LIGHTS_PER_TILE) {
