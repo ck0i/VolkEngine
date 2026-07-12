@@ -60,8 +60,7 @@ float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l) {
 
 float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
     if (lighting.directionalParameters.x == 0U) return 1.0;
-    float viewDepth =
-        (lighting.viewProjection * vec4(worldPosition, 1.0)).w;
+    float viewDepth = 1.0 / gl_FragCoord.w;
     if (viewDepth <= 0.0 || viewDepth > lighting.cascadeSplits.w)
         return 1.0;
     uint cascade = viewDepth <= lighting.cascadeSplits.x ? 0U
