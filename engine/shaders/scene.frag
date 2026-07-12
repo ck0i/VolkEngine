@@ -360,11 +360,9 @@ void main() {
     for (uint index = 0U;
          index < min(header.count, MAXIMUM_LIGHTS_PER_TILE); ++index) {
         uint lightIndex = lightTileIndices[header.offset + index];
-        if (lightIndex < lighting.counts.x) {
-            local += evaluateLocalLight(localLights[lightIndex],
-                                        vWorldPosition, n, v, albedo,
-                                        roughness, metallic, f0);
-        }
+        local += evaluateLocalLight(localLights[lightIndex],
+                                    vWorldPosition, n, v, albedo,
+                                    roughness, metallic, f0);
     }
 
     float ndotv = max(dot(n, v), 0.0);

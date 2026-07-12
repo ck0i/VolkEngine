@@ -23,7 +23,7 @@ The cache at `${binaryDir}/cache/pipeline_cache.bin` loads only when vendor ID, 
 
 Material classes share one packed ABI and pipeline layout. Masked camera, depth, and shadow paths use the same alpha cutoff. Normal mapping orthonormalizes the tangent against the geometric normal and preserves handedness. Foliage wind is shared by camera, depth, and shadow vertex paths so silhouettes agree.
 
-`light_assign.comp` assigns up to 256 local lights into fixed 16×16 tile partitions. `depth_pyramid.comp` builds the temporal reverse-Z pyramid. `atmosphere.frag` writes the analytic sky before scene geometry.
+`light_assign.comp` assigns bounded submitted-light indices into fixed 16×16 tile partitions, up to 256 local lights and 64 entries per tile. `depth_pyramid.comp` builds the temporal reverse-Z pyramid. `atmosphere.frag` writes the analytic sky before scene geometry.
 
 ## Authored asset path
 
