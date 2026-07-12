@@ -39,11 +39,12 @@ vec4 sampleMaterialTexture(uint role) {
 bool hasMaterialTexture(uint bit) {
     return (vTextureIndices.w & bit) != 0U;
 }
-float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l) {
+float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l,
+                       bool orthographic) {
     vec4 clip =
         lighting.shadowViewProjection[viewIndex] * vec4(worldPosition, 1.0);
-    if (clip.w <= 0.0) return 1.0;
-    vec3 projected = clip.xyz / clip.w;
+    if (!orthographic && clip.w <= 0.0) return 1.0;
+    vec3 projected = orthographic ? clip.xyz : clip.xyz / clip.w;
     vec2 tileUv = projected.xy * 0.5 + 0.5;
     if (any(lessThan(tileUv, vec2(0.0))) ||
         any(greaterThan(tileUv, vec2(1.0))) ||
@@ -68,7 +69,7 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
         : viewDepth <= lighting.cascadeSplits.z ? 2U
                                                 : 3U;
     float visibility =
-        sampleShadowView(cascade, worldPosition, n, l);
+        sampleShadowView(cascade, worldPosition, n, l, true);
     float split = lighting.cascadeSplits[cascade];
     float blendStart = uintBitsToFloat(
         lighting.directionalParameters[cascade + 1U]);
@@ -77,7 +78,7 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
         visibility = cascade < 2U
             ? mix(visibility,
                   sampleShadowView(
-                      cascade + 1U, worldPosition, n, l),
+                      cascade + 1U, worldPosition, n, l, true),
                   blend)
             : mix(visibility, 1.0, blend);
     }
@@ -89,7 +90,7 @@ float localShadowVisibility(LocalLight light, vec3 worldPosition,
     if (light.parameters.w == 0U) return 1.0;
     uint viewIndex = light.parameters.w - 1U;
     if (viewIndex >= lighting.counts.w) return 1.0;
-    return sampleShadowView(viewIndex, worldPosition, n, l);
+    return sampleShadowView(viewIndex, worldPosition, n, l, false);
 }
 
 
