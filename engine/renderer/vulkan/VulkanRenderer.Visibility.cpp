@@ -141,21 +141,36 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     plan.visibleItemCount = static_cast<std::uint32_t>(renderItems.size());
     plan.cameraPosition = camera.position();
     plan.cameraForward = camera.forward();
+    const bool cacheGridAggregate =
+        gridRangeFits && renderItems.materialGridTilesCoverRange();
+    std::array<unsigned, kRenderMaterialClassCount> gridClassCounts{};
+    std::uint64_t gridTriangleCount = 0;
+    bool gridHasAlphaMaskedItems = false;
     for (std::size_t index = 0; index < renderItems.size(); ++index) {
+        if (reuseCachedGridItems && index == gridRange.firstItem) {
+            frame.hasAlphaMaskedRenderItems |=
+                frame.cachedGpuMaterialGridHasAlphaMaskedItems;
+            for (std::size_t materialClass = 0U;
+                 materialClass < kRenderMaterialClassCount; ++materialClass) {
+                plan.materialClassCounts[materialClass] +=
+                    frame.cachedGpuMaterialGridClassCounts[materialClass];
+            }
+            plan.sceneTriangleCount +=
+                frame.cachedGpuMaterialGridTriangleCount;
+            index = gridEnd - 1U;
+            continue;
+        }
         const SceneRenderItem& item = renderItems[index];
-        frame.hasAlphaMaskedRenderItems |=
+        const bool alphaMasked =
             (static_cast<std::uint32_t>(item.material.flags.x) &
              MaterialFeatureAlphaMask) != 0U;
-        const bool cachedGridItem =
-            reuseCachedGridItems && index >= gridRange.firstItem &&
-            index < gridEnd;
+        frame.hasAlphaMaskedRenderItems |= alphaMasked;
         const std::size_t materialClass = static_cast<std::size_t>(
             std::clamp(std::lround(item.material.flags.y), 0L,
                        static_cast<long>(kRenderMaterialClassCount - 1U)));
         ++plan.materialClassCounts[materialClass];
-        if (!cachedGridItem &&
-            (updateAllRenderItems ||
-             !sameRenderItem(frame.cachedGpuRenderItems[index], item))) {
+        if (updateAllRenderItems ||
+            !sameRenderItem(frame.cachedGpuRenderItems[index], item)) {
             shadowCasterLayoutChanged =
                 shadowCasterLayoutChanged ||
                 !sameShadowCasterLayout(
@@ -170,7 +185,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                     ? 0U
                     : static_cast<std::uint32_t>(meshBatchIndex(item.mesh)),
                 item.mesh == builtin_assets::kSphere ? 1U : 0U,
-          static_cast<std::uint32_t>(materialClass), 0U};
+                static_cast<std::uint32_t>(materialClass), 0U};
             frame.cachedGpuRenderItems[index] = item;
             renderItemsChanged = true;
         }
@@ -178,8 +193,21 @@ VulkanRenderer::Impl::prepareGpuVisibility(
             item.mesh == builtin_assets::kSphere
                 ? sphereMeshes[0]
                 : meshBatchIndex(item.mesh);
-        plan.sceneTriangleCount +=
+        const std::uint64_t triangleCount =
             resourceOwner_.sceneMeshTriangleCounts[triangleMesh];
+        plan.sceneTriangleCount += triangleCount;
+        if (cacheGridAggregate && index >= gridRange.firstItem &&
+            index < gridEnd) {
+            gridHasAlphaMaskedItems |= alphaMasked;
+            ++gridClassCounts[materialClass];
+            gridTriangleCount += triangleCount;
+        }
+    }
+    if (cacheGridAggregate && !reuseCachedGridItems) {
+        frame.cachedGpuMaterialGridClassCounts = gridClassCounts;
+        frame.cachedGpuMaterialGridTriangleCount = gridTriangleCount;
+        frame.cachedGpuMaterialGridHasAlphaMaskedItems =
+            gridHasAlphaMaskedItems;
     }
     frame.gpuRenderItemCacheValid = true;
     frame.cachedGpuMaterialGridContentRevision =

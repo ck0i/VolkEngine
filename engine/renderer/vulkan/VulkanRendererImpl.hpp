@@ -717,6 +717,10 @@ private:
         std::vector<SceneRenderItem> cachedGpuRenderItems;
         bool gpuRenderItemCacheValid = false;
         std::uint64_t cachedGpuMaterialGridContentRevision = 0;
+        std::array<unsigned, kRenderMaterialClassCount>
+            cachedGpuMaterialGridClassCounts{};
+        std::uint64_t cachedGpuMaterialGridTriangleCount = 0;
+        bool cachedGpuMaterialGridHasAlphaMaskedItems = false;
         bool submittedOnce = false;
         bool submittedDepthPrepass = false;
         std::uint32_t submittedScenePassCount = 0;
