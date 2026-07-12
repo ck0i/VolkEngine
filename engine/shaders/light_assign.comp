@@ -7,12 +7,35 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 const uint LIGHTS_PER_BATCH = 64U;
 shared ivec4 lightTileRanges[LIGHTS_PER_BATCH];
+shared vec4 lightBounds[LIGHTS_PER_BATCH];
 
-ivec4 projectLightTileRange(LocalLight light) {
+vec4 lightBoundingSphere(LocalLight light) {
+    vec4 bounds = light.positionRange;
+    if (light.parameters.x == 1U) {
+        vec3 coneDirection = light.directionOuterCone.xyz;
+        float inverseDirectionLength =
+            inversesqrt(dot(coneDirection, coneDirection));
+        float outerCosine =
+            light.directionOuterCone.w * inverseDirectionLength;
+        // Range clips a spherical sector. Its tight sphere uses L/(2c);
+        // when c <= 0.5, the original range sphere is tighter.
+        if (outerCosine > 0.5) {
+            float sphereRadius =
+                light.positionRange.w / (2.0 * outerCosine);
+            bounds.xyz += coneDirection * inverseDirectionLength *
+                          sphereRadius;
+            bounds.w = sphereRadius;
+        }
+    }
+    return bounds;
+}
+
+
+ivec4 projectLightTileRange(vec4 bounds) {
     ivec2 maximumTile = ivec2(lighting.counts.yz) - ivec2(1);
     vec4 clip = lighting.viewProjection *
-                vec4(light.positionRange.xyz, 1.0);
-    float range = light.positionRange.w;
+                vec4(bounds.xyz, 1.0);
+    float range = bounds.w;
     if (clip.w + range <= 0.0) return ivec4(1, 1, 0, 0);
     if (clip.w <= range) return ivec4(0, 0, maximumTile);
 
@@ -52,9 +75,9 @@ vec4 normalizedPlane(vec4 plane) {
     return plane * inversesqrt(dot(plane.xyz, plane.xyz));
 }
 
-bool sphereTouchesTileFrustum(LocalLight light, vec4 planes[4]) {
-    vec4 center = vec4(light.positionRange.xyz, 1.0);
-    float negativeRadius = -light.positionRange.w;
+bool sphereTouchesTileFrustum(vec4 bounds, vec4 planes[4]) {
+    vec4 center = vec4(bounds.xyz, 1.0);
+    float negativeRadius = -bounds.w;
     return dot(planes[0], center) >= negativeRadius &&
            dot(planes[1], center) >= negativeRadius &&
            dot(planes[2], center) >= negativeRadius &&
@@ -106,8 +129,11 @@ void main() {
          base += LIGHTS_PER_BATCH) {
         uint loadedLightIndex = base + gl_LocalInvocationIndex;
         if (loadedLightIndex < lightCount) {
+            vec4 bounds =
+                lightBoundingSphere(localLights[loadedLightIndex]);
+            lightBounds[gl_LocalInvocationIndex] = bounds;
             lightTileRanges[gl_LocalInvocationIndex] =
-                projectLightTileRange(localLights[loadedLightIndex]);
+                projectLightTileRange(bounds);
         }
         barrier();
 
@@ -120,7 +146,7 @@ void main() {
                     continue;
                 uint lightIndex = base + batchIndex;
                 if (!sphereTouchesTileFrustum(
-                        localLights[lightIndex], tilePlanes))
+                        lightBounds[batchIndex], tilePlanes))
                     continue;
                 if (count < MAXIMUM_LIGHTS_PER_TILE) {
                     lightTileIndices[offset + count] = lightIndex;
