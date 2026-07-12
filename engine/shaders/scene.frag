@@ -69,21 +69,21 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
                                                 : 3U;
     float visibility =
         sampleShadowView(cascade, worldPosition, n, l);
-    if (cascade < 3U) {
-        float previousSplit = cascade == 0U ? 0.0
-            : cascade == 1U ? lighting.cascadeSplits.x
-                            : lighting.cascadeSplits.y;
-        float split = cascade == 0U ? lighting.cascadeSplits.x
-            : cascade == 1U ? lighting.cascadeSplits.y
-                            : lighting.cascadeSplits.z;
-        float blendStart = mix(previousSplit, split, 0.9);
-        float blend = smoothstep(blendStart, split, viewDepth);
-        if (blend > 0.0) {
-            visibility = mix(
-                visibility,
-                sampleShadowView(cascade + 1U, worldPosition, n, l),
-                blend);
-        }
+    float previousSplit = cascade == 0U ? 0.0
+        : cascade == 1U ? lighting.cascadeSplits.x
+                        : lighting.cascadeSplits.y;
+    float split = cascade == 0U ? lighting.cascadeSplits.x
+        : cascade == 1U ? lighting.cascadeSplits.y
+                        : lighting.cascadeSplits.z;
+    float blendStart = mix(previousSplit, split, 0.9);
+    float blend = smoothstep(blendStart, split, viewDepth);
+    if (blend > 0.0) {
+        visibility = cascade < 2U
+            ? mix(visibility,
+                  sampleShadowView(
+                      cascade + 1U, worldPosition, n, l),
+                  blend)
+            : mix(visibility, 1.0, blend);
     }
     return visibility;
 }
