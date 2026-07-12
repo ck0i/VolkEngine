@@ -435,6 +435,7 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     frame.shadowCountScratch.resize(meshCount);
     frame.shadowCursorScratch.resize(meshCount);
     frame.shadowIndexScratch.resize(maximumIndexCount);
+    frame.shadowVisibleItemScratch.reserve(renderItems.size());
     auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
         frame.shadowIndirectCommands.mapped);
     std::size_t nextIndex = 0U;
@@ -451,16 +452,68 @@ void VulkanRenderer::Impl::prepareShadowCasters(
             extractFrustumPlanes(lighting->shadowViewProjection[viewIndex]);
         std::fill(frame.shadowCountScratch.begin(),
                   frame.shadowCountScratch.end(), 0U);
-        for (const SceneRenderItem& item : renderItems) {
-            if (classifySphereAgainstFrustum(
-                    frustum, item.boundsCenter, item.boundsRadius) ==
-                FrustumSphereClassification::Outside) {
-                continue;
-            }
+        frame.shadowVisibleItemScratch.clear();
+        const auto acceptItem = [&](const std::size_t itemIndex) {
+            const SceneRenderItem& item = renderItems[itemIndex];
+            frame.shadowVisibleItemScratch.push_back(
+                static_cast<std::uint32_t>(itemIndex));
             ++frame.shadowCountScratch[meshIndexFor(item)];
             frame.shadowHasAlphaMaskedCasters |=
                 (static_cast<std::uint32_t>(item.material.flags.x) &
                  MaterialFeatureAlphaMask) != 0U;
+        };
+        const auto classifyItem = [&](const std::size_t itemIndex) {
+            const SceneRenderItem& item = renderItems[itemIndex];
+            if (classifySphereAgainstFrustum(
+                    frustum, item.boundsCenter, item.boundsRadius) !=
+                FrustumSphereClassification::Outside) {
+                acceptItem(itemIndex);
+            }
+        };
+
+        if (renderItems.materialGridTilesCoverRange()) {
+            const SceneGridRange& grid = renderItems.materialGridRange();
+            for (std::size_t itemIndex = 0U; itemIndex < grid.firstItem;
+                 ++itemIndex) {
+                classifyItem(itemIndex);
+            }
+            for (const SceneGridTile& tile : renderItems.materialGridTiles()) {
+                const FrustumSphereClassification tileClassification =
+                    classifySphereAgainstFrustum(
+                        frustum, tile.boundsCenter, tile.boundsRadius);
+                if (tileClassification ==
+                    FrustumSphereClassification::Outside) {
+                    continue;
+                }
+                for (std::uint32_t row = tile.rowBegin; row < tile.rowEnd;
+                     ++row) {
+                    const std::size_t rowBase =
+                        grid.firstItem +
+                        static_cast<std::size_t>(row) * grid.columns;
+                    for (std::uint32_t column = tile.columnBegin;
+                         column < tile.columnEnd; ++column) {
+                        const std::size_t itemIndex = rowBase + column;
+                        if (tileClassification ==
+                            FrustumSphereClassification::Inside) {
+                            acceptItem(itemIndex);
+                        } else {
+                            classifyItem(itemIndex);
+                        }
+                    }
+                }
+            }
+            const std::size_t gridEnd =
+                grid.firstItem +
+                static_cast<std::size_t>(grid.rows) * grid.columns;
+            for (std::size_t itemIndex = gridEnd;
+                 itemIndex < renderItems.size(); ++itemIndex) {
+                classifyItem(itemIndex);
+            }
+        } else {
+            for (std::size_t itemIndex = 0U;
+                 itemIndex < renderItems.size(); ++itemIndex) {
+                classifyItem(itemIndex);
+            }
         }
 
         for (std::size_t meshIndex = 0U; meshIndex < meshCount; ++meshIndex) {
@@ -474,15 +527,9 @@ void VulkanRenderer::Impl::prepareShadowCasters(
                 static_cast<std::uint32_t>(nextIndex)};
             nextIndex += frame.shadowCountScratch[meshIndex];
         }
-        for (std::uint32_t itemIndex = 0U;
-             itemIndex < static_cast<std::uint32_t>(renderItems.size());
-             ++itemIndex) {
+        for (const std::uint32_t itemIndex :
+             frame.shadowVisibleItemScratch) {
             const SceneRenderItem& item = renderItems[itemIndex];
-            if (classifySphereAgainstFrustum(
-                    frustum, item.boundsCenter, item.boundsRadius) ==
-                FrustumSphereClassification::Outside) {
-                continue;
-            }
             frame.shadowIndexScratch[
                 frame.shadowCursorScratch[meshIndexFor(item)]++] = itemIndex;
         }
