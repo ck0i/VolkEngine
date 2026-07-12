@@ -487,10 +487,11 @@ void VulkanRenderer::Impl::createFrameResources() {
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             frameName + " Light List Counter Buffer", true);
-        frame.shadowInstanceIndexCapacity = initialInstanceCapacity;
+        frame.shadowInstanceIndexCapacity =
+            initialInstanceCapacity * kShadowAtlasSlotCount;
         createLightingBuffer(
             frame.shadowInstanceIndices,
-            sizeof(std::uint32_t) * initialInstanceCapacity,
+            sizeof(std::uint32_t) * frame.shadowInstanceIndexCapacity,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -498,7 +499,7 @@ void VulkanRenderer::Impl::createFrameResources() {
         createLightingBuffer(
             frame.shadowIndirectCommands,
             sizeof(VkDrawIndexedIndirectCommand) *
-                resourceOwner_.sceneMeshes.size(),
+                resourceOwner_.sceneMeshes.size() * kShadowAtlasSlotCount,
             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,

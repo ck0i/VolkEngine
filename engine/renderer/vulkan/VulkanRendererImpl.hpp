@@ -691,6 +691,10 @@ private:
         bool shadowHasAlphaMaskedCasters = false;
         std::uint32_t shadowViewCount = 0;
         std::vector<std::uint32_t> shadowIndexScratch;
+        std::array<Mat4, kShadowAtlasSlotCount> cachedShadowViewProjection{};
+        std::uint32_t cachedShadowViewCount = 0;
+        std::vector<std::uint32_t> shadowCountScratch;
+        std::vector<std::uint32_t> shadowCursorScratch;
         bool shadowCasterCacheValid = false;
         bool gpuRenderItemsChangedThisFrame = false;
         std::size_t lightTileCapacity = 0;

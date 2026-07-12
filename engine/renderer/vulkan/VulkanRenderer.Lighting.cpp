@@ -396,62 +396,108 @@ void VulkanRenderer::Impl::ensureShadowCasterCapacity(
 void VulkanRenderer::Impl::prepareShadowCasters(
     FrameResources& frame, const std::size_t frameIndex,
     const Camera&, const SceneRenderList& renderItems) {
-    if (!indirectSceneDrawsEnabled_ || !config_.shadows) {
+    if (!indirectSceneDrawsEnabled_ || !config_.shadows ||
+        frame.shadowViewCount == 0U) {
         frame.shadowCommandCount = 0U;
         frame.shadowViewCount = 0U;
         frame.shadowHasAlphaMaskedCasters = false;
+        frame.shadowCasterCacheValid = false;
+        frame.cachedShadowViewCount = 0U;
         return;
     }
-    ensureShadowCasterCapacity(frame, frameIndex, renderItems.size());
+    if (renderItems.size() > std::numeric_limits<std::uint32_t>::max() ||
+        renderItems.size() >
+            std::numeric_limits<std::size_t>::max() / frame.shadowViewCount) {
+        throw std::runtime_error("Shadow caster count overflows renderer limits");
+    }
+    const std::size_t maximumIndexCount =
+        renderItems.size() * frame.shadowViewCount;
+    if (maximumIndexCount > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error(
+            "Per-view shadow caster indices exceed uint32 range");
+    }
+    ensureShadowCasterCapacity(frame, frameIndex, maximumIndexCount);
+
+    const auto* lighting =
+        static_cast<const GpuLightingUniforms*>(frame.lightingUniforms.mapped);
+    const bool matricesUnchanged =
+        frame.cachedShadowViewCount == frame.shadowViewCount &&
+        std::equal(
+            lighting->shadowViewProjection.begin(),
+            lighting->shadowViewProjection.begin() + frame.shadowViewCount,
+            frame.cachedShadowViewProjection.begin(), sameMatrix);
     if (frame.shadowCasterCacheValid &&
-        !frame.gpuRenderItemsChangedThisFrame) {
+        !frame.gpuRenderItemsChangedThisFrame && matricesUnchanged) {
         return;
     }
 
     const std::size_t meshCount = resourceOwner_.sceneMeshes.size();
-    frame.shadowHasAlphaMaskedCasters = std::any_of(
-        renderItems.begin(), renderItems.end(), [](const SceneRenderItem& item) {
-            return (static_cast<std::uint32_t>(item.material.flags.x) &
-                    MaterialFeatureAlphaMask) != 0U;
-        });
-    std::vector<std::uint32_t> counts(meshCount, 0U);
-    for (const SceneRenderItem& item : renderItems) {
-        const std::size_t meshIndex =
-            item.mesh == builtin_assets::kSphere
-                ? sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)
-                : meshBatchIndex(item.mesh);
-        ++counts.at(meshIndex);
+    frame.shadowCountScratch.resize(meshCount);
+    frame.shadowCursorScratch.resize(meshCount);
+    frame.shadowIndexScratch.resize(maximumIndexCount);
+    auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
+        frame.shadowIndirectCommands.mapped);
+    std::size_t nextIndex = 0U;
+    frame.shadowHasAlphaMaskedCasters = false;
+
+    const auto meshIndexFor = [&](const SceneRenderItem& item) {
+        return item.mesh == builtin_assets::kSphere
+                   ? sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)
+                   : meshBatchIndex(item.mesh);
+    };
+    for (std::uint32_t viewIndex = 0U;
+         viewIndex < frame.shadowViewCount; ++viewIndex) {
+        const Frustum frustum =
+            extractFrustumPlanes(lighting->shadowViewProjection[viewIndex]);
+        std::fill(frame.shadowCountScratch.begin(),
+                  frame.shadowCountScratch.end(), 0U);
+        for (const SceneRenderItem& item : renderItems) {
+            if (classifySphereAgainstFrustum(
+                    frustum, item.boundsCenter, item.boundsRadius) ==
+                FrustumSphereClassification::Outside) {
+                continue;
+            }
+            ++frame.shadowCountScratch[meshIndexFor(item)];
+            frame.shadowHasAlphaMaskedCasters |=
+                (static_cast<std::uint32_t>(item.material.flags.x) &
+                 MaterialFeatureAlphaMask) != 0U;
+        }
+
+        for (std::size_t meshIndex = 0U; meshIndex < meshCount; ++meshIndex) {
+            const GpuMesh& mesh = resourceOwner_.sceneMeshes[meshIndex];
+            frame.shadowCursorScratch[meshIndex] =
+                static_cast<std::uint32_t>(nextIndex);
+            commands[static_cast<std::size_t>(viewIndex) * meshCount +
+                     meshIndex] = {
+                mesh.indexCount, frame.shadowCountScratch[meshIndex],
+                mesh.firstIndex, mesh.vertexOffset,
+                static_cast<std::uint32_t>(nextIndex)};
+            nextIndex += frame.shadowCountScratch[meshIndex];
+        }
+        for (std::uint32_t itemIndex = 0U;
+             itemIndex < static_cast<std::uint32_t>(renderItems.size());
+             ++itemIndex) {
+            const SceneRenderItem& item = renderItems[itemIndex];
+            if (classifySphereAgainstFrustum(
+                    frustum, item.boundsCenter, item.boundsRadius) ==
+                FrustumSphereClassification::Outside) {
+                continue;
+            }
+            frame.shadowIndexScratch[
+                frame.shadowCursorScratch[meshIndexFor(item)]++] = itemIndex;
+        }
     }
-    std::vector<std::uint32_t> offsets(meshCount + 1U, 0U);
-    for (std::size_t index = 0; index < meshCount; ++index) {
-        offsets[index + 1U] = offsets[index] + counts[index];
-    }
-    std::vector<std::uint32_t> cursors(offsets.begin(), offsets.end() - 1);
-    frame.shadowIndexScratch.resize(renderItems.size());
-    for (std::uint32_t itemIndex = 0U;
-         itemIndex < static_cast<std::uint32_t>(renderItems.size());
-         ++itemIndex) {
-        const SceneRenderItem& item = renderItems[itemIndex];
-        const std::size_t meshIndex =
-            item.mesh == builtin_assets::kSphere
-                ? sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)
-                : meshBatchIndex(item.mesh);
-        frame.shadowIndexScratch[cursors[meshIndex]++] = itemIndex;
-    }
+
+    frame.shadowIndexScratch.resize(nextIndex);
     if (!frame.shadowIndexScratch.empty()) {
         std::memcpy(frame.shadowInstanceIndices.mapped,
                     frame.shadowIndexScratch.data(),
                     frame.shadowIndexScratch.size() *
                         sizeof(std::uint32_t));
     }
-    auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
-        frame.shadowIndirectCommands.mapped);
-    for (std::size_t meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
-        const GpuMesh& mesh = resourceOwner_.sceneMeshes[meshIndex];
-        commands[meshIndex] = {
-            mesh.indexCount, counts[meshIndex], mesh.firstIndex,
-            mesh.vertexOffset, offsets[meshIndex]};
-    }
+    std::copy_n(lighting->shadowViewProjection.begin(), frame.shadowViewCount,
+                frame.cachedShadowViewProjection.begin());
+    frame.cachedShadowViewCount = frame.shadowViewCount;
     const VulkanBufferSyncState hostWrite{
         VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT};
     frame.shadowInstanceIndices.syncState = hostWrite;

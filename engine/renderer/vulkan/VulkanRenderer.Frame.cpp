@@ -69,9 +69,9 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
         ensureSceneInstanceCapacity(frame, frameOwner_.currentFrame,
                                     visibility.visibleItemCount);
     }
-    prepareShadowCasters(frame, frameOwner_.currentFrame, camera, renderItems);
     prepareLighting(frame, frameOwner_.currentFrame, camera, renderItems,
                     viewProjection);
+    prepareShadowCasters(frame, frameOwner_.currentFrame, camera, renderItems);
     updateUniforms(frame, camera, viewProjection, elapsedSeconds);
     checkVk(vkResetCommandPool(deviceOwner_.device, frame.commandPool, 0), "vkResetCommandPool frame");
     const bool useDepthPrepass = resolveDepthPrepassForFrame(visibility);
@@ -926,9 +926,13 @@ void VulkanRenderer::Impl::recordShadowGraphPass(
             context.frame->commandBuffer, pipelineOwner_.shadowLayout,
             VK_SHADER_STAGE_VERTEX_BIT, 0U, sizeof(push), &push);
         if (context.frame->shadowCommandCount > 0U) {
+            const VkDeviceSize commandOffset =
+                static_cast<VkDeviceSize>(viewIndex) *
+                context.frame->shadowCommandCount *
+                sizeof(VkDrawIndexedIndirectCommand);
             vkCmdDrawIndexedIndirect(
                 context.frame->commandBuffer,
-                context.frame->shadowIndirectCommands.buffer, 0U,
+                context.frame->shadowIndirectCommands.buffer, commandOffset,
                 context.frame->shadowCommandCount,
                 sizeof(VkDrawIndexedIndirectCommand));
         }
