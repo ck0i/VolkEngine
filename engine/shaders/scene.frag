@@ -182,10 +182,8 @@ vec3 environmentRadiance(vec3 direction, vec3 radiance,
     float skyWeight =
         clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 globalTint = mix(
-        lighting.environmentGround.rgb *
-            lighting.environmentGround.a,
-        lighting.environmentSky.rgb *
-            lighting.environmentSky.a,
+        lighting.environmentGround.rgb,
+        lighting.environmentSky.rgb,
         skyWeight);
     return radiance *
         (globalTint * probeBlend.a + probeBlend.rgb);
@@ -362,10 +360,9 @@ void main() {
             : 1.0;
     vec3 directional = evaluateDirectLight(
         n, v, directionalL, directionalNdotL,
-        lighting.directionalColor.rgb *
-            lighting.directionalDirectionIntensity.w,
-        albedo, brdfParameters, metallic, f0, model,
-        materialStrength) * directionalVisibility;
+        lighting.directionalColor.rgb, albedo, brdfParameters,
+        metallic, f0, model, materialStrength) *
+        directionalVisibility;
     uvec2 tile = uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE;
     LightTileHeader header =
         lightTileHeaders[tile.y * lighting.counts.y + tile.x];

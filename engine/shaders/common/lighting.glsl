@@ -50,10 +50,10 @@ layout(set = 1, binding = 7) uniform sampler2D environmentMap;
 layout(set = 1, binding = 3) uniform LightingData {
     mat4 viewProjection;
     vec4 directionalDirectionIntensity;
-    vec4 directionalColor;
+    vec4 directionalColor; // RGB includes directional intensity
     uvec4 directionalParameters; // enabled, three blend-start float bit patterns
-    vec4 environmentSky;
-    vec4 environmentGround;
+    vec4 environmentSky; // RGB includes environment intensity
+    vec4 environmentGround; // RGB includes environment intensity
     vec4 environmentParameters;
     vec4 environmentDiffuseRadiance;
     uvec4 counts;

@@ -624,10 +624,24 @@ void VulkanRenderer::Impl::prepareLighting(
     GpuLightingUniforms uniforms{};
     uniforms.viewProjection = viewProjection;
     uniforms.directional = renderItems.directionalLight();
+    const float directionalIntensity =
+        uniforms.directional.directionIntensity.w;
+    uniforms.directional.color.x *= directionalIntensity;
+    uniforms.directional.color.y *= directionalIntensity;
+    uniforms.directional.color.z *= directionalIntensity;
+    uniforms.directional.directionIntensity.w = 1.0F;
     if (!indirectSceneDrawsEnabled_ || !config_.shadows) {
         uniforms.directional.parameters[0] = 0U;
     }
     uniforms.environment = renderItems.environment();
+    const auto premultiplyIntensity = [](Vec4& value) noexcept {
+        value.x *= value.w;
+        value.y *= value.w;
+        value.z *= value.w;
+        value.w = 1.0F;
+    };
+    premultiplyIntensity(uniforms.environment.skyColorIntensity);
+    premultiplyIntensity(uniforms.environment.groundColorIntensity);
     uniforms.environmentDiffuseRadiance =
         resourceOwner_.environmentDiffuseRadiance;
     uniforms.environment.parameters.z =
