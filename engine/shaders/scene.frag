@@ -195,10 +195,10 @@ vec3 environmentRadiance(vec3 direction, vec3 radiance,
 }
 
 
-vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
-                         vec3 albedo, vec2 brdfParameters, float metallic,
-                         vec3 f0, uint model, float strength) {
-    float rawNdotL = dot(n, l);
+vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
+                         vec3 radiance, vec3 albedo,
+                         vec2 brdfParameters, float metallic, vec3 f0,
+                         uint model, float strength) {
     float ndotl = max(rawNdotL, 0.0);
     vec3 h = normalize(v + l);
     float ndotv = max(dot(n, v), 0.0);
@@ -265,9 +265,8 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     if (wrap == 0.0 && unnormalizedNdotL <= 0.0)
         return vec3(0.0);
     float inverseDistance = inversesqrt(distanceSquared);
-    if (wrap > 0.0 &&
-        unnormalizedNdotL * inverseDistance <= -wrap)
-        return vec3(0.0);
+    float rawNdotL = unnormalizedNdotL * inverseDistance;
+    if (rawNdotL <= -wrap) return vec3(0.0);
     vec3 l = toLight * inverseDistance;
     float normalizedDistanceSquared =
         distanceSquared / rangeSquared;
@@ -290,8 +289,9 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
                     light.colorIntensity.a * attenuation;
     float visibility =
         localShadowVisibility(light, worldPosition, n, l);
-    return evaluateDirectLight(n, v, l, radiance, albedo, brdfParameters,
-                               metallic, f0, model, strength) * visibility;
+    return evaluateDirectLight(n, v, l, rawNdotL, radiance, albedo,
+                               brdfParameters, metallic, f0, model,
+                               strength) * visibility;
 }
 
 void main() {
@@ -351,10 +351,17 @@ void main() {
     float materialStrength = clamp(vMaterialFlags.z, 0.0, 1.0);
     vec3 directionalL =
         -lighting.directionalDirectionIntensity.xyz;
+    float directionalNdotL = dot(n, directionalL);
+    float directionalWrap = model == MATERIAL_FOLIAGE
+        ? 0.5 * materialStrength
+        : model == MATERIAL_SKIN ? 0.25 * materialStrength : 0.0;
     float directionalVisibility =
-        directionalShadowVisibility(vWorldPosition, n, directionalL);
+        directionalNdotL > -directionalWrap
+            ? directionalShadowVisibility(
+                  vWorldPosition, n, directionalL)
+            : 1.0;
     vec3 directional = evaluateDirectLight(
-        n, v, directionalL,
+        n, v, directionalL, directionalNdotL,
         lighting.directionalColor.rgb *
             lighting.directionalDirectionIntensity.w,
         albedo, brdfParameters, metallic, f0, model,
