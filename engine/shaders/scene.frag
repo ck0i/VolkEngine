@@ -265,10 +265,10 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     vec3 l = toLight * inverseDistance;
     float normalizedDistanceSquared =
         distanceSquared * inverseRangeSquared;
-    float rangeWindow = clamp(
+    float rangeWindow = max(
         1.0 - normalizedDistanceSquared *
               normalizedDistanceSquared,
-        0.0, 1.0);
+        0.0);
     float inverseFalloffDistance = min(
         inverseDistance * inverseDistance, 100.0);
     float attenuation =
