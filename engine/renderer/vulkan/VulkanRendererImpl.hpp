@@ -395,6 +395,8 @@ inline std::uint32_t bytesPerPixelEstimate(const VkFormat format) {
     case VK_FORMAT_D32_SFLOAT:
     case VK_FORMAT_D24_UNORM_S8_UINT:
         return 4;
+    case VK_FORMAT_D16_UNORM:
+        return 2;
     case VK_FORMAT_R16G16B16A16_SFLOAT:
         return 8;
     case VK_FORMAT_D32_SFLOAT_S8_UINT:
@@ -1153,6 +1155,7 @@ private:
   [[nodiscard]] VkExtent2D
   chooseExtent(const VkSurfaceCapabilitiesKHR &capabilities) const;
   [[nodiscard]] VkFormat findDepthFormat() const;
+  [[nodiscard]] VkFormat findShadowDepthFormat() const;
 
   [[nodiscard]] Buffer
   createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,

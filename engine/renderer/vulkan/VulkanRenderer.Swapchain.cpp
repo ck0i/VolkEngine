@@ -150,6 +150,30 @@ VkFormat VulkanRenderer::Impl::findDepthFormat() const {
     }
     throw std::runtime_error("No supported depth format found");
 }
+VkFormat VulkanRenderer::Impl::findShadowDepthFormat() const {
+    constexpr std::array<VkFormat, 4> candidates{
+        VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
+    constexpr VkFormatFeatureFlags2 required =
+        VK_FORMAT_FEATURE_2_DEPTH_STENCIL_ATTACHMENT_BIT |
+        VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT |
+        VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+        VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_DEPTH_COMPARISON_BIT;
+    for (const VkFormat format : candidates) {
+        VkFormatProperties3 properties3{
+            VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3};
+        VkFormatProperties2 properties2{
+            VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
+        properties2.pNext = &properties3;
+        vkGetPhysicalDeviceFormatProperties2(
+            deviceOwner_.physicalDevice, format, &properties2);
+        if ((properties3.optimalTilingFeatures & required) == required) {
+            return format;
+        }
+    }
+    throw std::runtime_error("No supported shadow depth format found");
+}
+
 
 void VulkanRenderer::Impl::realizeFrameGraphResources() {
     ImageResource replacementDepth;

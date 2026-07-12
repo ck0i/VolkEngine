@@ -214,7 +214,7 @@ struct ShadowMatrixPlan {
 
 void VulkanRenderer::Impl::createShadowResources() {
     resourceOwner_.shadowAtlas = createImage(
-        {kShadowAtlasExtent, kShadowAtlasExtent}, findDepthFormat(),
+        {kShadowAtlasExtent, kShadowAtlasExtent}, findShadowDepthFormat(),
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
             VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_IMAGE_ASPECT_DEPTH_BIT);
