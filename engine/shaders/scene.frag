@@ -352,13 +352,11 @@ void main() {
         lighting.directionalColor.rgb *
             lighting.directionalDirectionIntensity.w,
         albedo, roughness, metallic, f0) * directionalVisibility;
-    uvec2 tile = min(uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE,
-                     lighting.counts.yz - uvec2(1U));
+    uvec2 tile = uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE;
     LightTileHeader header =
         lightTileHeaders[tile.y * lighting.counts.y + tile.x];
     vec3 local = vec3(0.0);
-    for (uint index = 0U;
-         index < min(header.count, MAXIMUM_LIGHTS_PER_TILE); ++index) {
+    for (uint index = 0U; index < header.count; ++index) {
         uint lightIndex = lightTileIndices[header.offset + index];
         local += evaluateLocalLight(localLights[lightIndex],
                                     vWorldPosition, n, v, albedo,
