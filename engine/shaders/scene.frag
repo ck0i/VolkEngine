@@ -112,8 +112,7 @@ const uint MATERIAL_FEATURE_ALPHA_MASK = 1U;
 const uint MATERIAL_FEATURE_GROUND_GRID = 4U;
 
 uint materialClass() {
-    return uint(round(clamp(vMaterialFlags.y, 0.0,
-                            float(MATERIAL_WATER))));
+    return (vTextureIndices.w >> 3U) & 15U;
 }
 uint packedMaterialFeatures() {
     return uint(round(max(vMaterialFlags.x, 0.0)));

@@ -302,6 +302,10 @@ VulkanRenderer::Impl::InstanceData VulkanRenderer::Impl::instanceDataFor(
         (item.material.textures[0].valid() ? 1U : 0U) |
         (item.material.textures[1].valid() ? 2U : 0U) |
         (item.material.textures[2].valid() ? 4U : 0U);
+    const std::uint32_t materialClass = static_cast<std::uint32_t>(
+        std::clamp(std::lround(item.material.flags.y), 0L, 9L));
+    const std::uint32_t textureMetadata =
+        textureMask | (materialClass << 3U);
     return InstanceData{
         item.model,
         normalMatrix[0],
@@ -312,7 +316,7 @@ VulkanRenderer::Impl::InstanceData VulkanRenderer::Impl::instanceDataFor(
         item.material.flags,
         {textureIndex(item.material.textures[0], 0U),
          textureIndex(item.material.textures[1], 1U),
-         textureIndex(item.material.textures[2], 2U), textureMask}};
+         textureIndex(item.material.textures[2], 2U), textureMetadata}};
 }
 
 void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std::uint32_t imageIndex, const SceneRenderList& renderItems, const SceneVisibilityPlan& visibility, const bool useDepthPrepass, const Buffer* screenshotReadback, FrameGraphVariant& graphVariant) {

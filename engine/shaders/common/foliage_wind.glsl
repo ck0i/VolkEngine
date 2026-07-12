@@ -1,5 +1,5 @@
 vec3 applyFoliageWind(vec3 localPosition, SceneInstance instance) {
-    uint materialClass = uint(round(clamp(instance.materialFlags.y, 0.0, 9.0)));
+    uint materialClass = (instance.textureIndices.w >> 3U) & 15U;
     if (materialClass != 3U) return localPosition;
 
     float weight = smoothstep(0.15, 4.5, localPosition.y);
