@@ -76,13 +76,13 @@ struct ShadowMatrixPlan {
     const std::span<const RenderLocalLight> lights,
     const bool shadowsEnabled) {
     ShadowMatrixPlan result;
-    result.assignment = assignShadowAtlasSlots(directional, lights);
     if (!shadowsEnabled) {
         result.assignment.directionalCascadeCount = 0U;
         result.assignment.localShadowCount = 0U;
         result.assignment.localLightSlots.fill(-1);
         return result;
     }
+    result.assignment = assignShadowAtlasSlots(directional, lights);
 
     const float nearDistance = camera.nearPlane();
     const float farDistance = std::min(camera.farPlane(), 120.0F);
