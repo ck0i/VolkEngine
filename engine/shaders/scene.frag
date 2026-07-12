@@ -303,7 +303,6 @@ void main() {
         vec3 b = cross(n, t) * vWorldTangent.w;
         vec3 tangentNormal = sampleMaterialTexture(1U).xyz * 2.0 - 1.0;
         tangentNormal.xy *= clamp(vMaterialFlags.w, 0.0, 4.0);
-        tangentNormal = normalize(tangentNormal);
         n = normalize(mat3(t, b, n) * tangentNormal);
     }
     vec3 v = normalize(scene.cameraPositionTime.xyz - vWorldPosition);
