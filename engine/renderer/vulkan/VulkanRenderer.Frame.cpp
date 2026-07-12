@@ -66,6 +66,12 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
             : planSceneVisibility(camera, projection, viewProjection,
                                   renderItems);
     if (!indirectSceneDrawsEnabled_) {
+        frame.hasAlphaMaskedRenderItems = false;
+        for (const SceneRenderItem& item : renderItems) {
+            frame.hasAlphaMaskedRenderItems |=
+                (static_cast<std::uint32_t>(item.material.flags.x) &
+                 MaterialFeatureAlphaMask) != 0U;
+        }
         ensureSceneInstanceCapacity(frame, frameOwner_.currentFrame,
                                     visibility.visibleItemCount);
     }
@@ -978,7 +984,11 @@ void VulkanRenderer::Impl::recordDepthGraphPass(const FrameGraphRecordContext& c
     rendering.layerCount = 1;
     rendering.pDepthAttachment = &attachment;
     vkCmdBeginRendering(context.frame->commandBuffer, &rendering);
-    vkCmdBindPipeline(context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineOwner_.depthPrepass);
+    vkCmdBindPipeline(
+        context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        context.frame->hasAlphaMaskedRenderItems
+            ? pipelineOwner_.depthPrepass
+            : pipelineOwner_.depthPrepassOpaque);
     recordSceneBatches(context);
     vkCmdEndRendering(context.frame->commandBuffer);
     if (frameOwner_.timestampsEnabled) {

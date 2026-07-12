@@ -113,6 +113,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     frame.cachedGpuRenderItems.resize(renderItems.size());
     bool renderItemsChanged = updateAllRenderItems;
     bool shadowCasterLayoutChanged = updateAllRenderItems;
+    frame.hasAlphaMaskedRenderItems = false;
 
     auto* candidates =
         static_cast<GpuCullCandidate*>(frame.cullCandidates.mapped);
@@ -125,6 +126,9 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     plan.cameraForward = camera.forward();
     for (std::size_t index = 0; index < renderItems.size(); ++index) {
         const SceneRenderItem& item = renderItems[index];
+        frame.hasAlphaMaskedRenderItems |=
+            (static_cast<std::uint32_t>(item.material.flags.x) &
+             MaterialFeatureAlphaMask) != 0U;
         const std::size_t materialClass = static_cast<std::size_t>(
             std::clamp(std::lround(item.material.flags.y), 0L,
                    static_cast<long>(kRenderMaterialClassCount - 1U)));

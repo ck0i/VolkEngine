@@ -496,7 +496,7 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
   }
 }
 
-inline std::array<std::filesystem::path, 17>
+inline std::array<std::filesystem::path, 19>
 shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
   return {
       shaderDirectory / "scene.vert.spv",
@@ -515,6 +515,8 @@ shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
         shaderDirectory / "shadow.frag.spv",
         shaderDirectory / "shadow_bindless.frag.spv",
         shaderDirectory / "shadow_opaque.vert.spv",
+        shaderDirectory / "scene_depth_opaque.vert.spv",
+        shaderDirectory / "scene_depth_gpu_opaque.vert.spv",
       shaderDirectory / "atmosphere.frag.spv",
     };
 }
@@ -698,6 +700,7 @@ private:
         std::vector<std::uint32_t> shadowCountScratch;
         std::vector<std::uint32_t> shadowCursorScratch;
         bool shadowCasterCacheValid = false;
+        bool hasAlphaMaskedRenderItems = false;
         bool gpuRenderItemsChangedThisFrame = false;
         bool shadowCasterLayoutChangedThisFrame = false;
         std::size_t lightTileCapacity = 0;
@@ -870,6 +873,7 @@ private:
     struct PipelineSet {
         VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
         VkPipeline depthPrepass = VK_NULL_HANDLE;
+        VkPipeline depthPrepassOpaque = VK_NULL_HANDLE;
         VkPipeline scene = VK_NULL_HANDLE;
         VkPipeline sceneNoPrepass = VK_NULL_HANDLE;
     VkPipeline atmosphere = VK_NULL_HANDLE;
@@ -1355,6 +1359,7 @@ private:
         VkPipelineCache cache = VK_NULL_HANDLE;
         VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
         VkPipeline depthPrepass = VK_NULL_HANDLE;
+        VkPipeline depthPrepassOpaque = VK_NULL_HANDLE;
         VkPipeline scene = VK_NULL_HANDLE;
         VkPipelineLayout depthPyramidLayout = VK_NULL_HANDLE;
         VkPipeline depthPyramid = VK_NULL_HANDLE;
@@ -1372,7 +1377,7 @@ private:
         VkPipeline shadowOpaque = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 17> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 19> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };

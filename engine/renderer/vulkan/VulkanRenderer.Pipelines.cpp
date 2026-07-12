@@ -202,6 +202,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
     VkShaderModule tonemapFrag = VK_NULL_HANDLE;
     VkShaderModule atmosphereFrag = VK_NULL_HANDLE;
   VkShaderModule depthPrepassVert = VK_NULL_HANDLE;
+    VkShaderModule depthPrepassOpaqueVert = VK_NULL_HANDLE;
     VkShaderModule cullCompute = VK_NULL_HANDLE;
     VkShaderModule cullSubgroupCompute = VK_NULL_HANDLE;
     VkShaderModule depthPyramidCompute = VK_NULL_HANDLE;
@@ -217,9 +218,11 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
             shaderPaths[resourceOwner_.bindlessMaterialsEnabled ? 5U : 1U]);
         tonemapVert = createShaderModule(shaderPaths[2]);
         tonemapFrag = createShaderModule(shaderPaths[3]);
-    atmosphereFrag = createShaderModule(shaderPaths[16]);
+    atmosphereFrag = createShaderModule(shaderPaths[18]);
         depthPrepassVert = createShaderModule(
             shaderPaths[indirectSceneDrawsEnabled_ ? 8U : 4U]);
+        depthPrepassOpaqueVert = createShaderModule(
+            shaderPaths[indirectSceneDrawsEnabled_ ? 17U : 16U]);
         cullCompute = createShaderModule(shaderPaths[6]);
         depthPyramidCompute = createShaderModule(shaderPaths[9]);
         lightAssignmentCompute = createShaderModule(shaderPaths[11]);
@@ -426,25 +429,49 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         sceneRendering.pColorAttachmentFormats = &resourceOwner_.hdr.format;
         sceneRendering.depthAttachmentFormat = resourceOwner_.depth.format;
 
+        const std::array<VkPipelineShaderStageCreateInfo, 1>
+            opaqueDepthPrepassStages{
+                shaderStage(
+                    VK_SHADER_STAGE_VERTEX_BIT, depthPrepassOpaqueVert)};
         const std::array<VkPipelineShaderStageCreateInfo, 2> depthPrepassStages{
             shaderStage(VK_SHADER_STAGE_VERTEX_BIT, depthPrepassVert),
             shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, shadowFrag)};
         VkPipelineRenderingCreateInfo depthPrepassRendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
         depthPrepassRendering.colorAttachmentCount = 0;
         depthPrepassRendering.depthAttachmentFormat = resourceOwner_.depth.format;
-        VkGraphicsPipelineCreateInfo depthPrepassInfo = makeGraphicsPipelineInfo(depthPrepassRendering, depthPrepassStages, depthVertexInput, rasterizer, depthPrepassDepth, noColorBlend, pipelines.sceneLayout);
-        VkGraphicsPipelineCreateInfo sceneInfo = makeGraphicsPipelineInfo(sceneRendering, sceneStages, vertexInput, rasterizer, sceneDepth, blend, pipelines.sceneLayout);
+        const VkGraphicsPipelineCreateInfo depthPrepassInfo =
+            makeGraphicsPipelineInfo(
+                depthPrepassRendering, depthPrepassStages, depthVertexInput,
+                rasterizer, depthPrepassDepth, noColorBlend,
+                pipelines.sceneLayout);
+        const VkGraphicsPipelineCreateInfo depthPrepassOpaqueInfo =
+            makeGraphicsPipelineInfo(
+                depthPrepassRendering, opaqueDepthPrepassStages,
+                opaqueShadowVertexInput, rasterizer, depthPrepassDepth,
+                noColorBlend, pipelines.sceneLayout);
+        VkGraphicsPipelineCreateInfo sceneInfo = makeGraphicsPipelineInfo(
+            sceneRendering, sceneStages, vertexInput, rasterizer, sceneDepth,
+            blend, pipelines.sceneLayout);
         VkGraphicsPipelineCreateInfo sceneNoPrepassInfo = sceneInfo;
         sceneNoPrepassInfo.pDepthStencilState = &depthPrepassDepth;
-        std::array<VkGraphicsPipelineCreateInfo, 3> scenePipelineInfos{depthPrepassInfo, sceneInfo, sceneNoPrepassInfo};
-        std::array<VkPipeline, 3> scenePipelineHandles{};
-        const VkResult scenePipelineResult = vkCreateGraphicsPipelines(deviceOwner_.device, pipelineOwner_.cache, static_cast<std::uint32_t>(scenePipelineInfos.size()),
-                                                                       scenePipelineInfos.data(), nullptr, scenePipelineHandles.data());
+        const std::array<VkGraphicsPipelineCreateInfo, 4> scenePipelineInfos{
+            depthPrepassInfo, depthPrepassOpaqueInfo, sceneInfo,
+            sceneNoPrepassInfo};
+        std::array<VkPipeline, 4> scenePipelineHandles{};
+        const VkResult scenePipelineResult = vkCreateGraphicsPipelines(
+            deviceOwner_.device, pipelineOwner_.cache,
+            static_cast<std::uint32_t>(scenePipelineInfos.size()),
+            scenePipelineInfos.data(), nullptr, scenePipelineHandles.data());
         pipelines.depthPrepass = scenePipelineHandles[0];
-        pipelines.scene = scenePipelineHandles[1];
-        pipelines.sceneNoPrepass = scenePipelineHandles[2];
+        pipelines.depthPrepassOpaque = scenePipelineHandles[1];
+        pipelines.scene = scenePipelineHandles[2];
+        pipelines.sceneNoPrepass = scenePipelineHandles[3];
         checkVk(scenePipelineResult, "vkCreateGraphicsPipelines scene set");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.depthPrepass), "Depth Prepass Pipeline");
+        setObjectName(
+            VK_OBJECT_TYPE_PIPELINE,
+            handleToUint64(pipelines.depthPrepassOpaque),
+            "Opaque Depth Prepass Pipeline");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.scene), "HDR Scene Pipeline");
         setObjectName(VK_OBJECT_TYPE_PIPELINE, handleToUint64(pipelines.sceneNoPrepass), "HDR Scene Pipeline No Prepass");
         VkPipelineLayoutCreateInfo shadowLayoutInfo{
@@ -567,6 +594,10 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         if (atmosphereFrag != VK_NULL_HANDLE) {
       vkDestroyShaderModule(deviceOwner_.device, atmosphereFrag, nullptr);
     }
+        if (depthPrepassOpaqueVert != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(
+                deviceOwner_.device, depthPrepassOpaqueVert, nullptr);
+        }
     if (depthPrepassVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr); }
         if (tonemapFrag != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, tonemapFrag, nullptr); }
         if (tonemapVert != VK_NULL_HANDLE) { vkDestroyShaderModule(deviceOwner_.device, tonemapVert, nullptr); }
@@ -587,6 +618,8 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
                               nullptr);
     }
     vkDestroyShaderModule(deviceOwner_.device, cullCompute, nullptr);
+    vkDestroyShaderModule(
+        deviceOwner_.device, depthPrepassOpaqueVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, depthPrepassVert, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, tonemapFrag, nullptr);
     vkDestroyShaderModule(deviceOwner_.device, tonemapVert, nullptr);
@@ -618,6 +651,7 @@ void VulkanRenderer::Impl::destroyPipelineSet(PipelineSet& pipelines) const {
   }
   if (pipelines.tonemap != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.tonemap, nullptr); pipelines.tonemap = VK_NULL_HANDLE; }
     if (pipelines.tonemapLayout != VK_NULL_HANDLE) { vkDestroyPipelineLayout(deviceOwner_.device, pipelines.tonemapLayout, nullptr); pipelines.tonemapLayout = VK_NULL_HANDLE; }
+    if (pipelines.depthPrepassOpaque != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.depthPrepassOpaque, nullptr); pipelines.depthPrepassOpaque = VK_NULL_HANDLE; }
     if (pipelines.depthPrepass != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.depthPrepass, nullptr); pipelines.depthPrepass = VK_NULL_HANDLE; }
     if (pipelines.scene != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.scene, nullptr); pipelines.scene = VK_NULL_HANDLE; }
     if (pipelines.sceneNoPrepass != VK_NULL_HANDLE) { vkDestroyPipeline(deviceOwner_.device, pipelines.sceneNoPrepass, nullptr); pipelines.sceneNoPrepass = VK_NULL_HANDLE; }
@@ -628,6 +662,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
     PipelineSet pipelines{};
     pipelines.sceneLayout = pipelineOwner_.sceneLayout;
     pipelines.depthPrepass = pipelineOwner_.depthPrepass;
+    pipelines.depthPrepassOpaque = pipelineOwner_.depthPrepassOpaque;
     pipelines.scene = pipelineOwner_.scene;
     pipelines.sceneNoPrepass = pipelineOwner_.sceneNoPrepass;
     pipelines.atmosphere = pipelineOwner_.atmosphere;
@@ -646,6 +681,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::detachActivePipelineSet(
 
     pipelineOwner_.sceneLayout = VK_NULL_HANDLE;
     pipelineOwner_.depthPrepass = VK_NULL_HANDLE;
+    pipelineOwner_.depthPrepassOpaque = VK_NULL_HANDLE;
     pipelineOwner_.scene = VK_NULL_HANDLE;
   pipelineOwner_.atmosphere = VK_NULL_HANDLE;
     pipelineOwner_.sceneNoPrepass = VK_NULL_HANDLE;
@@ -690,6 +726,7 @@ void VulkanRenderer::Impl::retireDeferredPipelineSets() {
 void VulkanRenderer::Impl::installPipelineSet(const PipelineSet& pipelines) {
     pipelineOwner_.sceneLayout = pipelines.sceneLayout;
     pipelineOwner_.depthPrepass = pipelines.depthPrepass;
+    pipelineOwner_.depthPrepassOpaque = pipelines.depthPrepassOpaque;
     pipelineOwner_.scene = pipelines.scene;
     pipelineOwner_.sceneNoPrepass = pipelines.sceneNoPrepass;
   pipelineOwner_.atmosphere = pipelines.atmosphere;
