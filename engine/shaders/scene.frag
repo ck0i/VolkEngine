@@ -225,8 +225,9 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
                   (0.35 * strength);
     } else if (model == MATERIAL_HAIR && ndotl > 0.0) {
         vec3 tangent = normalize(vWorldTangent.xyz);
+        float tangentDotH = dot(tangent, h);
         float sinTheta = sqrt(max(
-            1.0 - dot(tangent, h) * dot(tangent, h), 0.0));
+            1.0 - tangentDotH * tangentDotH, 0.0));
         float longitudinal = pow(sinTheta, mix(24.0, 96.0, strength));
         result += radiance * ndotl * longitudinal *
                   mix(vec3(0.04), albedo, 0.35) * strength;
