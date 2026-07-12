@@ -257,6 +257,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     float distanceSquared = dot(toLight, toLight);
     float range = light.positionRange.w;
     float rangeSquared = range * range;
+    float inverseRangeSquared = uintBitsToFloat(light.parameters.y);
     if (distanceSquared >= rangeSquared ||
         distanceSquared <= 0.000001)
         return vec3(0.0);
@@ -271,7 +272,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     if (rawNdotL <= -wrap) return vec3(0.0);
     vec3 l = toLight * inverseDistance;
     float normalizedDistanceSquared =
-        distanceSquared / rangeSquared;
+        distanceSquared * inverseRangeSquared;
     float rangeWindow = clamp(
         1.0 - normalizedDistanceSquared *
               normalizedDistanceSquared,

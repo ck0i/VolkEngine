@@ -598,6 +598,11 @@ void VulkanRenderer::Impl::prepareLighting(
         static_cast<RenderLocalLight*>(frame.localLights.mapped);
     for (std::size_t index = 0; index < lights.size(); ++index) {
         gpuLights[index] = lights[index];
+        // GPU ABI: parameters.y replaces the consumed authoring shadow flag
+        // with the invariant needed by the fragment-light loop.
+        const float range = gpuLights[index].positionRange.w;
+        gpuLights[index].parameters[1] =
+            std::bit_cast<std::uint32_t>(1.0F / (range * range));
         const std::int32_t slot =
             shadowPlan.assignment.localLightSlots[index];
         gpuLights[index].parameters[3] =
