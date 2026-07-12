@@ -39,7 +39,7 @@ vec4 sampleMaterialTexture(uint role) {
 bool hasMaterialTexture(uint bit) {
     return (vTextureIndices.w & bit) != 0U;
 }
-float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l) {
+float sampleShadowView(uint viewIndex, vec3 worldPosition, float ndotl) {
     vec4 clip =
         lighting.shadowViewProjection[viewIndex] * vec4(worldPosition, 1.0);
     if (clip.w <= 0.0) return 1.0;
@@ -53,12 +53,12 @@ float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l) {
     vec4 atlasRect = lighting.shadowUvScaleBias[viewIndex];
     vec2 atlasUv = tileUv * atlasRect.xy + atlasRect.zw;
     float slopeBias =
-        mix(0.00008, 0.0008, 1.0 - clamp(dot(n, l), 0.0, 1.0));
+        mix(0.00008, 0.0008, 1.0 - clamp(ndotl, 0.0, 1.0));
     return texture(shadowAtlas,
                    vec3(atlasUv, min(projected.z + slopeBias, 1.0)));
 }
 
-float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
+float directionalShadowVisibility(vec3 worldPosition, float ndotl) {
     if (lighting.directionalParameters.x == 0U) return 1.0;
     float viewDepth =
         (lighting.viewProjection * vec4(worldPosition, 1.0)).w;
@@ -69,7 +69,7 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
         : viewDepth <= lighting.cascadeSplits.z ? 2U
                                                 : 3U;
     float visibility =
-        sampleShadowView(cascade, worldPosition, n, l);
+        sampleShadowView(cascade, worldPosition, ndotl);
     if (cascade < 3U) {
         float previousSplit = cascade == 0U ? 0.0
             : cascade == 1U ? lighting.cascadeSplits.x
@@ -82,7 +82,7 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
         if (blend > 0.0) {
             visibility = mix(
                 visibility,
-                sampleShadowView(cascade + 1U, worldPosition, n, l),
+                sampleShadowView(cascade + 1U, worldPosition, ndotl),
                 blend);
         }
     }
@@ -90,11 +90,11 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
 }
 
 float localShadowVisibility(LocalLight light, vec3 worldPosition,
-                            vec3 n, vec3 l) {
+                            float ndotl) {
     if (light.parameters.w == 0U) return 1.0;
     uint viewIndex = light.parameters.w - 1U;
     if (viewIndex >= lighting.counts.w) return 1.0;
-    return sampleShadowView(viewIndex, worldPosition, n, l);
+    return sampleShadowView(viewIndex, worldPosition, ndotl);
 }
 
 
@@ -206,9 +206,8 @@ vec3 environmentRadiance(vec3 direction, float lod,
 
 vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
                          vec3 albedo, float roughness, float metallic,
-                         vec3 f0) {
+                         vec3 f0, float rawNdotL) {
     uint model = materialClass();
-    float rawNdotL = dot(n, l);
     float ndotl = max(rawNdotL, 0.0);
     vec3 h = normalize(v + l);
     float ndotv = max(dot(n, v), 0.0);
@@ -276,6 +275,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
         unnormalizedNdotL <= -wrap * distanceToLight)
         return vec3(0.0);
     vec3 l = toLight / distanceToLight;
+    float rawNdotL = dot(n, l);
     float normalizedDistance = distanceToLight / range;
     float rangeWindow = clamp(1.0 - normalizedDistance * normalizedDistance *
                               normalizedDistance * normalizedDistance, 0.0, 1.0);
@@ -290,9 +290,9 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     vec3 radiance = light.colorIntensity.rgb *
                     light.colorIntensity.a * attenuation;
     float visibility =
-        localShadowVisibility(light, worldPosition, n, l);
+        localShadowVisibility(light, worldPosition, rawNdotL);
     return evaluateDirectLight(n, v, l, radiance, albedo, roughness,
-                               metallic, f0) * visibility;
+                               metallic, f0, rawNdotL) * visibility;
 }
 
 void main() {
@@ -347,13 +347,15 @@ void main() {
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
     vec3 directionalL =
         -lighting.directionalDirectionIntensity.xyz;
+    float directionalNdotL = dot(n, directionalL);
     float directionalVisibility =
-        directionalShadowVisibility(vWorldPosition, n, directionalL);
+        directionalShadowVisibility(vWorldPosition, directionalNdotL);
     vec3 directional = evaluateDirectLight(
         n, v, directionalL,
         lighting.directionalColor.rgb *
             lighting.directionalDirectionIntensity.w,
-        albedo, roughness, metallic, f0) * directionalVisibility;
+        albedo, roughness, metallic, f0,
+        directionalNdotL) * directionalVisibility;
     uvec2 tile = min(uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE,
                      lighting.counts.yz - uvec2(1U));
     LightTileHeader header =
