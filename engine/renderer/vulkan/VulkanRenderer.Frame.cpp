@@ -1050,20 +1050,22 @@ void VulkanRenderer::Impl::recordHdrGraphPass(const FrameGraphRecordContext& con
     rendering.pColorAttachments = &colorAttachment;
     rendering.pDepthAttachment = &depthAttachment;
     vkCmdBeginRendering(context.frame->commandBuffer, &rendering);
-  if (config_.atmosphere) {
-    vkCmdBindPipeline(context.frame->commandBuffer,
-                      VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      pipelineOwner_.atmosphere);
-    const VkDescriptorSet sceneSet =
-        resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame];
-    vkCmdBindDescriptorSets(
+    vkCmdBindPipeline(
         context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        pipelineOwner_.sceneLayout, 0U, 1U, &sceneSet, 0U, nullptr);
-    vkCmdDraw(context.frame->commandBuffer, 3U, 1U, 0U, 0U);
-  }
-  vkCmdBindPipeline(context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      context.useDepthPrepass ? pipelineOwner_.scene : pipelineOwner_.sceneNoPrepass);
+        context.useDepthPrepass ? pipelineOwner_.scene
+                                : pipelineOwner_.sceneNoPrepass);
     recordSceneBatches(context);
+    if (config_.atmosphere) {
+        vkCmdBindPipeline(context.frame->commandBuffer,
+                          VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          pipelineOwner_.atmosphere);
+        const VkDescriptorSet sceneSet =
+            resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame];
+        vkCmdBindDescriptorSets(
+            context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineOwner_.sceneLayout, 0U, 1U, &sceneSet, 0U, nullptr);
+        vkCmdDraw(context.frame->commandBuffer, 3U, 1U, 0U, 0U);
+    }
     vkCmdEndRendering(context.frame->commandBuffer);
     if (frameOwner_.timestampsEnabled) {
         vkCmdWriteTimestamp2(context.frame->commandBuffer, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,

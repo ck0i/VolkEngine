@@ -537,6 +537,9 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         std::array<VkPipelineShaderStageCreateInfo, 2> tonemapStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, tonemapVert), shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, tonemapFrag)};
         VkPipelineVertexInputStateCreateInfo emptyVertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         VkPipelineDepthStencilStateCreateInfo noDepth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        VkPipelineDepthStencilStateCreateInfo atmosphereDepth = noDepth;
+        atmosphereDepth.depthTestEnable = VK_TRUE;
+        atmosphereDepth.depthCompareOp = VK_COMPARE_OP_EQUAL;
         VkPipelineRasterizationStateCreateInfo noCullRasterizer = rasterizer;
         noCullRasterizer.cullMode = VK_CULL_MODE_NONE;
     const std::array<VkPipelineShaderStageCreateInfo, 2> atmosphereStages{
@@ -544,7 +547,7 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, atmosphereFrag)};
     VkGraphicsPipelineCreateInfo atmosphereInfo = makeGraphicsPipelineInfo(
         sceneRendering, atmosphereStages, emptyVertexInput, noCullRasterizer,
-        noDepth, blend, pipelines.sceneLayout);
+        atmosphereDepth, blend, pipelines.sceneLayout);
     checkVk(vkCreateGraphicsPipelines(deviceOwner_.device, pipelineOwner_.cache,
                                       1U, &atmosphereInfo, nullptr,
                                       &pipelines.atmosphere),
