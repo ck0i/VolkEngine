@@ -566,12 +566,8 @@ void VulkanRenderer::Impl::prepareLighting(
     const Camera& camera, const SceneRenderList& renderItems,
     const Mat4& viewProjection) {
     const std::span<const RenderLocalLight> lights = renderItems.localLights();
-    validateLocalLights(lights);
-    validateDirectionalLight(renderItems.directionalLight());
-    validateEnvironment(renderItems.environment());
     const std::span<const RenderReflectionProbe> probes =
         renderItems.reflectionProbes();
-    validateReflectionProbes(probes);
     const std::uint32_t columns =
         (swapchainOwner_.extent.width + kLightTileSize - 1U) /
         kLightTileSize;
