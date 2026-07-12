@@ -216,6 +216,7 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
   for (FrameResources &frame : frameOwner_.frames) {
     frame.cachedGpuRenderItems.clear();
     frame.gpuRenderItemCacheValid = false;
+    frame.cachedGpuMaterialGridMeshContentRevision = 0;
     frame.gpuRenderItemsChangedThisFrame = true;
     frame.shadowCasterCacheValid = false;
   }

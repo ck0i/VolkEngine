@@ -73,19 +73,62 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     clusterCapacities.resize(commandCount);
     auto& meshPotentialCounts = gpuMeshPotentialCountScratch_;
     meshPotentialCounts.resize(resourceOwner_.sceneMeshes.size());
-    std::ranges::fill(meshPotentialCounts, 0U);
     const std::array<std::size_t, 3> sphereMeshes{
         sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh),
         sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium),
         sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)};
-    for (const SceneRenderItem& item : renderItems) {
+    const SceneGridRange& gridRange = renderItems.materialGridRange();
+    const bool gridRangeFits =
+        gridRange.valid && gridRange.firstItem <= renderItems.size() &&
+        gridRange.rows != 0U &&
+        static_cast<std::size_t>(gridRange.columns) <=
+            (renderItems.size() - gridRange.firstItem) / gridRange.rows;
+    const std::size_t gridEnd =
+        gridRangeFits
+            ? gridRange.firstItem +
+                  static_cast<std::size_t>(gridRange.rows) * gridRange.columns
+            : 0U;
+    const bool cacheGridAggregate =
+        gridRangeFits && renderItems.materialGridTilesCoverRange();
+    auto& cachedGridMeshCounts =
+        frame.cachedGpuMaterialGridMeshPotentialCounts;
+    const bool reuseCachedGridMeshCounts =
+        cacheGridAggregate &&
+        cachedGridMeshCounts.size() == meshPotentialCounts.size() &&
+        frame.cachedGpuMaterialGridMeshContentRevision ==
+            renderItems.materialGridContentRevision();
+    if (reuseCachedGridMeshCounts) {
+        meshPotentialCounts = cachedGridMeshCounts;
+    } else {
+        std::ranges::fill(meshPotentialCounts, 0U);
+        if (cacheGridAggregate) {
+            cachedGridMeshCounts.assign(meshPotentialCounts.size(), 0U);
+        }
+    }
+
+    for (std::size_t index = 0U; index < renderItems.size(); ++index) {
+        if (reuseCachedGridMeshCounts && index == gridRange.firstItem) {
+            index = gridEnd - 1U;
+            continue;
+        }
+        const SceneRenderItem& item = renderItems[index];
+        const bool gridItem =
+            cacheGridAggregate && index >= gridRange.firstItem &&
+            index < gridEnd;
         if (item.mesh == builtin_assets::kSphere) {
             for (const std::size_t meshIndex : sphereMeshes) {
                 ++meshPotentialCounts[meshIndex];
+                if (gridItem) ++cachedGridMeshCounts[meshIndex];
             }
         } else {
-            ++meshPotentialCounts[meshBatchIndex(item.mesh)];
+            const std::size_t meshIndex = meshBatchIndex(item.mesh);
+            ++meshPotentialCounts[meshIndex];
+            if (gridItem) ++cachedGridMeshCounts[meshIndex];
         }
+    }
+    if (cacheGridAggregate && !reuseCachedGridMeshCounts) {
+        frame.cachedGpuMaterialGridMeshContentRevision =
+            renderItems.materialGridContentRevision();
     }
     std::uint64_t clusterInstanceCapacity64 = 0;
     for (std::size_t commandIndex = 0; commandIndex < commandCount;
@@ -114,17 +157,6 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     bool renderItemsChanged = updateAllRenderItems;
     bool shadowCasterLayoutChanged = updateAllRenderItems;
     frame.hasAlphaMaskedRenderItems = false;
-    const SceneGridRange& gridRange = renderItems.materialGridRange();
-    const bool gridRangeFits =
-        gridRange.valid && gridRange.firstItem <= renderItems.size() &&
-        gridRange.rows != 0U &&
-        static_cast<std::size_t>(gridRange.columns) <=
-            (renderItems.size() - gridRange.firstItem) / gridRange.rows;
-    const std::size_t gridEnd =
-        gridRangeFits
-            ? gridRange.firstItem +
-                  static_cast<std::size_t>(gridRange.rows) * gridRange.columns
-            : 0U;
     const bool reuseCachedGridItems =
         !updateAllRenderItems && gridRangeFits &&
         renderItems.materialGridTilesCoverRange() &&
@@ -141,8 +173,6 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     plan.visibleItemCount = static_cast<std::uint32_t>(renderItems.size());
     plan.cameraPosition = camera.position();
     plan.cameraForward = camera.forward();
-    const bool cacheGridAggregate =
-        gridRangeFits && renderItems.materialGridTilesCoverRange();
     std::array<unsigned, kRenderMaterialClassCount> gridClassCounts{};
     std::uint64_t gridTriangleCount = 0;
     bool gridHasAlphaMaskedItems = false;

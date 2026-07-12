@@ -721,6 +721,9 @@ private:
             cachedGpuMaterialGridClassCounts{};
         std::uint64_t cachedGpuMaterialGridTriangleCount = 0;
         bool cachedGpuMaterialGridHasAlphaMaskedItems = false;
+        std::vector<std::uint32_t>
+            cachedGpuMaterialGridMeshPotentialCounts;
+        std::uint64_t cachedGpuMaterialGridMeshContentRevision = 0;
         bool submittedOnce = false;
         bool submittedDepthPrepass = false;
         std::uint32_t submittedScenePassCount = 0;
