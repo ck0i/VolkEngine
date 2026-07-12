@@ -427,7 +427,7 @@ void VulkanRenderer::Impl::prepareShadowCasters(
             lighting->shadowViewProjection.begin() + frame.shadowViewCount,
             frame.cachedShadowViewProjection.begin(), sameMatrix);
     if (frame.shadowCasterCacheValid &&
-        !frame.gpuRenderItemsChangedThisFrame && matricesUnchanged) {
+        !frame.shadowCasterLayoutChangedThisFrame && matricesUnchanged) {
         return;
     }
 

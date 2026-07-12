@@ -22,6 +22,32 @@ namespace {
            sameVec4(left.material.flags, right.material.flags) &&
            left.material.textures == right.material.textures;
 }
+[[nodiscard]] bool sameShadowCasterLayout(
+    const SceneRenderItem& left, const SceneRenderItem& right) noexcept {
+    if (left.boundsCenter.x != right.boundsCenter.x ||
+        left.boundsCenter.y != right.boundsCenter.y ||
+        left.boundsCenter.z != right.boundsCenter.z ||
+        left.boundsRadius != right.boundsRadius ||
+        left.mesh != right.mesh) {
+        return false;
+    }
+    constexpr float foliageClass =
+        static_cast<float>(RenderMaterialClass::Foliage);
+    if ((left.material.flags.y == foliageClass) !=
+        (right.material.flags.y == foliageClass)) {
+        return false;
+    }
+    const auto leftFeatures =
+        static_cast<std::uint32_t>(left.material.flags.x);
+    const auto rightFeatures =
+        static_cast<std::uint32_t>(right.material.flags.x);
+    if (((leftFeatures | rightFeatures) & MaterialFeatureAlphaMask) == 0U) {
+        return true;
+    }
+    return left.material.flags.x == right.material.flags.x &&
+           left.material.textures == right.material.textures;
+}
+
 
 } // namespace
 
@@ -86,6 +112,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         frame.cachedGpuRenderItems.size() != renderItems.size();
     frame.cachedGpuRenderItems.resize(renderItems.size());
     bool renderItemsChanged = updateAllRenderItems;
+    bool shadowCasterLayoutChanged = updateAllRenderItems;
 
     auto* candidates =
         static_cast<GpuCullCandidate*>(frame.cullCandidates.mapped);
@@ -104,6 +131,10 @@ VulkanRenderer::Impl::prepareGpuVisibility(
         ++plan.materialClassCounts[materialClass];
         if (updateAllRenderItems ||
             !sameRenderItem(frame.cachedGpuRenderItems[index], item)) {
+            shadowCasterLayoutChanged =
+                shadowCasterLayoutChanged ||
+                !sameShadowCasterLayout(
+                    frame.cachedGpuRenderItems[index], item);
             GpuCullCandidate& candidate = candidates[index];
             sceneInstances[index] = instanceDataFor(item);
             candidate.model = item.model;
@@ -127,6 +158,8 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     }
     frame.gpuRenderItemCacheValid = true;
     frame.gpuRenderItemsChangedThisFrame = renderItemsChanged;
+    frame.shadowCasterLayoutChangedThisFrame =
+        shadowCasterLayoutChanged;
 
     auto* commands = static_cast<VkDrawIndexedIndirectCommand*>(
         frame.indirectCommands.mapped);

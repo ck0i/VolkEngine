@@ -698,6 +698,7 @@ private:
         std::vector<std::uint32_t> shadowCursorScratch;
         bool shadowCasterCacheValid = false;
         bool gpuRenderItemsChangedThisFrame = false;
+        bool shadowCasterLayoutChangedThisFrame = false;
         std::size_t lightTileCapacity = 0;
         std::uint32_t reflectionProbeCount = 0;
         std::uint32_t submittedLocalLightCount = 0;
