@@ -261,6 +261,14 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
         attenuation *= smoothstep(light.directionOuterCone.w, innerCosine,
                                   coneCosine);
     }
+    if (attenuation <= 0.0) return vec3(0.0);
+    uint model = materialClass();
+    float wrap = model == MATERIAL_FOLIAGE
+        ? 0.5 * clamp(vMaterialFlags.z, 0.0, 1.0)
+        : model == MATERIAL_SKIN
+            ? 0.25 * clamp(vMaterialFlags.z, 0.0, 1.0)
+            : 0.0;
+    if (dot(n, l) <= -wrap) return vec3(0.0);
     vec3 radiance = light.colorIntensity.rgb *
                     light.colorIntensity.a * attenuation;
     float visibility =
