@@ -24,7 +24,7 @@ Performance work must name the workload, hardware, driver, build, settings, and 
 | Scene data | Reusable extraction and frame-slot arrays avoid rebuilding unchanged records where possible. |
 | Visibility | Capability-gated compute performs culling, LOD, Hi-Z rejection, compaction, counters, and command generation. |
 | Submission | The default GPU path emits one indirect command per mesh; direct submission remains the fallback. |
-| Lighting | Fixed tile and shadow-atlas partitions bound pressure; hierarchical caster culling and early local-light rejection avoid unnecessary shadow and BRDF work. |
+| Lighting | Fixed tile and shadow-atlas partitions bound pressure; caster culling and early light rejection avoid unnecessary shadow and BRDF work, while diffuse and specular environment samples share probe weights. |
 | Uploads | Meshes and textures are packed into shared staging submissions; same-queue barriers avoid unnecessary semaphore chains. |
 | Frame graph | Cached variants derive pass order, hazards, lifetimes, and compatible transient slots. |
 | Diagnostics | Fixed timestamp ranges and bounded job/streaming traces expose cost without unbounded telemetry growth. |

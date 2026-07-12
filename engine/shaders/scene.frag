@@ -158,20 +158,8 @@ vec2 environmentUv(vec3 direction) {
         0.5 - asin(clamp(direction.y, -1.0, 1.0)) / PI);
 }
 
-vec3 environmentRadiance(vec3 direction, float lod,
-                         vec3 worldPosition) {
-    vec3 radiance =
-        textureLod(environmentMap, environmentUv(direction), lod).rgb;
-    float skyWeight =
-        clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 globalTint = mix(
-        lighting.environmentGround.rgb *
-            lighting.environmentGround.a,
-        lighting.environmentSky.rgb *
-            lighting.environmentSky.a,
-        skyWeight);
-    vec3 weighted = radiance * globalTint;
-    float totalWeight = 1.0;
+vec4 environmentProbeTint(vec3 worldPosition) {
+    vec4 weightedTint = vec4(0.0, 0.0, 0.0, 1.0);
     uint probeCount = uint(clamp(
         round(lighting.environmentParameters.z), 0.0, 4.0));
     for (uint probeIndex = 0U; probeIndex < probeCount;
@@ -184,10 +172,25 @@ vec3 environmentRadiance(vec3 direction, float lod,
         float weight =
             (1.0 - smoothstep(0.55, 1.0, normalizedDistance)) *
             probe.tintIntensity.w;
-        weighted += radiance * probe.tintIntensity.rgb * weight;
-        totalWeight += weight;
+        weightedTint.rgb += probe.tintIntensity.rgb * weight;
+        weightedTint.a += weight;
     }
-    return weighted / totalWeight;
+    return weightedTint;
+}
+
+vec3 environmentRadiance(vec3 direction, float lod,
+                         vec4 probeTint) {
+    vec3 radiance =
+        textureLod(environmentMap, environmentUv(direction), lod).rgb;
+    float skyWeight =
+        clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 globalTint = mix(
+        lighting.environmentGround.rgb *
+            lighting.environmentGround.a,
+        lighting.environmentSky.rgb *
+            lighting.environmentSky.a,
+        skyWeight);
+    return radiance * (globalTint + probeTint.rgb) / probeTint.a;
 }
 
 
@@ -361,12 +364,13 @@ void main() {
     vec3 ambientKd = (1.0 - ambientF) * (1.0 - metallic);
     float maximumEnvironmentLod =
         lighting.environmentParameters.w;
+    vec4 probeTint = environmentProbeTint(vWorldPosition);
     vec3 diffuseEnvironment = environmentRadiance(
-        n, maximumEnvironmentLod, vWorldPosition);
+        n, maximumEnvironmentLod, probeTint);
     vec3 reflectionDirection = reflect(-v, n);
     vec3 specularEnvironment = environmentRadiance(
         reflectionDirection, roughness * maximumEnvironmentLod,
-        vWorldPosition);
+        probeTint);
     vec3 ambientDiffuse =
         ambientKd * albedo * diffuseEnvironment;
     vec3 ambientSpecular = ambientF * specularEnvironment;
