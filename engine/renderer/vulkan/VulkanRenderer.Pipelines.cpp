@@ -224,7 +224,8 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
         depthPrepassOpaqueVert = createShaderModule(
             shaderPaths[indirectSceneDrawsEnabled_ ? 17U : 16U]);
         cullCompute = createShaderModule(shaderPaths[6]);
-        depthPyramidCompute = createShaderModule(shaderPaths[9]);
+        depthPyramidCompute = createShaderModule(
+            shaderPaths[resourceOwner_.depthPyramidExtremaEnabled ? 19U : 9U]);
         lightAssignmentCompute = createShaderModule(shaderPaths[11]);
         shadowVert = createShaderModule(shaderPaths[12]);
         shadowOpaqueVert = createShaderModule(shaderPaths[15]);

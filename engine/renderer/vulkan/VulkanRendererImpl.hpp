@@ -496,7 +496,7 @@ inline std::string_view presentModeName(const VkPresentModeKHR mode) {
   }
 }
 
-inline std::array<std::filesystem::path, 19>
+inline std::array<std::filesystem::path, 20>
 shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
   return {
       shaderDirectory / "scene.vert.spv",
@@ -518,6 +518,7 @@ shaderSpirvPaths(const std::filesystem::path &shaderDirectory) {
         shaderDirectory / "scene_depth_opaque.vert.spv",
         shaderDirectory / "scene_depth_gpu_opaque.vert.spv",
       shaderDirectory / "atmosphere.frag.spv",
+        shaderDirectory / "depth_pyramid_extrema.comp.spv",
     };
 }
 } // namespace vulkan_renderer_detail
@@ -848,6 +849,7 @@ private:
         std::uint32_t sourceWidth = 0;
         std::uint32_t sourceHeight = 0;
         std::uint32_t useReductionSampler = 0;
+        std::uint32_t sourceHasExtrema = 0;
     };
     struct LightAssignmentPushConstants {
         std::uint32_t depthBoundsEnabled = 0;
@@ -1313,6 +1315,7 @@ private:
         ImageResource depthPyramid;
         std::vector<VkImageView> depthPyramidMipViews;
         bool depthPyramidValid = false;
+        bool depthPyramidExtremaEnabled = false;
         ImageResource hdr;
         std::vector<ImageResource> materialTextures;
     std::array<std::size_t, vulkan_renderer_detail::kMaterialTextureCount>
@@ -1382,7 +1385,7 @@ private:
         VkPipeline shadowOpaque = VK_NULL_HANDLE;
         std::vector<RetiredPipelineSet> retiredSets;
         bool autoDepthPrepassEnabled = false;
-        std::array<std::filesystem::file_time_type, 19> shaderWriteTimes{};
+        std::array<std::filesystem::file_time_type, 20> shaderWriteTimes{};
         double hotReloadRetryDelaySeconds = 0.5;
         double hotReloadLastCheckSeconds = 0.0;
     };

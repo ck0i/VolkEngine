@@ -124,7 +124,9 @@ void main() {
         validTile ? tile.y * lighting.counts.y + tile.x : 0U;
     uint offset = tileIndex * MAXIMUM_LIGHTS_PER_TILE;
     vec4 farDepthPlane;
+    vec4 nearDepthPlane;
     bool farDepthValid = false;
+    bool nearDepthValid = false;
     uint count = 0U;
     uint overflow = 0U;
     uint lightCount = min(lighting.counts.x, MAXIMUM_LOCAL_LIGHTS);
@@ -159,15 +161,22 @@ void main() {
             ivec2 depthCoordinate = min(
                 ivec2(tile), textureSize(
                     depthPyramid, lightTileDepthMip) - 1);
-            float farthestDepth = texelFetch(
-                depthPyramid, depthCoordinate, lightTileDepthMip).r;
+            vec2 depthExtrema = texelFetch(
+                depthPyramid, depthCoordinate, lightTileDepthMip).rg;
+            float farthestDepth = depthExtrema.r;
+            float nearestDepth = -depthExtrema.g;
+            vec4 rowZ = vec4(
+                viewProjection[0][2], viewProjection[1][2],
+                viewProjection[2][2], viewProjection[3][2]);
             if (farthestDepth > 0.0) {
-                vec4 rowZ = vec4(
-                    viewProjection[0][2], viewProjection[1][2],
-                    viewProjection[2][2], viewProjection[3][2]);
                 farDepthPlane = normalizedPlane(
                     rowZ - farthestDepth * rowW);
                 farDepthValid = true;
+            }
+            if (pushData.depthBoundsEnabled > 1U && nearestDepth > 0.0) {
+                nearDepthPlane = normalizedPlane(
+                    nearestDepth * rowW - rowZ);
+                nearDepthValid = true;
             }
         }
         tilePlanes[2] = normalizedPlane(
@@ -202,10 +211,13 @@ void main() {
                         lightBounds[batchIndex], tilePlanes))
                     continue;
                 vec4 cone = lightCones[batchIndex];
-                if (farDepthValid &&
-                    dot(farDepthPlane,
-                        vec4(lightBounds[batchIndex].xyz, 1.0)) <
-                        -lightBounds[batchIndex].w)
+                vec4 lightCenter =
+                    vec4(lightBounds[batchIndex].xyz, 1.0);
+                float lightRadius = lightBounds[batchIndex].w;
+                if ((farDepthValid &&
+                     dot(farDepthPlane, lightCenter) < -lightRadius) ||
+                    (nearDepthValid &&
+                     dot(nearDepthPlane, lightCenter) < -lightRadius))
                     continue;
                 if (cone.w >= 0.0 && !coneTouchesTileFrustum(
                         localLights[lightIndex], cone, tilePlanes))

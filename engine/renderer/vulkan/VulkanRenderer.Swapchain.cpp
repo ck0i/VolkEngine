@@ -193,8 +193,22 @@ void VulkanRenderer::Impl::realizeFrameGraphResources() {
             throw std::runtime_error(
                 "Depth pyramid mip count exceeds renderer limit");
         }
+        VkFormatProperties extremaProperties{};
+        vkGetPhysicalDeviceFormatProperties(
+            deviceOwner_.physicalDevice, VK_FORMAT_R32G32_SFLOAT,
+            &extremaProperties);
+        constexpr VkFormatFeatureFlags kExtremaFeatures =
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+            VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
+        resourceOwner_.depthPyramidExtremaEnabled =
+            (extremaProperties.optimalTilingFeatures & kExtremaFeatures) ==
+            kExtremaFeatures;
+        const VkFormat depthPyramidFormat =
+            resourceOwner_.depthPyramidExtremaEnabled
+                ? VK_FORMAT_R32G32_SFLOAT
+                : VK_FORMAT_R32_SFLOAT;
         replacementDepthPyramid = createImage(
-            depthPyramidExtent, VK_FORMAT_R32_SFLOAT,
+            depthPyramidExtent, depthPyramidFormat,
             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT, depthPyramidMipLevels);
         setObjectName(VK_OBJECT_TYPE_IMAGE,
@@ -212,7 +226,7 @@ void VulkanRenderer::Impl::realizeFrameGraphResources() {
                 VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
             viewInfo.image = replacementDepthPyramid.image;
             viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format = VK_FORMAT_R32_SFLOAT;
+            viewInfo.format = depthPyramidFormat;
             viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             viewInfo.subresourceRange.baseMipLevel = mip;
             viewInfo.subresourceRange.levelCount = 1;

@@ -652,7 +652,9 @@ void VulkanRenderer::Impl::recordLightAssignment(
                             pipelineOwner_.lightAssignmentLayout, 1U, 1U,
                             &descriptorSet, 0U, nullptr);
     const LightAssignmentPushConstants push{
-        depthBoundsEnabled ? 1U : 0U};
+        depthBoundsEnabled
+            ? (resourceOwner_.depthPyramidExtremaEnabled ? 2U : 1U)
+            : 0U};
     vkCmdPushConstants(commandBuffer, pipelineOwner_.lightAssignmentLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0U, sizeof(push), &push);
     vkCmdDispatch(commandBuffer, (tileColumns + 7U) / 8U,

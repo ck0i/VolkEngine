@@ -1135,9 +1135,15 @@ void VulkanRenderer::Impl::recordDepthPyramidGraphPass(
             context.frame->commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
             pipelineOwner_.depthPyramidLayout, 0, 1, &descriptorSet, 0,
             nullptr);
+        const bool sourceHasExtrema =
+            resourceOwner_.depthPyramidExtremaEnabled && mip != 0U;
         const DepthPyramidPushConstants push{
             sourceWidth, sourceHeight,
-            resourceOwner_.depthReductionSamplerEnabled ? 1U : 0U};
+            resourceOwner_.depthReductionSamplerEnabled &&
+                    (!resourceOwner_.depthPyramidExtremaEnabled || mip != 0U)
+                ? 1U
+                : 0U,
+            sourceHasExtrema ? 1U : 0U};
         vkCmdPushConstants(context.frame->commandBuffer,
                            pipelineOwner_.depthPyramidLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
