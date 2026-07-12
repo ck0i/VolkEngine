@@ -251,7 +251,9 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     vec3 toLight = light.positionRange.xyz - worldPosition;
     float distanceSquared = dot(toLight, toLight);
     float range = light.positionRange.w;
-    if (distanceSquared >= range * range || distanceSquared <= 0.000001)
+    float rangeSquared = range * range;
+    if (distanceSquared >= rangeSquared ||
+        distanceSquared <= 0.000001)
         return vec3(0.0);
     uint model = materialClass();
     float wrap = model == MATERIAL_FOLIAGE
@@ -262,15 +264,21 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     float unnormalizedNdotL = dot(n, toLight);
     if (wrap == 0.0 && unnormalizedNdotL <= 0.0)
         return vec3(0.0);
-    float distanceToLight = sqrt(distanceSquared);
+    float inverseDistance = inversesqrt(distanceSquared);
     if (wrap > 0.0 &&
-        unnormalizedNdotL <= -wrap * distanceToLight)
+        unnormalizedNdotL * inverseDistance <= -wrap)
         return vec3(0.0);
-    vec3 l = toLight / distanceToLight;
-    float normalizedDistance = distanceToLight / range;
-    float rangeWindow = clamp(1.0 - normalizedDistance * normalizedDistance *
-                              normalizedDistance * normalizedDistance, 0.0, 1.0);
-    float attenuation = rangeWindow * rangeWindow / max(distanceSquared, 0.01);
+    vec3 l = toLight * inverseDistance;
+    float normalizedDistanceSquared =
+        distanceSquared / rangeSquared;
+    float rangeWindow = clamp(
+        1.0 - normalizedDistanceSquared *
+              normalizedDistanceSquared,
+        0.0, 1.0);
+    float inverseFalloffDistance = min(
+        inverseDistance * inverseDistance, 100.0);
+    float attenuation =
+        rangeWindow * rangeWindow * inverseFalloffDistance;
     if (light.parameters.x == 1U) {
         float coneCosine = dot(-l, light.directionOuterCone.xyz);
         float innerCosine = float(min(light.parameters.z, 65535U)) / 65535.0;
