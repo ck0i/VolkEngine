@@ -150,7 +150,6 @@ vec3 landscapeSurface(vec3 normal, vec2 coordinate, float height) {
     return mix(mix(meadow, rock, slope), vec3(0.72, 0.77, 0.80), snow);
 }
 vec2 environmentUv(vec3 direction) {
-    direction = normalize(direction);
     float rotation = lighting.environmentParameters.y /
                      (2.0 * PI);
     return vec2(
