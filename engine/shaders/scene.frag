@@ -249,7 +249,19 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     float range = light.positionRange.w;
     if (distanceSquared >= range * range || distanceSquared <= 0.000001)
         return vec3(0.0);
+    uint model = materialClass();
+    float wrap = model == MATERIAL_FOLIAGE
+        ? 0.5 * clamp(vMaterialFlags.z, 0.0, 1.0)
+        : model == MATERIAL_SKIN
+            ? 0.25 * clamp(vMaterialFlags.z, 0.0, 1.0)
+            : 0.0;
+    float unnormalizedNdotL = dot(n, toLight);
+    if (wrap == 0.0 && unnormalizedNdotL <= 0.0)
+        return vec3(0.0);
     float distanceToLight = sqrt(distanceSquared);
+    if (wrap > 0.0 &&
+        unnormalizedNdotL <= -wrap * distanceToLight)
+        return vec3(0.0);
     vec3 l = toLight / distanceToLight;
     float normalizedDistance = distanceToLight / range;
     float rangeWindow = clamp(1.0 - normalizedDistance * normalizedDistance *
@@ -262,13 +274,6 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
                                   coneCosine);
     }
     if (attenuation <= 0.0) return vec3(0.0);
-    uint model = materialClass();
-    float wrap = model == MATERIAL_FOLIAGE
-        ? 0.5 * clamp(vMaterialFlags.z, 0.0, 1.0)
-        : model == MATERIAL_SKIN
-            ? 0.25 * clamp(vMaterialFlags.z, 0.0, 1.0)
-            : 0.0;
-    if (dot(n, l) <= -wrap) return vec3(0.0);
     vec3 radiance = light.colorIntensity.rgb *
                     light.colorIntensity.a * attenuation;
     float visibility =
