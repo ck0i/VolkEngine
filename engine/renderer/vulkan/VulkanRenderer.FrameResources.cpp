@@ -751,14 +751,18 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
                         FrameGraphUsage::StorageBuffer);
             graph.setFinalUsage(cullCounters, FrameGraphUsage::HostRead);
         }
-        const FrameGraph::PassHandle shadowPass = graph.addPass({
-            "Shadow Atlas", {0.32F, 0.30F, 0.28F, 1.0F}});
-        graph.writeAttachment(
-            shadowPass, shadowAtlas, FrameGraphUsage::DepthAttachment,
-            FrameGraphAttachmentLoad::Clear, FrameGraphAttachmentStore::Store);
-        graph.read(shadowPass, lightingUniforms,
-                   FrameGraphUsage::UniformBuffer);
-        if (indirectSceneDrawsEnabled_) {
+        FrameGraph::PassHandle shadowPass{};
+        const bool shadowsEnabled =
+            config_.shadows && indirectSceneDrawsEnabled_;
+        if (shadowsEnabled) {
+            shadowPass = graph.addPass({
+                "Shadow Atlas", {0.32F, 0.30F, 0.28F, 1.0F}});
+            graph.writeAttachment(
+                shadowPass, shadowAtlas, FrameGraphUsage::DepthAttachment,
+                FrameGraphAttachmentLoad::Clear,
+                FrameGraphAttachmentStore::Store);
+            graph.read(shadowPass, lightingUniforms,
+                       FrameGraphUsage::UniformBuffer);
             graph.read(shadowPass, sceneInstances,
                        FrameGraphUsage::StorageBuffer);
             graph.read(shadowPass, shadowInstances,
@@ -845,7 +849,9 @@ void VulkanRenderer::Impl::createFrameGraph(const bool resizeRecompile) {
                    FrameGraphUsage::StorageBuffer);
         graph.read(hdrPass, lightTileIndices,
                    FrameGraphUsage::StorageBuffer);
-        graph.read(hdrPass, shadowAtlas, FrameGraphUsage::SampledImage);
+        if (shadowsEnabled) {
+            graph.read(hdrPass, shadowAtlas, FrameGraphUsage::SampledImage);
+        }
 
         if (!depthPrepass && indirectSceneDrawsEnabled_) {
             depthPyramidPass = graph.addPass({

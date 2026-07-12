@@ -336,6 +336,12 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         const std::uint32_t queryBase = static_cast<std::uint32_t>(frameOwner_.currentFrame) * kTimestampQueriesPerFrame;
         vkCmdResetQueryPool(frame.commandBuffer, frameOwner_.timestampQueryPool, queryBase, kTimestampQueriesPerFrame);
         vkCmdWriteTimestamp2(frame.commandBuffer, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, frameOwner_.timestampQueryPool, queryBase + kTimestampFrameStart);
+        if (!indirectSceneDrawsEnabled_) {
+            vkCmdWriteTimestamp2(
+                frame.commandBuffer, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                frameOwner_.timestampQueryPool,
+                queryBase + kTimestampShadowEnd);
+        }
     }
 
 
@@ -814,6 +820,15 @@ void VulkanRenderer::Impl::recordCullGraphPass(
             static_cast<std::uint32_t>(frameOwner_.currentFrame) *
                     kTimestampQueriesPerFrame +
                 kTimestampCullEnd);
+        if (!config_.shadows) {
+            vkCmdWriteTimestamp2(
+                context.frame->commandBuffer,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                frameOwner_.timestampQueryPool,
+                static_cast<std::uint32_t>(frameOwner_.currentFrame) *
+                        kTimestampQueriesPerFrame +
+                    kTimestampShadowEnd);
+        }
     }
 }
 
