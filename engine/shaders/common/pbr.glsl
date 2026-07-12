@@ -22,12 +22,12 @@ float pow5(float value) {
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 f0) {
-    return f0 + (1.0 - f0) * pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
+    return f0 + (1.0 - f0) * pow5(max(1.0 - cosTheta, 0.0));
 }
 
 vec3 fresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness) {
     vec3 grazing = max(vec3(1.0 - roughness), f0);
-    return f0 + (grazing - f0) * pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
+    return f0 + (grazing - f0) * pow5(max(1.0 - cosTheta, 0.0));
 }
 
 float gridMask(vec2 uv) {
