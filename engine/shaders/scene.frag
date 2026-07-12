@@ -197,11 +197,10 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
     uint model = materialClass();
     float rawNdotL = dot(n, l);
     float ndotl = max(rawNdotL, 0.0);
-    vec3 h = vec3(0.0);
+    vec3 h = normalize(v + l);
     float ndotv = max(dot(n, v), 0.0);
     vec3 result = vec3(0.0);
     if (ndotl > 0.0) {
-        h = normalize(v + l);
         float d = distributionGGX(n, h, roughness);
         float g = geometrySmith(ndotv, ndotl, roughness);
         vec3 f = fresnelSchlick(max(dot(h, v), 0.0), f0);
