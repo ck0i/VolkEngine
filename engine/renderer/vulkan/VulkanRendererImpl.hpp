@@ -875,6 +875,10 @@ private:
     struct LightAssignmentPushConstants {
         std::uint32_t depthBoundsEnabled = 0;
     };
+    struct alignas(16) GpuReflectionProbe {
+        Vec4 positionInverseRadiusSquared{};
+        Vec4 tintIntensity{};
+    };
     struct alignas(16) GpuLightingUniforms {
     Mat4 viewProjection;
     RenderDirectionalLight directional;
@@ -886,7 +890,7 @@ private:
     std::array<Mat4, kShadowAtlasSlotCount> shadowViewProjection{};
     std::array<Vec4, kShadowAtlasSlotCount> shadowUvScaleBias{};
         Vec4 cascadeSplits{};
-        std::array<RenderReflectionProbe, kMaximumReflectionProbes>
+        std::array<GpuReflectionProbe, kMaximumReflectionProbes>
             reflectionProbes{};
     };
     struct alignas(16) GpuLightListCounters {
@@ -971,6 +975,8 @@ private:
                   "GpuCullCounters.sphereLodCounts offset mismatch");
   static_assert(offsetof(GpuCullCounters, visibleMaterialClassCounts) == 32,
                 "GpuCullCounters.visibleMaterialClassCounts offset mismatch");
+    static_assert(sizeof(GpuReflectionProbe) == 32,
+                  "GpuReflectionProbe must match GLSL ReflectionProbe layout");
     static_assert(sizeof(GpuLightingUniforms) == 1632,
                   "GpuLightingUniforms must match GLSL LightingData layout");
     static_assert(offsetof(GpuLightingUniforms, directional) == 64);

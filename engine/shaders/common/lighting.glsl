@@ -14,7 +14,7 @@ struct LightTileHeader {
     uint count;
 };
 struct ReflectionProbe {
-    vec4 positionRadius;
+    vec4 positionInverseRadiusSquared;
     vec4 tintIntensity;
 };
 

@@ -678,8 +678,15 @@ void VulkanRenderer::Impl::prepareLighting(
         resourceOwner_.environmentDiffuseRadiance;
     uniforms.environment.parameters.z = std::bit_cast<float>(
         static_cast<std::uint32_t>(probes.size()));
-    std::copy(probes.begin(), probes.end(),
-              uniforms.reflectionProbes.begin());
+    for (std::size_t index = 0; index < probes.size(); ++index) {
+        const RenderReflectionProbe& source = probes[index];
+        GpuReflectionProbe& destination = uniforms.reflectionProbes[index];
+        destination.positionInverseRadiusSquared = source.positionRadius;
+        const float radius = source.positionRadius.w;
+        destination.positionInverseRadiusSquared.w =
+            1.0F / (radius * radius);
+        destination.tintIntensity = source.tintIntensity;
+    }
     uniforms.environment.parameters.w = static_cast<float>(
         resourceOwner_.environmentMap.mipLevels - 1U);
     frame.exposureScale =

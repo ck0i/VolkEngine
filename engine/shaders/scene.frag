@@ -176,11 +176,12 @@ vec4 environmentProbeBlend(vec3 worldPosition) {
         ReflectionProbe probe =
             lighting.reflectionProbes[probeIndex];
         vec3 probeOffset =
-            worldPosition - probe.positionRadius.xyz;
-        float distanceSquared = dot(probeOffset, probeOffset);
-        float radius = probe.positionRadius.w;
-        if (distanceSquared >= radius * radius) continue;
-        float normalizedDistance = sqrt(distanceSquared) / radius;
+            worldPosition - probe.positionInverseRadiusSquared.xyz;
+        float normalizedDistanceSquared =
+            dot(probeOffset, probeOffset) *
+            probe.positionInverseRadiusSquared.w;
+        if (normalizedDistanceSquared >= 1.0) continue;
+        float normalizedDistance = sqrt(normalizedDistanceSquared);
         float weight =
             (1.0 - smoothstep(0.55, 1.0, normalizedDistance)) *
             probe.tintIntensity.w;
