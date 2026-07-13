@@ -114,7 +114,8 @@ bool sphereOccluded(const vec3 center, const float radius) {
         max(radiusNdc * cull.depthPyramid.y, 1.0);
     const int mip = int(clamp(ceil(log2(diameterPixels)), 0.0,
                               cull.depthPyramid.z - 1.0));
-    const ivec2 mipExtent = textureSize(depthPyramidTexture, mip);
+    const ivec2 mipExtent = max(
+        ivec2(cull.depthPyramid.xy) >> mip, ivec2(1));
     const ivec2 maximumTexel = mipExtent - ivec2(1);
     const ivec2 texelMin = clamp(
         ivec2(floor(uvMin * vec2(mipExtent))), ivec2(0), maximumTexel);
