@@ -208,7 +208,8 @@ vec3 environmentRadiance(vec3 direction, vec3 radiance,
 vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
                          float ndotv, vec3 radiance, vec3 albedo,
                          vec2 brdfParameters, float diffuseWeight, vec3 f0,
-                         uint model, float strength) {
+                         uint model, float strength,
+                         float hairTangentInverseLength) {
     float ndotl = max(rawNdotL, 0.0);
     vec3 result = vec3(0.0);
     if (ndotl > 0.0) {
@@ -239,8 +240,8 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
                 result += albedo * radiance * ndotl * sheen *
                           (0.35 * strength);
             } else {
-                vec3 tangent = normalize(vWorldTangent.xyz);
-                float tangentDotH = dot(tangent, h);
+                float tangentDotH =
+                    dot(vWorldTangent.xyz, h) * hairTangentInverseLength;
                 float sinTheta = sqrt(max(
                     1.0 - tangentDotH * tangentDotH, 0.0));
                 float longitudinal =
@@ -262,7 +263,7 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
 vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
                         float ndotv, vec3 albedo, vec2 brdfParameters,
                         float diffuseWeight, vec3 f0, uint model,
-                        float strength) {
+                        float strength, float hairTangentInverseLength) {
     vec3 toLight = light.positionRange.xyz - worldPosition;
     float distanceSquared = dot(toLight, toLight);
     float range = light.positionRange.w;
@@ -307,7 +308,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
         localShadowVisibility(light, worldPosition, n, l);
     return evaluateDirectLight(n, v, l, rawNdotL, ndotv, radiance, albedo,
                                brdfParameters, diffuseWeight, f0, model,
-                               strength) * visibility;
+                               strength, hairTangentInverseLength) * visibility;
 }
 
 void main() {
@@ -366,6 +367,9 @@ void main() {
     vec2 brdfParameters = vec2(
         alpha * alpha, geometryR * geometryR * 0.125);
     float materialStrength = clamp(vMaterialFlags.z, 0.0, 1.0);
+    float hairTangentInverseLength = model == MATERIAL_HAIR
+        ? inversesqrt(dot(vWorldTangent.xyz, vWorldTangent.xyz))
+        : 0.0;
     float ndotv = max(dot(n, v), 0.0);
     vec3 directionalL =
         -lighting.directionalDirectionIntensity.xyz;
@@ -382,7 +386,8 @@ void main() {
     vec3 directional = evaluateDirectLight(
         n, v, directionalL, directionalNdotL, ndotv,
         lighting.directionalColor.rgb, albedo, brdfParameters,
-        diffuseWeight, f0, model, materialStrength) *
+        diffuseWeight, f0, model, materialStrength,
+        hairTangentInverseLength) *
         directionalVisibility;
     uvec2 tile = uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE;
     LightTileHeader header =
@@ -392,7 +397,8 @@ void main() {
         uint lightIndex = lightTileIndices[header.offset + index];
         local += evaluateLocalLight(
             localLights[lightIndex], vWorldPosition, n, v, ndotv, albedo,
-            brdfParameters, diffuseWeight, f0, model, materialStrength);
+            brdfParameters, diffuseWeight, f0, model, materialStrength,
+            hairTangentInverseLength);
     }
 
     vec3 ambientF = fresnelSchlickRoughness(ndotv, f0, roughness);
