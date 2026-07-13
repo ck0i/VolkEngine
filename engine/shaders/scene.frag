@@ -145,11 +145,20 @@ vec3 landscapeSurface(vec3 normal, vec2 coordinate, float height) {
     return mix(mix(meadow, rock, slope), vec3(0.72, 0.77, 0.80), snow);
 }
 vec2 environmentUv(vec3 direction) {
-    float rotation = lighting.environmentParameters.y;
-    return vec2(
-        fract(atan(direction.z, direction.x) / (2.0 * PI) +
-              0.5 + rotation),
-        0.5 - asin(clamp(direction.y, -1.0, 1.0)) / PI);
+    float rotationCosine = lighting.environmentSky.a;
+    float rotationSine = lighting.environmentGround.a;
+    direction = vec3(
+        rotationCosine * direction.x - rotationSine * direction.z,
+        direction.y,
+        rotationSine * direction.x + rotationCosine * direction.z);
+    direction /= abs(direction.x) + abs(direction.y) + abs(direction.z);
+    vec2 encoded = direction.xy;
+    vec2 signNotZero = mix(
+        vec2(-1.0), vec2(1.0),
+        greaterThanEqual(encoded, vec2(0.0)));
+    vec2 folded = (1.0 - abs(encoded.yx)) * signNotZero;
+    encoded = mix(encoded, folded, bvec2(direction.z < 0.0));
+    return encoded * 0.5 + 0.5;
 }
 
 vec4 environmentProbeBlend(vec3 worldPosition) {

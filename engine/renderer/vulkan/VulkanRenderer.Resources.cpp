@@ -88,7 +88,7 @@ struct EnvironmentMip {
 };
 
 std::vector<EnvironmentMip> buildProceduralEnvironmentMap() {
-    constexpr std::uint32_t width = 256U;
+    constexpr std::uint32_t width = 128U;
     constexpr std::uint32_t height = 128U;
     std::vector<EnvironmentMip> mips;
     mips.push_back({width, height,
@@ -100,17 +100,20 @@ std::vector<EnvironmentMip> buildProceduralEnvironmentMap() {
     for (std::uint32_t y = 0U; y < height; ++y) {
         const float v = (static_cast<float>(y) + 0.5F) /
                         static_cast<float>(height);
-        const float latitude = (0.5F - v) * 3.14159265359F;
-        const float cosLatitude = std::cos(latitude);
         for (std::uint32_t x = 0U; x < width; ++x) {
             const float u = (static_cast<float>(x) + 0.5F) /
                             static_cast<float>(width);
-            const float longitude =
-                (u * 2.0F - 1.0F) * 3.14159265359F;
-            const Vec3 direction{
-                cosLatitude * std::cos(longitude),
-                std::sin(latitude),
-                cosLatitude * std::sin(longitude)};
+            Vec3 direction{u * 2.0F - 1.0F, v * 2.0F - 1.0F, 0.0F};
+            direction.z =
+                1.0F - std::abs(direction.x) - std::abs(direction.y);
+            if (direction.z < 0.0F) {
+                const float oldX = direction.x;
+                direction.x = (1.0F - std::abs(direction.y)) *
+                              std::copysign(1.0F, oldX);
+                direction.y = (1.0F - std::abs(oldX)) *
+                              std::copysign(1.0F, direction.y);
+            }
+            direction = normalize(direction);
             const float skyWeight =
                 std::clamp(direction.y * 0.5F + 0.5F, 0.0F, 1.0F);
             Vec3 color =
@@ -648,9 +651,8 @@ void VulkanRenderer::Impl::createSampler() {
     checkVk(vkCreateSampler(deviceOwner_.device, &samplerInfo, nullptr, &resourceOwner_.linearSampler), "vkCreateSampler");
     setObjectName(VK_OBJECT_TYPE_SAMPLER, handleToUint64(resourceOwner_.linearSampler), "Linear Clamp Sampler");
     VkSamplerCreateInfo environmentSamplerInfo = samplerInfo;
-    environmentSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     environmentSamplerInfo.maxLod = static_cast<float>(
-        mipLevelCountForExtent({256U, 128U}) - 1U);
+        mipLevelCountForExtent({128U, 128U}) - 1U);
     checkVk(vkCreateSampler(
                 deviceOwner_.device, &environmentSamplerInfo, nullptr,
                 &resourceOwner_.environmentSampler),

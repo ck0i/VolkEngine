@@ -13,7 +13,6 @@ namespace ve {
 namespace {
 
 constexpr float kShadowGuardPixels = 2.0F;
-constexpr float kInverseTau = 1.0F / (2.0F * 3.14159265359F);
 
 [[nodiscard]] Vec4 transformPoint(const Mat4& matrix,
                                   const Vec3 point) noexcept {
@@ -668,9 +667,13 @@ void VulkanRenderer::Impl::prepareLighting(
         uniforms.directional.parameters[0] = 0U;
     }
     uniforms.environment = renderItems.environment();
-    uniforms.environment.parameters.y *= kInverseTau;
+    const float environmentRotation = uniforms.environment.parameters.y;
     premultiplyIntensity(uniforms.environment.skyColorIntensity);
     premultiplyIntensity(uniforms.environment.groundColorIntensity);
+    uniforms.environment.skyColorIntensity.w =
+        std::cos(environmentRotation);
+    uniforms.environment.groundColorIntensity.w =
+        std::sin(environmentRotation);
     uniforms.environmentDiffuseRadiance =
         resourceOwner_.environmentDiffuseRadiance;
     uniforms.environment.parameters.z =

@@ -52,9 +52,9 @@ layout(set = 1, binding = 3) uniform LightingData {
     vec4 directionalDirectionIntensity;
     vec4 directionalColor; // RGB includes directional intensity
     uvec4 directionalParameters; // enabled, three blend-start float bit patterns
-    vec4 environmentSky; // RGB includes environment intensity
-    vec4 environmentGround; // RGB includes environment intensity
-    vec4 environmentParameters; // exposure, turn rotation, probe count, max LOD
+    vec4 environmentSky; // premultiplied RGB, rotation cosine in alpha
+    vec4 environmentGround; // premultiplied RGB, rotation sine in alpha
+    vec4 environmentParameters; // exposure, rotation radians, probe count, max LOD
     vec4 environmentDiffuseRadiance;
     uvec4 counts;
     vec4 viewport;
