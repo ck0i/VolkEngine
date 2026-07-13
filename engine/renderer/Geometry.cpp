@@ -549,7 +549,9 @@ MeshData createUvSphereMesh(const std::uint32_t rings, const std::uint32_t segme
     }
     MeshData mesh{};
     const std::uint64_t vertexCount64 = (static_cast<std::uint64_t>(rings) + 1ULL) * (static_cast<std::uint64_t>(segments) + 1ULL);
-    const std::uint64_t indexCount64 = static_cast<std::uint64_t>(rings) * static_cast<std::uint64_t>(segments) * 6ULL;
+    const std::uint64_t indexCount64 =
+        (static_cast<std::uint64_t>(rings) - 1ULL) *
+        static_cast<std::uint64_t>(segments) * 6ULL;
     if (vertexCount64 > std::numeric_limits<std::uint32_t>::max() ||
         indexCount64 > std::numeric_limits<std::uint32_t>::max()) {
         throw std::runtime_error("UV sphere exceeds renderer 32-bit mesh range");
@@ -572,14 +574,19 @@ MeshData createUvSphereMesh(const std::uint32_t rings, const std::uint32_t segme
 
     for (std::uint32_t ring = 0; ring < rings; ++ring) {
         for (std::uint32_t segment = 0; segment < segments; ++segment) {
-            const std::uint32_t a = ring * (segments + 1U) + segment;
+            const std::uint32_t a =
+                ring * (segments + 1U) + segment;
             const std::uint32_t b = a + segments + 1U;
-            mesh.indices.push_back(a);
-            mesh.indices.push_back(b);
-            mesh.indices.push_back(a + 1U);
-            mesh.indices.push_back(a + 1U);
-            mesh.indices.push_back(b);
-            mesh.indices.push_back(b + 1U);
+            if (ring != 0U) {
+                mesh.indices.push_back(a);
+                mesh.indices.push_back(b);
+                mesh.indices.push_back(a + 1U);
+            }
+            if (ring + 1U != rings) {
+                mesh.indices.push_back(a + 1U);
+                mesh.indices.push_back(b);
+                mesh.indices.push_back(b + 1U);
+            }
         }
     }
     finalizeMesh(mesh);

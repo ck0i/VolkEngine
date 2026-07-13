@@ -484,6 +484,8 @@ int main() {
             mesh = ve::createUvSphereMesh(6U, 12U);
         });
         expectMeshBoundsFromVertices("createUvSphereMesh bounds", mesh);
+        expectEqual("createUvSphereMesh omits degenerate pole triangles",
+                    mesh.indices.size(), static_cast<std::size_t>(360));
     }
     {
         ve::MeshData mesh;
