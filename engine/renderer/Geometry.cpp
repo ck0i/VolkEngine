@@ -459,6 +459,16 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
              liveTriangleCounts[indices[offset + 1U]],
              liveTriangleCounts[indices[offset + 2U]]});
     };
+    const auto triangleMiddleLiveCount = [&](const std::uint32_t triangle) {
+        const std::size_t offset = static_cast<std::size_t>(triangle) * 3U;
+        const std::array counts{
+            liveTriangleCounts[indices[offset + 0U]],
+            liveTriangleCounts[indices[offset + 1U]],
+            liveTriangleCounts[indices[offset + 2U]]};
+        return counts[0] + counts[1] + counts[2] -
+            std::min(counts[0], std::min(counts[1], counts[2])) -
+            std::max(counts[0], std::max(counts[1], counts[2]));
+    };
     const auto touchVertex = [&](const std::uint32_t vertex) {
         if (const auto found = std::find(cache.begin(), cache.end(), vertex); found != cache.end()) {
             cache.erase(found);
@@ -498,22 +508,32 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
         std::size_t bestLiveCount = std::numeric_limits<std::size_t>::max();
         std::size_t bestMinLiveCount =
             std::numeric_limits<std::size_t>::max();
+        std::size_t bestMiddleLiveCount =
+            std::numeric_limits<std::size_t>::max();
         for (const std::uint32_t triangle : candidates) {
             const int score = triangleScore(triangle);
             const std::size_t minLiveCount =
                 cacheSize <= 16U ? triangleMinLiveCount(triangle) : 0U;
+            const std::size_t middleLiveCount =
+                cacheSize <= 16U ? triangleMiddleLiveCount(triangle) : 0U;
             const std::size_t liveCount = triangleLiveCount(triangle);
             if (score > bestScore ||
                 (score == bestScore &&
                  minLiveCount < bestMinLiveCount) ||
                 (score == bestScore &&
                  minLiveCount == bestMinLiveCount &&
+                 middleLiveCount < bestMiddleLiveCount) ||
+                (score == bestScore &&
+                 minLiveCount == bestMinLiveCount &&
+                 middleLiveCount == bestMiddleLiveCount &&
                  liveCount < bestLiveCount) ||
                 (score == bestScore &&
                  minLiveCount == bestMinLiveCount &&
+                 middleLiveCount == bestMiddleLiveCount &&
                  liveCount == bestLiveCount && triangle < bestTriangle)) {
                 bestScore = score;
                 bestMinLiveCount = minLiveCount;
+                bestMiddleLiveCount = middleLiveCount;
                 bestLiveCount = liveCount;
                 bestTriangle = triangle;
             }
