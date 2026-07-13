@@ -71,11 +71,19 @@ layout(set = 0, binding = 7) uniform sampler2D depthPyramidTexture;
 
 
 bool sphereVisible(const vec3 center, const float radius) {
-    for (uint planeIndex = 0; planeIndex < 6; ++planeIndex) {
-        const vec4 plane = cull.frustumPlanes[planeIndex];
-        if (dot(plane.xyz, center) + plane.w < -radius) {
-            return false;
-        }
+    if (dot(cull.frustumPlanes[0].xyz, center) +
+            cull.frustumPlanes[0].w < -radius ||
+        dot(cull.frustumPlanes[1].xyz, center) +
+            cull.frustumPlanes[1].w < -radius ||
+        dot(cull.frustumPlanes[2].xyz, center) +
+            cull.frustumPlanes[2].w < -radius ||
+        dot(cull.frustumPlanes[3].xyz, center) +
+            cull.frustumPlanes[3].w < -radius ||
+        dot(cull.frustumPlanes[4].xyz, center) +
+            cull.frustumPlanes[4].w < -radius ||
+        dot(cull.frustumPlanes[5].xyz, center) +
+            cull.frustumPlanes[5].w < -radius) {
+        return false;
     }
     return true;
 }
