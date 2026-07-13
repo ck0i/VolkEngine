@@ -299,15 +299,47 @@ VulkanRenderer::Impl::InstanceData VulkanRenderer::Impl::instanceDataFor(
         }
         return handle.index;
     };
-    const std::array<Vec4, 3> normalMatrix = normalMatrixColumns(item.model);
     const std::uint32_t textureMask =
         (item.material.textures[0].valid() ? 1U : 0U) |
         (item.material.textures[1].valid() ? 2U : 0U) |
         (item.material.textures[2].valid() ? 4U : 0U);
+    const Vec3 modelX{
+        item.model.m[0], item.model.m[1], item.model.m[2]};
+    const Vec3 modelY{
+        item.model.m[4], item.model.m[5], item.model.m[6]};
+    const Vec3 modelZ{
+        item.model.m[8], item.model.m[9], item.model.m[10]};
+    const float scaleSquaredX = dot(modelX, modelX);
+    const float scaleSquaredY = dot(modelY, modelY);
+    const float scaleSquaredZ = dot(modelZ, modelZ);
+    const float maximumScaleSquared =
+        std::max({scaleSquaredX, scaleSquaredY, scaleSquaredZ});
+    // Keep the shortcut below packed SNORM16 normal precision.
+    constexpr float kUniformScaleTolerance =
+        16.0F * std::numeric_limits<float>::epsilon();
+    const float tolerance =
+        maximumScaleSquared * kUniformScaleTolerance;
+    const float determinant = dot(modelX, cross(modelY, modelZ));
+    const bool modelPreservesNormalDirections =
+        maximumScaleSquared > 0.000001F &&
+        std::abs(scaleSquaredX - scaleSquaredY) <= tolerance &&
+        std::abs(scaleSquaredX - scaleSquaredZ) <= tolerance &&
+        std::abs(dot(modelX, modelY)) <= tolerance &&
+        std::abs(dot(modelX, modelZ)) <= tolerance &&
+        std::abs(dot(modelY, modelZ)) <= tolerance &&
+        std::abs(determinant) > 0.000001F;
+    std::array<Vec4, 3> normalMatrix{};
+    if (modelPreservesNormalDirections) {
+        normalMatrix[0].w = determinant < 0.0F ? -1.0F : 1.0F;
+    } else {
+        normalMatrix = normalMatrixColumns(item.model);
+    }
+    constexpr std::uint32_t kModelNormalMatrixBit = 1U << 31U;
     const std::uint32_t materialClass = static_cast<std::uint32_t>(
         std::clamp(std::lround(item.material.flags.y), 0L, 9L));
     const std::uint32_t textureMetadata =
-        textureMask | (materialClass << 3U);
+        textureMask | (materialClass << 3U) |
+        (modelPreservesNormalDirections ? kModelNormalMatrixBit : 0U);
     const double roundedFeatures =
         std::round(std::max<double>(item.material.flags.x, 0.0));
     const auto packedFeatures = static_cast<std::uint32_t>(std::min(

@@ -27,9 +27,15 @@ void main() {
     vec3 localPosition = applyFoliageWind(inPosition, instance);
     vec4 world = instance.model * vec4(localPosition, 1.0);
     vWorldPosition = world.xyz;
-    mat3 normalMatrix = mat3(instance.normalMatrix0.xyz, instance.normalMatrix1.xyz, instance.normalMatrix2.xyz);
-    vWorldNormal = normalize(normalMatrix * inNormal);
     uint materialBits = instance.textureIndices.w;
+    if ((materialBits & (1U << 31U)) != 0U) {
+        vWorldNormal = normalize(mat3(instance.model) * inNormal);
+    } else {
+        mat3 normalMatrix =
+            mat3(instance.normalMatrix0.xyz, instance.normalMatrix1.xyz,
+                 instance.normalMatrix2.xyz);
+        vWorldNormal = normalize(normalMatrix * inNormal);
+    }
     bool needsTangent =
         (materialBits & MATERIAL_TEXTURE_NORMAL) != 0U ||
         ((materialBits >> 3U) & 15U) == MATERIAL_HAIR;
