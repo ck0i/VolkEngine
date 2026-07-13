@@ -21,7 +21,7 @@ Performance work must name the workload, hardware, driver, build, settings, and 
 | Simulation | Only independent read-only systems share a phase; mutation remains serial. |
 | Assets | IO and import jobs publish complete candidates at a frame boundary; failure retains active assets. |
 | Residency | One byte budget covers typed artifacts; requested dependencies are pinned and unpinned LRU entries are evicted. |
-| Scene data | Reusable extraction and frame-slot arrays avoid rebuilding unchanged records; covered material grids reuse revision-keyed GPU records and capacity counts, and material features are normalized once into GPU bit patterns. |
+| Scene data | Reusable extraction and frame-slot arrays avoid rebuilding unchanged records; covered material grids reuse revision-keyed GPU records and capacity counts, and material features are normalized during GPU instance materialization instead of reconstructed per fragment. |
 | Visibility | Capability-gated compute performs culling, LOD, Hi-Z rejection, compaction, counters, and command generation. |
 | Submission | The default GPU path emits one indirect command per mesh; direct submission remains the fallback. |
 | Lighting | Fixed tile and shadow-atlas partitions bound pressure; workgroups share projected light tile ranges, caster culling and range checks avoid unnecessary work and reduce attenuation bounds to one-sided clamps, environment lobes share probe weights, and uploads precompute inverse range-squared, cone-width, integer probe counts, local/directional/environment radiance, and environment rotation outside fragment loops. |
