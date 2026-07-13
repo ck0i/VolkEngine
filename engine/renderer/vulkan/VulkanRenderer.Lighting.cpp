@@ -447,9 +447,15 @@ void VulkanRenderer::Impl::prepareShadowCasters(
     std::size_t nextCommand = 0U;
     frame.shadowHasAlphaMaskedCasters = false;
 
-    const auto meshIndexFor = [&](const SceneRenderItem& item) {
+    const auto meshIndexFor = [&](const SceneRenderItem& item,
+                                  const float shadowPixelScale) {
+        const bool farSphere =
+            shadowPixelScale > 0.0F &&
+            item.boundsRadius * shadowPixelScale < 4.32F;
         return item.mesh == builtin_assets::kSphere
-                   ? sceneMeshBatchIndex(SceneMeshBatchId::SphereShadow)
+                   ? sceneMeshBatchIndex(
+                         farSphere ? SceneMeshBatchId::SphereLow
+                                   : SceneMeshBatchId::SphereShadow)
                    : meshBatchIndex(item.mesh);
     };
     for (std::uint32_t viewIndex = 0U;
@@ -458,6 +464,19 @@ void VulkanRenderer::Impl::prepareShadowCasters(
             static_cast<std::uint32_t>(nextCommand);
         const Frustum frustum =
             extractFrustumPlanes(lighting->shadowViewProjection[viewIndex]);
+        float shadowPixelScale = 0.0F;
+        if (lighting->directional.parameters[0] != 0U &&
+            viewIndex < kDirectionalShadowCascadeCount) {
+            const Mat4& matrix =
+                lighting->shadowViewProjection[viewIndex];
+            const float horizontalScale =
+                length(Vec3{matrix.m[0], matrix.m[4], matrix.m[8]});
+            const float verticalScale =
+                length(Vec3{matrix.m[1], matrix.m[5], matrix.m[9]});
+            shadowPixelScale =
+                0.5F * static_cast<float>(kShadowAtlasSlotExtent) *
+                std::max(horizontalScale, verticalScale);
+        }
         std::fill(frame.shadowCountScratch.begin(),
                   frame.shadowCountScratch.end(), 0U);
         frame.shadowVisibleItemScratch.clear();
@@ -465,7 +484,8 @@ void VulkanRenderer::Impl::prepareShadowCasters(
             const SceneRenderItem& item = renderItems[itemIndex];
             frame.shadowVisibleItemScratch.push_back(
                 static_cast<std::uint32_t>(itemIndex));
-            ++frame.shadowCountScratch[meshIndexFor(item)];
+            ++frame.shadowCountScratch[
+                meshIndexFor(item, shadowPixelScale)];
             frame.shadowHasAlphaMaskedCasters |=
                 (static_cast<std::uint32_t>(item.material.flags.x) &
                  MaterialFeatureAlphaMask) != 0U;
@@ -540,7 +560,8 @@ void VulkanRenderer::Impl::prepareShadowCasters(
              frame.shadowVisibleItemScratch) {
             const SceneRenderItem& item = renderItems[itemIndex];
             frame.shadowIndexScratch[
-                frame.shadowCursorScratch[meshIndexFor(item)]++] = itemIndex;
+                frame.shadowCursorScratch[
+                    meshIndexFor(item, shadowPixelScale)]++] = itemIndex;
         }
         frame.shadowCommandCounts[viewIndex] =
             static_cast<std::uint32_t>(
