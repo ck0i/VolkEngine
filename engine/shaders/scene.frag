@@ -39,7 +39,7 @@ vec4 sampleMaterialTexture(uint role) {
 bool hasMaterialTexture(uint bit) {
     return (vTextureIndices.w & bit) != 0U;
 }
-float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l,
+float sampleShadowView(uint viewIndex, vec3 worldPosition, float ndotl,
                        bool orthographic) {
     vec4 clip =
         lighting.shadowViewProjection[viewIndex] * vec4(worldPosition, 1.0);
@@ -54,12 +54,12 @@ float sampleShadowView(uint viewIndex, vec3 worldPosition, vec3 n, vec3 l,
     vec4 atlasRect = lighting.shadowUvScaleBias[viewIndex];
     vec2 atlasUv = tileUv * atlasRect.xy + atlasRect.zw;
     float slopeBias =
-        mix(0.00008, 0.0008, 1.0 - clamp(dot(n, l), 0.0, 1.0));
+        mix(0.00008, 0.0008, 1.0 - clamp(ndotl, 0.0, 1.0));
     return texture(shadowAtlas,
                    vec3(atlasUv, min(projected.z + slopeBias, 1.0)));
 }
 
-float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
+float directionalShadowVisibility(vec3 worldPosition, float ndotl) {
     if (lighting.directionalParameters.x == 0U) return 1.0;
     float viewDepth = 1.0 / gl_FragCoord.w;
     if (viewDepth <= 0.0 || viewDepth > lighting.cascadeSplits.w)
@@ -69,7 +69,7 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
         : viewDepth <= lighting.cascadeSplits.z ? 2U
                                                 : 3U;
     float visibility =
-        sampleShadowView(cascade, worldPosition, n, l, true);
+        sampleShadowView(cascade, worldPosition, ndotl, true);
     float split = lighting.cascadeSplits[cascade];
     float blendStart = uintBitsToFloat(
         lighting.directionalParameters[cascade + 1U]);
@@ -78,7 +78,7 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
         visibility = cascade < 2U
             ? mix(visibility,
                   sampleShadowView(
-                      cascade + 1U, worldPosition, n, l, true),
+                      cascade + 1U, worldPosition, ndotl, true),
                   blend)
             : mix(visibility, 1.0, blend);
     }
@@ -86,11 +86,11 @@ float directionalShadowVisibility(vec3 worldPosition, vec3 n, vec3 l) {
 }
 
 float localShadowVisibility(LocalLight light, vec3 worldPosition,
-                            vec3 n, vec3 l) {
+                            float ndotl) {
     if (light.parameters.w == 0U) return 1.0;
     uint viewIndex = light.parameters.w - 1U;
     if (viewIndex >= lighting.counts.w) return 1.0;
-    return sampleShadowView(viewIndex, worldPosition, n, l, false);
+    return sampleShadowView(viewIndex, worldPosition, ndotl, false);
 }
 
 
@@ -305,7 +305,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     vec3 radiance =
         light.colorIntensity.rgb * attenuation;
     float visibility =
-        localShadowVisibility(light, worldPosition, n, l);
+        localShadowVisibility(light, worldPosition, rawNdotL);
     return evaluateDirectLight(n, v, l, rawNdotL, ndotv, radiance, albedo,
                                brdfParameters, diffuseWeight, f0, model,
                                strength, hairTangentInverseLength) * visibility;
@@ -381,7 +381,7 @@ void main() {
     float directionalVisibility =
         directionalNdotL > -directionalWrap
             ? directionalShadowVisibility(
-                  vWorldPosition, n, directionalL)
+                  vWorldPosition, directionalNdotL)
             : 1.0;
     vec3 directional = evaluateDirectLight(
         n, v, directionalL, directionalNdotL, ndotv,
