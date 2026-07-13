@@ -111,6 +111,8 @@ const uint MATERIAL_FEATURE_GROUND_GRID = 4U;
 const uint MATERIAL_DIRECT_LOBE_MASK =
     (1U << MATERIAL_CLEAR_COAT) | (1U << MATERIAL_HAIR) |
     (1U << MATERIAL_CLOTH);
+const uint MATERIAL_WRAP_MASK =
+    (1U << MATERIAL_FOLIAGE) | (1U << MATERIAL_SKIN);
 uint materialClass() {
     return (vTextureIndices.w >> 3U) & 15U;
 }
@@ -247,10 +249,8 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
             }
         }
     }
-    if (model == MATERIAL_FOLIAGE ||
-        model == MATERIAL_SKIN) {
-        float wrap = (model == MATERIAL_FOLIAGE ? 0.5 : 0.25) *
-                     strength;
+    if ((MATERIAL_WRAP_MASK & (1U << model)) != 0U) {
+        float wrap = (model == MATERIAL_FOLIAGE ? 0.5 : 0.25) * strength;
         float wrapped = max((rawNdotL + wrap) / (1.0 + wrap), 0.0);
         result += albedo * radiance * max(wrapped - ndotl, 0.0) *
                   dielectricWeight / PI;
@@ -270,9 +270,9 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     if (distanceSquared >= rangeSquared ||
         distanceSquared <= 0.000001)
         return vec3(0.0);
-    float wrap = model == MATERIAL_FOLIAGE
-        ? 0.5 * strength
-        : model == MATERIAL_SKIN ? 0.25 * strength : 0.0;
+    float wrap = (MATERIAL_WRAP_MASK & (1U << model)) != 0U
+        ? (model == MATERIAL_FOLIAGE ? 0.5 : 0.25) * strength
+        : 0.0;
     float unnormalizedNdotL = dot(n, toLight);
     if (wrap == 0.0 && unnormalizedNdotL <= 0.0)
         return vec3(0.0);
@@ -368,9 +368,10 @@ void main() {
     vec3 directionalL =
         -lighting.directionalDirectionIntensity.xyz;
     float directionalNdotL = dot(n, directionalL);
-    float directionalWrap = model == MATERIAL_FOLIAGE
-        ? 0.5 * materialStrength
-        : model == MATERIAL_SKIN ? 0.25 * materialStrength : 0.0;
+    float directionalWrap =
+        (MATERIAL_WRAP_MASK & (1U << model)) != 0U
+        ? (model == MATERIAL_FOLIAGE ? 0.5 : 0.25) * materialStrength
+        : 0.0;
     float directionalVisibility =
         directionalNdotL > -directionalWrap
             ? directionalShadowVisibility(
