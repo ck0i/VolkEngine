@@ -262,7 +262,7 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
 
 vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
                         float ndotv, vec3 albedo, vec2 brdfParameters,
-                        float diffuseWeight, vec3 f0, uint model,
+                        float diffuseWeight, vec3 f0, uint model, float wrap,
                         float strength, float hairTangentInverseLength) {
     vec3 toLight = light.positionRange.xyz - worldPosition;
     float distanceSquared = dot(toLight, toLight);
@@ -272,9 +272,6 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     if (distanceSquared >= rangeSquared ||
         distanceSquared <= 0.000001)
         return vec3(0.0);
-    float wrap = (MATERIAL_WRAP_MASK & (1U << model)) != 0U
-        ? (model == MATERIAL_FOLIAGE ? 0.5 : 0.25) * strength
-        : 0.0;
     float unnormalizedNdotL = dot(n, toLight);
     if (wrap == 0.0 && unnormalizedNdotL <= 0.0)
         return vec3(0.0);
@@ -397,8 +394,8 @@ void main() {
         uint lightIndex = lightTileIndices[header.offset + index];
         local += evaluateLocalLight(
             localLights[lightIndex], vWorldPosition, n, v, ndotv, albedo,
-            brdfParameters, diffuseWeight, f0, model, materialStrength,
-            hairTangentInverseLength);
+            brdfParameters, diffuseWeight, f0, model, directionalWrap,
+            materialStrength, hairTangentInverseLength);
     }
 
     vec3 ambientF = fresnelSchlickRoughness(ndotv, f0, roughness);
