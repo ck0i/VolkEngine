@@ -110,6 +110,7 @@ int main() {
     samples.add(static_cast<double>(value));
     }
     summary.distributions.cpuFrame = samples.distribution();
+    summary.distributions.gpuHdrScene = samples.distribution();
     assert(summary.distributions.cpuFrame.sampleCount == 100U);
     assert(summary.distributions.cpuFrame.median == 50.5);
     assert(summary.distributions.cpuFrame.p95 > 95.0);
@@ -162,7 +163,7 @@ int main() {
   const std::string serialized = ve::serializeRunSummary(summary);
   assert(serialized.find("\"schema\":\"volkengine.run-summary\"") !=
          std::string::npos);
-  assert(jsonUnsigned(serialized, "schema_version") == 7U);
+  assert(jsonUnsigned(serialized, "schema_version") == 8U);
   assert(serialized.find("\"scenario\":\"submission-pressure-v1\"") !=
          std::string::npos);
   assert(serialized.find("\"warmup_frames\":20") != std::string::npos);
@@ -246,6 +247,9 @@ int main() {
   assert(serialized.find("\"cpu_asset_cook\":{\"available\":true,\"value\":1."
                          "25,\"unit\":\"ms\"") != std::string::npos);
   assert(serialized.find("\"distributions\":{\"cpu_frame\":{\"unit\":\"ms\","
+                         "\"sample_count\":100,\"available\":true") !=
+         std::string::npos);
+  assert(serialized.find("\"gpu_hdr_scene\":{\"unit\":\"ms\","
                          "\"sample_count\":100,\"available\":true") !=
          std::string::npos);
   ve::RunSummary disabledVisibility = summary;

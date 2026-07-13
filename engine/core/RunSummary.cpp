@@ -427,6 +427,27 @@ std::string serializeRunSummary(const RunSummary& summary) {
                      summary.distributions.cpuQueueSubmit);
   output << ',';
   appendDistribution(output, "gpu_frame", summary.distributions.gpuFrame);
+  output << ',';
+  appendDistribution(output, "gpu_light_assignment",
+                     summary.distributions.gpuLightAssignment);
+  output << ',';
+  appendDistribution(output, "gpu_visibility_cull",
+                     summary.distributions.gpuVisibilityCull);
+  output << ',';
+  appendDistribution(output, "gpu_shadows",
+                     summary.distributions.gpuShadows);
+  output << ',';
+  appendDistribution(output, "gpu_depth_prepass",
+                     summary.distributions.gpuDepthPrepass);
+  output << ',';
+  appendDistribution(output, "gpu_hdr_scene",
+                     summary.distributions.gpuHdrScene);
+  output << ',';
+  appendDistribution(output, "gpu_depth_pyramid",
+                     summary.distributions.gpuDepthPyramid);
+  output << ',';
+  appendDistribution(output, "gpu_tone_map",
+                     summary.distributions.gpuToneMap);
   output << "}\n}\n";
   return output.str();
 }

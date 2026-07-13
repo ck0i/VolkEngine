@@ -38,7 +38,7 @@ Performance work must name the workload, hardware, driver, build, settings, and 
 - `cpuCommandRecordMs` — instance data, statistics, UI encoding, and command recording;
 - `cpuQueueSubmitMs` — submission setup and API call.
 
-GPU fields are valid only when `gpuTimestampsValid` is true. Pass timings cover light assignment, culling, shadows, depth, HDR, depth-pyramid, and final output. When the prepass is off, its timing is zero and HDR includes depth writes.
+GPU fields are valid only when `gpuTimestampsValid` is true. Pass timings cover light assignment, culling, shadows, depth, HDR, depth-pyramid, and final output. Run summaries report post-warmup distributions for each active pass; disabled pass distributions have no samples, while their scalar `RenderStats` timing remains zero. When the prepass is off, HDR includes depth writes.
 
 `sceneTriangleCount` describes visible geometry before pass multiplication. `triangleCount` describes submitted work, including repeated scene passes and fullscreen output. ImGui draw lists are excluded.
 

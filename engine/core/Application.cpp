@@ -399,6 +399,13 @@ int Application::runInternal(World *world, const WorldUpdateCallback update,
     BoundedMetricSamples cpuCommandRecordSamples;
     BoundedMetricSamples cpuQueueSubmitSamples;
     BoundedMetricSamples gpuFrameSamples;
+    BoundedMetricSamples gpuLightAssignmentSamples;
+    BoundedMetricSamples gpuVisibilityCullSamples;
+    BoundedMetricSamples gpuShadowSamples;
+    BoundedMetricSamples gpuDepthPrepassSamples;
+    BoundedMetricSamples gpuHdrSceneSamples;
+    BoundedMetricSamples gpuDepthPyramidSamples;
+    BoundedMetricSamples gpuToneMapSamples;
     while (!window_.shouldClose()) {
         const FrameTiming timing = clock_.tick();
         window_.pollEvents();
@@ -489,8 +496,20 @@ int Application::runInternal(World *world, const WorldUpdateCallback update,
       cpuSceneBuildSamples.add(sample.cpuSceneBuildMs);
       cpuCommandRecordSamples.add(sample.cpuCommandRecordMs);
       cpuQueueSubmitSamples.add(sample.cpuQueueSubmitMs);
-      if (sample.gpuTimestampsValid)
+      if (sample.gpuTimestampsValid) {
         gpuFrameSamples.add(sample.gpuFrameMs);
+        gpuLightAssignmentSamples.add(sample.gpuLightAssignmentMs);
+        if (sample.gpuDrivenVisibility)
+          gpuVisibilityCullSamples.add(sample.gpuCullMs);
+        if (sample.shadowsEnabled)
+          gpuShadowSamples.add(sample.gpuShadowMs);
+        if (sample.depthPrepassEnabled)
+          gpuDepthPrepassSamples.add(sample.gpuDepthPrepassMs);
+        gpuHdrSceneSamples.add(sample.gpuHdrSceneMs);
+        if (sample.depthPyramidBuildEnabled)
+          gpuDepthPyramidSamples.add(sample.gpuDepthPyramidMs);
+        gpuToneMapSamples.add(sample.gpuFinalPassMs);
+      }
     }
     ++renderedFrames;
     titleUpdateSeconds += timing.deltaSeconds;
@@ -577,9 +596,18 @@ int Application::runInternal(World *world, const WorldUpdateCallback update,
       finalStats.shadowAtlasOverflowCount, finalStats.reflectionProbeCount,
       finalStats.effectiveExposure);
   const RunMetricDistributions distributions{
-      cpuFrameSamples.distribution(), cpuSceneBuildSamples.distribution(),
+      cpuFrameSamples.distribution(),
+      cpuSceneBuildSamples.distribution(),
       cpuCommandRecordSamples.distribution(),
-      cpuQueueSubmitSamples.distribution(), gpuFrameSamples.distribution()};
+      cpuQueueSubmitSamples.distribution(),
+      gpuFrameSamples.distribution(),
+      gpuLightAssignmentSamples.distribution(),
+      gpuVisibilityCullSamples.distribution(),
+      gpuShadowSamples.distribution(),
+      gpuDepthPrepassSamples.distribution(),
+      gpuHdrSceneSamples.distribution(),
+      gpuDepthPyramidSamples.distribution(),
+      gpuToneMapSamples.distribution()};
   const JobSystemStats jobStats = jobs_.stats();
   logger()->info(
       "Job system: {} workers, {} submitted, {} succeeded, {} failed, {} "

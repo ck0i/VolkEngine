@@ -87,7 +87,7 @@ struct LandscapeRunStats {
 };
 
 struct RunSummary {
-  static constexpr std::uint32_t kSchemaVersion = 7;
+  static constexpr std::uint32_t kSchemaVersion = 8;
 
   EngineConfig config;
   RunOptions options;

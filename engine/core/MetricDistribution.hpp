@@ -76,6 +76,13 @@ struct RunMetricDistributions {
     MetricDistribution cpuCommandRecord;
     MetricDistribution cpuQueueSubmit;
     MetricDistribution gpuFrame;
+    MetricDistribution gpuLightAssignment;
+    MetricDistribution gpuVisibilityCull;
+    MetricDistribution gpuShadows;
+    MetricDistribution gpuDepthPrepass;
+    MetricDistribution gpuHdrScene;
+    MetricDistribution gpuDepthPyramid;
+    MetricDistribution gpuToneMap;
 };
 
 } // namespace ve
