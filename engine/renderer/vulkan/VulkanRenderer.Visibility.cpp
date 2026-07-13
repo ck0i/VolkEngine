@@ -309,6 +309,7 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     if (config_.gpuVisibilityValidation) {
         frame.expectedCullingUnitCounts.assign(commandCount, 0U);
         frame.expectedVisibleItemCount = 0U;
+        frame.expectedMaterialClassCounts.fill(0U);
         frame.expectedSphereLodCounts.fill(0U);
         for (const SceneRenderItem& item : renderItems) {
             if (classifySphereAgainstFrustum(
@@ -317,6 +318,11 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                 continue;
             }
             ++frame.expectedVisibleItemCount;
+            const std::size_t materialClass = static_cast<std::size_t>(
+                std::clamp(
+                    std::lround(item.material.flags.y), 0L,
+                    static_cast<long>(kRenderMaterialClassCount - 1U)));
+            ++frame.expectedMaterialClassCounts[materialClass];
             std::size_t meshIndex = 0;
             if (item.mesh == builtin_assets::kSphere) {
                 const float viewDepth =
@@ -488,7 +494,9 @@ void VulkanRenderer::Impl::validateGpuVisibility(
         frame.completedSphereLodCounts[1] !=
             frame.expectedSphereLodCounts[1] ||
         frame.completedSphereLodCounts[2] !=
-            frame.expectedSphereLodCounts[2]) {
+            frame.expectedSphereLodCounts[2] ||
+        frame.completedMaterialClassCounts !=
+            frame.expectedMaterialClassCounts) {
         throw std::runtime_error(
             "GPU visibility summary disagrees with CPU reference");
     }

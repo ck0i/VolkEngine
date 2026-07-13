@@ -741,6 +741,8 @@ private:
         std::vector<std::uint32_t> expectedCullingUnitCounts;
         bool gpuVisibilityValidationPending = false;
         std::uint32_t expectedVisibleItemCount = 0;
+        std::array<unsigned, kRenderMaterialClassCount>
+            expectedMaterialClassCounts{};
         std::array<std::uint32_t, 3> expectedSphereLodCounts{};
         std::uint32_t submittedSceneItemCount = 0;
         std::uint32_t submittedGpuCommandCount = 0;

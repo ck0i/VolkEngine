@@ -168,10 +168,31 @@ void main() {
     if (!sphereVisible(candidate.bounds.xyz, candidate.bounds.w)) {
         return;
     }
-    atomicAdd(counters.visibleItemCount, 1);
-    atomicAdd(counters.visibleMaterialClassCounts[
-                  min(candidate.metadata.z, 9U)],
-              1U);
+    const uint materialClass = min(candidate.metadata.z, 9U);
+#ifdef VE_SUBGROUP_RESERVATION
+    const uvec4 visibleLanes = subgroupBallot(true);
+    if (subgroupElect()) {
+        atomicAdd(counters.visibleItemCount,
+                  subgroupBallotBitCount(visibleLanes));
+    }
+    uvec4 counterRemaining = visibleLanes;
+    while (subgroupBallotBitCount(counterRemaining) != 0U) {
+        const uint leader = subgroupBallotFindLSB(counterRemaining);
+        const uint leaderMaterial =
+            subgroupBroadcast(materialClass, leader);
+        const uvec4 matching =
+            subgroupBallot(materialClass == leaderMaterial) &
+            counterRemaining;
+        if (gl_SubgroupInvocationID == leader) {
+            atomicAdd(counters.visibleMaterialClassCounts[leaderMaterial],
+                      subgroupBallotBitCount(matching));
+        }
+        counterRemaining &= ~matching;
+    }
+#else
+    atomicAdd(counters.visibleItemCount, 1U);
+    atomicAdd(counters.visibleMaterialClassCounts[materialClass], 1U);
+#endif
 
     const uint meshIndex = selectedMesh(candidate);
     const MeshClusterRange range = meshRanges[meshIndex];
