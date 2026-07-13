@@ -21,12 +21,19 @@ void main() {
         return;
     }
 
-    const uvec2 sourceBegin =
-        destination * build.sourceExtent / destinationExtent;
-    const uvec2 sourceEnd =
-        ((destination + uvec2(1)) * build.sourceExtent +
-         destinationExtent - uvec2(1)) /
-        destinationExtent;
+    uvec2 sourceBegin;
+    uvec2 sourceEnd;
+    if (all(equal(build.sourceExtent, destinationExtent * 2U))) {
+        sourceBegin = destination * 2U;
+        sourceEnd = sourceBegin + 2U;
+    } else {
+        sourceBegin =
+            destination * build.sourceExtent / destinationExtent;
+        sourceEnd =
+            ((destination + uvec2(1)) * build.sourceExtent +
+             destinationExtent - uvec2(1)) /
+            destinationExtent;
+    }
     const uvec2 sourceSpan = sourceEnd - sourceBegin;
     float farthestDepth = 1.0;
 #ifdef VE_DEPTH_EXTREMA
