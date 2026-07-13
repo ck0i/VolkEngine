@@ -42,6 +42,7 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
 
   struct AssetGpuState {
     Buffer sceneVertexBuffer;
+    std::array<VkDeviceSize, 3> sceneVertexOffsets{};
     Buffer sceneIndexBuffer;
     Buffer clusterData;
     Buffer clusterHierarchy;
@@ -64,6 +65,8 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
     AssetGpuState state;
     state.sceneVertexBuffer =
         std::exchange(resourceOwner_.sceneVertexBuffer, {});
+    state.sceneVertexOffsets = resourceOwner_.sceneVertexOffsets;
+    resourceOwner_.sceneVertexOffsets = {};
     state.sceneIndexBuffer = std::exchange(resourceOwner_.sceneIndexBuffer, {});
     state.clusterData = std::exchange(resourceOwner_.clusterData, {});
     state.clusterHierarchy = std::exchange(resourceOwner_.clusterHierarchy, {});
@@ -94,6 +97,7 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
   const auto restoreState = [&](AssetGpuState &state) {
     resourceOwner_.sceneVertexBuffer =
         std::exchange(state.sceneVertexBuffer, {});
+    resourceOwner_.sceneVertexOffsets = state.sceneVertexOffsets;
     resourceOwner_.sceneIndexBuffer = std::exchange(state.sceneIndexBuffer, {});
     resourceOwner_.clusterData = std::exchange(state.clusterData, {});
     resourceOwner_.clusterHierarchy = std::exchange(state.clusterHierarchy, {});

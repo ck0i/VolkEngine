@@ -514,9 +514,15 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
     const std::array<VkDescriptorSet, 2> sceneSets{
         resourceOwner_.sceneDescriptorSets[frameOwner_.currentFrame],
         resourceOwner_.lightingDescriptorSets[frameOwner_.currentFrame]};
-    const VkDeviceSize offset = 0;
     if (sceneDrawCalls > 0U) {
-        vkCmdBindVertexBuffers(frame.commandBuffer, 0, 1, &resourceOwner_.sceneVertexBuffer.buffer, &offset);
+        const std::array<VkBuffer, 3> vertexBuffers{
+            resourceOwner_.sceneVertexBuffer.buffer,
+            resourceOwner_.sceneVertexBuffer.buffer,
+            resourceOwner_.sceneVertexBuffer.buffer};
+        vkCmdBindVertexBuffers(
+            frame.commandBuffer, 0U,
+            static_cast<std::uint32_t>(vertexBuffers.size()),
+            vertexBuffers.data(), resourceOwner_.sceneVertexOffsets.data());
         vkCmdBindIndexBuffer(frame.commandBuffer, resourceOwner_.sceneIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineOwner_.sceneLayout,
                                 0, static_cast<std::uint32_t>(sceneSets.size()),
@@ -935,10 +941,14 @@ void VulkanRenderer::Impl::recordShadowGraphPass(
         pipelineOwner_.shadowLayout, 0U,
         static_cast<std::uint32_t>(descriptorSets.size()),
         descriptorSets.data(), 0U, nullptr);
-    const VkDeviceSize vertexOffset = 0U;
-    vkCmdBindVertexBuffers(context.frame->commandBuffer, 0U, 1U,
-                           &resourceOwner_.sceneVertexBuffer.buffer,
-                           &vertexOffset);
+    const std::array<VkBuffer, 3> vertexBuffers{
+        resourceOwner_.sceneVertexBuffer.buffer,
+        resourceOwner_.sceneVertexBuffer.buffer,
+        resourceOwner_.sceneVertexBuffer.buffer};
+    vkCmdBindVertexBuffers(
+        context.frame->commandBuffer, 0U,
+        static_cast<std::uint32_t>(vertexBuffers.size()),
+        vertexBuffers.data(), resourceOwner_.sceneVertexOffsets.data());
     vkCmdBindIndexBuffer(context.frame->commandBuffer,
                          resourceOwner_.sceneIndexBuffer.buffer, 0U,
                          VK_INDEX_TYPE_UINT32);

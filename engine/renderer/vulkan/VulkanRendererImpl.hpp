@@ -127,21 +127,21 @@ isUnormSwapchainFormat(const VkFormat format) noexcept {
     }
 }
 
-struct GpuVertex {
-    Vec3 position;
-    Vec2 uv;
+struct GpuVertexPosition {
+  Vec3 position;
+};
+struct GpuVertexUv {
+  Vec2 uv;
+};
+struct GpuVertexSurface {
   std::array<std::int16_t, 4> normal;
   std::array<std::int16_t, 4> tangent;
 };
-static_assert(sizeof(GpuVertex) == 36,
-              "GpuVertex layout is part of the Vulkan vertex input contract");
-static_assert(offsetof(GpuVertex, position) == 0,
-              "GpuVertex position offset changed");
-static_assert(offsetof(GpuVertex, uv) == 12, "GpuVertex uv offset changed");
-static_assert(offsetof(GpuVertex, normal) == 20,
-              "GpuVertex normal offset changed");
-static_assert(offsetof(GpuVertex, tangent) == 28,
-              "GpuVertex tangent offset changed");
+static_assert(sizeof(GpuVertexPosition) == 12);
+static_assert(sizeof(GpuVertexUv) == 8);
+static_assert(sizeof(GpuVertexSurface) == 16);
+static_assert(offsetof(GpuVertexSurface, normal) == 0);
+static_assert(offsetof(GpuVertexSurface, tangent) == 8);
 
 struct PipelineCacheHeader {
   std::uint32_t headerSize = 0;
@@ -671,7 +671,7 @@ private:
     Buffer vertices;
     Buffer indices;
         Buffer staging;
-        VkDeviceSize indexStagingOffset = 0;
+        std::array<VkDeviceSize, 3> vertexOffsets{};
         VkDeviceSize vertexSize = 0;
         VkDeviceSize indexSize = 0;
         std::vector<GpuMesh> meshes;
@@ -1370,6 +1370,7 @@ private:
     std::array<VkDescriptorSet, kMaxFramesInFlight> lightingDescriptorSets{};
     ReferenceAssetBundle *referenceAssets = nullptr;
     Buffer sceneVertexBuffer;
+        std::array<VkDeviceSize, 3> sceneVertexOffsets{};
     Buffer clusterData;
     Buffer clusterHierarchy;
         Buffer meshClusterRanges;

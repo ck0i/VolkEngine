@@ -331,30 +331,45 @@ VulkanRenderer::Impl::PipelineSet VulkanRenderer::Impl::buildPipelineSet() {
                       "Depth Pyramid Pipeline");
 
         std::array<VkPipelineShaderStageCreateInfo, 2> sceneStages{shaderStage(VK_SHADER_STAGE_VERTEX_BIT, sceneVert), shaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, sceneFrag)};
-        std::array<VkVertexInputBindingDescription, 1> bindings{};
-        bindings[0].binding = 0;
-        bindings[0].stride = sizeof(GpuVertex);
-        bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        std::array<VkVertexInputBindingDescription, 3> bindings{};
+        bindings[0] = {
+            0, sizeof(GpuVertexPosition), VK_VERTEX_INPUT_RATE_VERTEX};
+        bindings[1] = {
+            1, sizeof(GpuVertexUv), VK_VERTEX_INPUT_RATE_VERTEX};
+        bindings[2] = {
+            2, sizeof(GpuVertexSurface), VK_VERTEX_INPUT_RATE_VERTEX};
         std::array<VkVertexInputAttributeDescription, 4> attributes{};
-        attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuVertex, position)};
-        attributes[1] = {1, 0, VK_FORMAT_R16G16B16A16_SNORM, offsetof(GpuVertex, normal)};
-        attributes[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuVertex, uv)};
-        attributes[3] = {3, 0, VK_FORMAT_R16G16B16A16_SNORM, offsetof(GpuVertex, tangent)};
-        std::array<VkVertexInputAttributeDescription, 2> depthAttributes{};
-        depthAttributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuVertex, position)};
-        depthAttributes[1] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuVertex, uv)};
+        attributes[0] = {
+            0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(GpuVertexPosition, position)};
+        attributes[1] = {
+            1, 2, VK_FORMAT_R16G16B16A16_SNORM,
+            offsetof(GpuVertexSurface, normal)};
+        attributes[2] = {
+            2, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuVertexUv, uv)};
+        attributes[3] = {
+            3, 2, VK_FORMAT_R16G16B16A16_SNORM,
+            offsetof(GpuVertexSurface, tangent)};
+        std::array<VkVertexInputAttributeDescription, 2> depthAttributes{
+            attributes[0], attributes[2]};
 
-        VkPipelineVertexInputStateCreateInfo vertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        vertexInput.vertexBindingDescriptionCount = static_cast<std::uint32_t>(bindings.size());
+        VkPipelineVertexInputStateCreateInfo vertexInput{
+            VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        vertexInput.vertexBindingDescriptionCount =
+            static_cast<std::uint32_t>(bindings.size());
         vertexInput.pVertexBindingDescriptions = bindings.data();
-        vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
+        vertexInput.vertexAttributeDescriptionCount =
+            static_cast<std::uint32_t>(attributes.size());
         vertexInput.pVertexAttributeDescriptions = attributes.data();
 
         VkPipelineVertexInputStateCreateInfo depthVertexInput = vertexInput;
-        depthVertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(depthAttributes.size());
+        depthVertexInput.vertexBindingDescriptionCount = 2U;
+        depthVertexInput.vertexAttributeDescriptionCount =
+            static_cast<std::uint32_t>(depthAttributes.size());
         depthVertexInput.pVertexAttributeDescriptions = depthAttributes.data();
         VkPipelineVertexInputStateCreateInfo opaqueShadowVertexInput =
             depthVertexInput;
+        opaqueShadowVertexInput.vertexBindingDescriptionCount = 1U;
         opaqueShadowVertexInput.vertexAttributeDescriptionCount = 1U;
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;

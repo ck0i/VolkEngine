@@ -25,7 +25,7 @@ Performance work must name the workload, hardware, driver, build, settings, and 
 | Visibility | Capability-gated compute performs culling, LOD, Hi-Z rejection, compaction, counters, and command generation; subgroup paths aggregate visible and per-material counters before global atomics, and fixed frustum plane sets are unrolled. |
 | Submission | The default GPU path emits one indirect command per mesh; direct submission remains the fallback. |
 | Lighting | Fixed tile and shadow-atlas partitions bound pressure; workgroups share projected light tile ranges, caster culling and range checks avoid unnecessary work and reduce attenuation bounds to one-sided clamps, environment lobes share probe weights, uploads precompute inverse range-squared, cone-width, integer probe counts, local/directional/environment radiance, and environment rotation, and each fragment reuses material dielectric weight, combines bounded Smith visibility divisions, and skips back-facing half-vector work. |
-| Uploads | Meshes and textures are packed into shared staging submissions; same-queue barriers avoid unnecessary semaphore chains. |
+| Uploads | Position, UV, and packed-surface vertex streams share one geometry allocation so depth passes fetch only required attributes; meshes and textures use shared staging submissions, and same-queue barriers avoid unnecessary semaphore chains. |
 | Frame graph | Cached variants derive pass order, hazards, lifetimes, and compatible transient slots. |
 | Diagnostics | Fixed timestamp ranges and bounded job/streaming traces expose cost without unbounded telemetry growth. |
 

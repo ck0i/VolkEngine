@@ -10,11 +10,12 @@ namespace {
     return static_cast<std::int16_t>(std::lround(std::clamp(value, -1.0f, 1.0f) * 32767.0f));
 }
 
-[[nodiscard]] GpuVertex packVertex(const Vertex& vertex) {
-    return GpuVertex{{vertex.position.x, vertex.position.y, vertex.position.z},
-                     {vertex.uv.x, vertex.uv.y},
-                     {packSnorm16(vertex.normal.x), packSnorm16(vertex.normal.y), packSnorm16(vertex.normal.z), 0},
-                     {packSnorm16(vertex.tangent.x), packSnorm16(vertex.tangent.y), packSnorm16(vertex.tangent.z), packSnorm16(vertex.tangent.w)}};
+[[nodiscard]] GpuVertexSurface packVertexSurface(const Vertex& vertex) {
+    return GpuVertexSurface{
+        {packSnorm16(vertex.normal.x), packSnorm16(vertex.normal.y),
+         packSnorm16(vertex.normal.z), 0},
+        {packSnorm16(vertex.tangent.x), packSnorm16(vertex.tangent.y),
+         packSnorm16(vertex.tangent.z), packSnorm16(vertex.tangent.w)}};
 }
 
 } // namespace
@@ -32,7 +33,7 @@ void VulkanRenderer::Impl::recordMeshUpload(VkCommandBuffer commandBuffer, const
     vkCmdCopyBuffer(commandBuffer, upload.staging.buffer, upload.vertices.buffer, 1, &vertexCopy);
 
     VkBufferCopy indexCopy{};
-    indexCopy.srcOffset = upload.indexStagingOffset;
+    indexCopy.srcOffset = upload.vertexSize;
     indexCopy.size = upload.indexSize;
     vkCmdCopyBuffer(commandBuffer, upload.staging.buffer, upload.indices.buffer, 1, &indexCopy);
 
@@ -119,16 +120,29 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
         vertexCount += mesh.vertices.size();
         indexCount += mesh.indices.size();
     }
-    if (vertexCount > static_cast<std::size_t>(std::numeric_limits<VkDeviceSize>::max() / sizeof(GpuVertex)) ||
-        indexCount > static_cast<std::size_t>(std::numeric_limits<VkDeviceSize>::max() / sizeof(std::uint32_t))) {
+    constexpr std::size_t kPackedVertexSize =
+        sizeof(GpuVertexPosition) + sizeof(GpuVertexUv) +
+        sizeof(GpuVertexSurface);
+    if (vertexCount > static_cast<std::size_t>(
+                          std::numeric_limits<VkDeviceSize>::max() /
+                          kPackedVertexSize) ||
+        indexCount > static_cast<std::size_t>(
+                         std::numeric_limits<VkDeviceSize>::max() /
+                         sizeof(std::uint32_t))) {
         throw std::runtime_error("Scene geometry upload exceeds VkDeviceSize range");
     }
-    upload.vertexSize = static_cast<VkDeviceSize>(vertexCount * sizeof(GpuVertex));
-    upload.indexSize = static_cast<VkDeviceSize>(indexCount * sizeof(std::uint32_t));
-    if (upload.indexSize > std::numeric_limits<VkDeviceSize>::max() - upload.vertexSize) {
+    upload.vertexOffsets[1] = static_cast<VkDeviceSize>(
+        vertexCount * sizeof(GpuVertexPosition));
+    upload.vertexOffsets[2] = upload.vertexOffsets[1] +
+        static_cast<VkDeviceSize>(vertexCount * sizeof(GpuVertexUv));
+    upload.vertexSize =
+        static_cast<VkDeviceSize>(vertexCount * kPackedVertexSize);
+    upload.indexSize =
+        static_cast<VkDeviceSize>(indexCount * sizeof(std::uint32_t));
+    if (upload.indexSize >
+        std::numeric_limits<VkDeviceSize>::max() - upload.vertexSize) {
         throw std::runtime_error("Scene geometry staging size exceeds VkDeviceSize range");
     }
-    upload.indexStagingOffset = upload.vertexSize;
     const VkDeviceSize stagingSize = upload.vertexSize + upload.indexSize;
 
     try {
@@ -137,8 +151,14 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
         {
             ScopedVmaMap stagingMap{deviceOwner_.allocator, upload.staging.allocation, "vmaMapMemory mesh staging"};
             auto* stagingBytes = static_cast<std::uint8_t*>(stagingMap.get());
-            auto* vertexDst = reinterpret_cast<GpuVertex*>(stagingBytes);
-            auto* indexDst = reinterpret_cast<std::uint32_t*>(stagingBytes + static_cast<std::size_t>(upload.indexStagingOffset));
+            auto* positionDst =
+                reinterpret_cast<GpuVertexPosition*>(stagingBytes);
+            auto* uvDst = reinterpret_cast<GpuVertexUv*>(
+                stagingBytes + static_cast<std::size_t>(upload.vertexOffsets[1]));
+            auto* surfaceDst = reinterpret_cast<GpuVertexSurface*>(
+                stagingBytes + static_cast<std::size_t>(upload.vertexOffsets[2]));
+            auto* indexDst = reinterpret_cast<std::uint32_t*>(
+                stagingBytes + static_cast<std::size_t>(upload.vertexSize));
             std::size_t vertexCursor = 0;
             std::size_t indexCursor = 0;
             const auto appendMesh = [&](MeshData& mesh) -> GpuMesh {
@@ -152,9 +172,18 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
                 const std::size_t firstIndex = indexCursor;
                 const std::size_t meshVertexCount = mesh.vertices.size();
                 const std::size_t meshIndexCount = mesh.indices.size();
-                GpuVertex* meshVertexDst = vertexDst + vertexCursor;
-                for (std::size_t vertexIndex = 0; vertexIndex < meshVertexCount; ++vertexIndex) {
-                    meshVertexDst[vertexIndex] = packVertex(mesh.vertices[vertexIndex]);
+                GpuVertexPosition* meshPositionDst =
+                    positionDst + vertexCursor;
+                GpuVertexUv* meshUvDst = uvDst + vertexCursor;
+                GpuVertexSurface* meshSurfaceDst =
+                    surfaceDst + vertexCursor;
+                for (std::size_t vertexIndex = 0;
+                     vertexIndex < meshVertexCount; ++vertexIndex) {
+                    const Vertex& vertex = mesh.vertices[vertexIndex];
+                    meshPositionDst[vertexIndex] = {vertex.position};
+                    meshUvDst[vertexIndex] = {vertex.uv};
+                    meshSurfaceDst[vertexIndex] =
+                        packVertexSurface(vertex);
                 }
                 vertexCursor += meshVertexCount;
                 if (meshIndexCount > 0U) {
@@ -293,6 +322,7 @@ void VulkanRenderer::Impl::createMeshes() {
     }
 
     resourceOwner_.sceneVertexBuffer = takeBuffer(meshUpload.vertices);
+    resourceOwner_.sceneVertexOffsets = meshUpload.vertexOffsets;
     resourceOwner_.sceneIndexBuffer = takeBuffer(meshUpload.indices);
     resourceOwner_.sceneMeshes = meshUpload.meshes;
     resourceOwner_.sceneClusters = std::move(gpuClusters);
