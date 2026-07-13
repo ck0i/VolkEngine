@@ -135,12 +135,12 @@ void main() {
     vec4 tilePlanes[4];
     if (validTile) {
         vec2 minimumNdc =
-            vec2(tile * LIGHT_TILE_SIZE) /
-                lighting.viewport.xy * 2.0 - 1.0;
+            vec2(tile * LIGHT_TILE_SIZE) *
+                lighting.viewport.zw * 2.0 - 1.0;
         vec2 maximumNdc =
             min(vec2((tile + 1U) * LIGHT_TILE_SIZE),
-                lighting.viewport.xy) /
-                lighting.viewport.xy * 2.0 - 1.0;
+                lighting.viewport.xy) *
+                lighting.viewport.zw * 2.0 - 1.0;
         // Transform the tile's clip inequalities into world-space planes.
         mat4 viewProjection = lighting.viewProjection;
         vec4 rowX = vec4(
