@@ -152,7 +152,9 @@ uint selectedMesh(const CullCandidate candidate) {
     if (projectedRadiusPixels >= 4.32) {
         return cull.sphereLodMeshes.y;
     }
-    return cull.sphereLodMeshes.z;
+    return projectedRadiusPixels >= 2.0
+        ? cull.sphereLodMeshes.z
+        : cull.sphereLodMeshes.w;
 }
 
 

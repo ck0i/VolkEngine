@@ -449,14 +449,19 @@ void VulkanRenderer::Impl::prepareShadowCasters(
 
     const auto meshIndexFor = [&](const SceneRenderItem& item,
                                   const float shadowPixelScale) {
-        const bool farSphere =
-            shadowPixelScale > 0.0F &&
-            item.boundsRadius * shadowPixelScale < 4.32F;
-        return item.mesh == builtin_assets::kSphere
-                   ? sceneMeshBatchIndex(
-                         farSphere ? SceneMeshBatchId::SphereLow
-                                   : SceneMeshBatchId::SphereShadow)
-                   : meshBatchIndex(item.mesh);
+        if (item.mesh != builtin_assets::kSphere) {
+            return meshBatchIndex(item.mesh);
+        }
+        const float projectedRadius =
+            item.boundsRadius * shadowPixelScale;
+        if (shadowPixelScale > 0.0F && projectedRadius < 2.0F) {
+            return sceneMeshBatchIndex(
+                SceneMeshBatchId::SphereUltraLow);
+        }
+        return sceneMeshBatchIndex(
+            shadowPixelScale > 0.0F && projectedRadius < 4.32F
+                ? SceneMeshBatchId::SphereLow
+                : SceneMeshBatchId::SphereShadow);
     };
     for (std::uint32_t viewIndex = 0U;
          viewIndex < frame.shadowViewCount; ++viewIndex) {

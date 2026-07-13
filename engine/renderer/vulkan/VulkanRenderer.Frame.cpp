@@ -637,7 +637,10 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
         gpuCountersValid
             ? frame.completedSphereLodCounts[2]
             : visibility.meshInstanceCounts[
-                  sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)];
+                  sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] +
+                  visibility.meshInstanceCounts[
+                      sceneMeshBatchIndex(
+                          SceneMeshBatchId::SphereUltraLow)];
     stats_.gridVisibilityCacheHit = visibility.gridVisibilityCacheHit;
     stats_.gridVisibilityWorkItems = visibility.gridVisibilityWorkItems;
     stats_.indirectSceneDraws = indirectSceneDrawsEnabled_ && sceneDrawCalls > 0U;

@@ -73,10 +73,11 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     clusterCapacities.resize(commandCount);
     auto& meshPotentialCounts = gpuMeshPotentialCountScratch_;
     meshPotentialCounts.resize(resourceOwner_.sceneMeshes.size());
-    const std::array<std::size_t, 3> sphereMeshes{
+    const std::array<std::size_t, 4> sphereMeshes{
         sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh),
         sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium),
-        sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)};
+        sceneMeshBatchIndex(SceneMeshBatchId::SphereLow),
+        sceneMeshBatchIndex(SceneMeshBatchId::SphereUltraLow)};
     const SceneGridRange& gridRange = renderItems.materialGridRange();
     const bool gridRangeFits =
         gridRange.valid && gridRange.firstItem <= renderItems.size() &&
@@ -293,7 +294,8 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     uniforms.sphereLodMeshes = {
         static_cast<std::uint32_t>(sphereMeshes[0]),
         static_cast<std::uint32_t>(sphereMeshes[1]),
-        static_cast<std::uint32_t>(sphereMeshes[2]), 0U};
+        static_cast<std::uint32_t>(sphereMeshes[2]),
+        static_cast<std::uint32_t>(sphereMeshes[3])};
     uniforms.viewProjection = viewProjection;
     uniforms.depthPyramid = {
         static_cast<float>(resourceOwner_.depthPyramid.extent.width),
@@ -327,9 +329,12 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                 const std::size_t lod =
                     projectedRadiusPixels >= 12.6f
                         ? 0U
-                        : (projectedRadiusPixels >= 4.32f ? 1U : 2U);
+                        : projectedRadiusPixels >= 4.32f
+                              ? 1U
+                              : (projectedRadiusPixels >= 2.0f ? 2U : 3U);
                 meshIndex = sphereMeshes[lod];
-                ++frame.expectedSphereLodCounts[lod];
+                ++frame.expectedSphereLodCounts[
+                    std::min(lod, std::size_t{2})];
             } else {
                 meshIndex = meshBatchIndex(item.mesh);
             }
@@ -541,6 +546,8 @@ VulkanRenderer::Impl::planSceneVisibility(
     const std::size_t sphereHighBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh);
     const std::size_t sphereMediumBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium);
     const std::size_t sphereLowBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereLow);
+    const std::size_t sphereUltraLowBatchIndex =
+        sceneMeshBatchIndex(SceneMeshBatchId::SphereUltraLow);
     const auto sphereLodBatchIndex = [&](const Vec3 boundsCenter, const float projectedBoundsRadius, const float conservativeDepthRadius) {
         const float viewDepth = std::max(dot(boundsCenter - cameraPosition, cameraForward) - conservativeDepthRadius, 0.001f);
         const float projectedRadiusPixels =
@@ -551,7 +558,9 @@ VulkanRenderer::Impl::planSceneVisibility(
         if (projectedRadiusPixels >= 4.32f) {
             return sphereMediumBatchIndex;
         }
-        return sphereLowBatchIndex;
+        return projectedRadiusPixels >= 2.0f
+                   ? sphereLowBatchIndex
+                   : sphereUltraLowBatchIndex;
     };
     const auto meshBatchIndexFor = [&](const MeshAssetHandle mesh, const Vec3 boundsCenter, const float projectedBoundsRadius, const float conservativeDepthRadius) {
         if (mesh == builtin_assets::kSphere) {
