@@ -62,7 +62,7 @@ struct alignas(16) RenderEnvironment {
     Vec4 parameters{1.0F, 0.0F, 0.0F, 0.0F}; // exposure compensation, rotation radians, probe count, max LOD
 };
 struct alignas(16) RenderReflectionProbe {
-    Vec4 positionRadius{}; // xyz world position, w blend radius
+    Vec4 positionRadius{}; // xyz world position, w positive GPU-representable blend radius
     Vec4 tintIntensity{1.0F, 1.0F, 1.0F, 1.0F};
 };
 

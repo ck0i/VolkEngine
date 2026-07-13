@@ -130,9 +130,15 @@ void validateReflectionProbes(
             "Reflection probe count exceeds renderer limit");
     }
     for (const RenderReflectionProbe& probe : probes) {
+        const float radius = probe.positionRadius.w;
+        const float radiusSquared = radius * radius;
+        const bool representableRadius =
+            radius > 0.0F && radiusSquared > 0.0F &&
+            std::isfinite(radiusSquared) &&
+            std::isfinite(1.0F / radiusSquared);
         if (!finiteVec4(probe.positionRadius) ||
             !finiteVec4(probe.tintIntensity) ||
-            probe.positionRadius.w <= 0.0F ||
+            !representableRadius ||
             probe.tintIntensity.x < 0.0F ||
             probe.tintIntensity.y < 0.0F ||
             probe.tintIntensity.z < 0.0F ||

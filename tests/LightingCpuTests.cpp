@@ -106,6 +106,14 @@ int main() {
     probes[0].positionRadius.w = 0.0F;
     assert(throwsInvalidArgument(
         [&] { ve::validateReflectionProbes(probes); }));
+    probes[0].positionRadius.w =
+        std::numeric_limits<float>::denorm_min();
+    assert(throwsInvalidArgument(
+        [&] { ve::validateReflectionProbes(probes); }));
+    probes[0].positionRadius.w =
+        std::numeric_limits<float>::max();
+    assert(throwsInvalidArgument(
+        [&] { ve::validateReflectionProbes(probes); }));
     probes.assign(ve::kMaximumReflectionProbes + 1U, {});
     assert(throwsInvalidArgument(
         [&] { ve::validateReflectionProbes(probes); }));
