@@ -282,8 +282,10 @@ VulkanRenderer::Impl::prepareGpuVisibility(
     uniforms.cameraPositionProjectionScale = {
         plan.cameraPosition.x, plan.cameraPosition.y, plan.cameraPosition.z,
         std::abs(projection.m[5])};
-    uniforms.cameraForward = {plan.cameraForward.x, plan.cameraForward.y,
-                              plan.cameraForward.z, 0.0f};
+    uniforms.cameraForward = {
+        plan.cameraForward.x, plan.cameraForward.y, plan.cameraForward.z,
+        std::abs(projection.m[5]) *
+            static_cast<float>(swapchainOwner_.extent.height) * 0.5f};
     uniforms.counts = {
         static_cast<std::uint32_t>(renderItems.size()),
         static_cast<std::uint32_t>(commandCount),
@@ -320,12 +322,12 @@ VulkanRenderer::Impl::prepareGpuVisibility(
                                  plan.cameraForward) -
                                  item.boundsRadius,
                              0.001f);
-                const float projectedRadius =
-                    item.boundsRadius * std::abs(projection.m[5]) / viewDepth;
+                const float projectedRadiusPixels =
+                    item.boundsRadius * uniforms.cameraForward.w / viewDepth;
                 const std::size_t lod =
-                    projectedRadius >= 0.035f
+                    projectedRadiusPixels >= 12.6f
                         ? 0U
-                        : (projectedRadius >= 0.012f ? 1U : 2U);
+                        : (projectedRadiusPixels >= 4.32f ? 1U : 2U);
                 meshIndex = sphereMeshes[lod];
                 ++frame.expectedSphereLodCounts[lod];
             } else {
@@ -511,7 +513,11 @@ VulkanRenderer::Impl::planSceneVisibility(
     const Vec3 cameraForward = camera.forward();
     plan.cameraPosition = cameraPosition;
     plan.cameraForward = cameraForward;
-    const float projectionScaleY = projection.m[5] < 0.0f ? -projection.m[5] : projection.m[5];
+    const float projectionScaleY =
+        std::abs(projection.m[5]);
+    const float projectionPixelScale =
+        projectionScaleY *
+        static_cast<float>(swapchainOwner_.extent.height) * 0.5f;
     if (renderItems.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
         throw std::runtime_error("Scene visibility exceeds renderer instance-count range");
     }
@@ -537,11 +543,12 @@ VulkanRenderer::Impl::planSceneVisibility(
     const std::size_t sphereLowBatchIndex = sceneMeshBatchIndex(SceneMeshBatchId::SphereLow);
     const auto sphereLodBatchIndex = [&](const Vec3 boundsCenter, const float projectedBoundsRadius, const float conservativeDepthRadius) {
         const float viewDepth = std::max(dot(boundsCenter - cameraPosition, cameraForward) - conservativeDepthRadius, 0.001f);
-        const float projectedRadiusNdc = (projectedBoundsRadius * projectionScaleY) / viewDepth;
-        if (projectedRadiusNdc >= 0.035f) {
+        const float projectedRadiusPixels =
+            (projectedBoundsRadius * projectionPixelScale) / viewDepth;
+        if (projectedRadiusPixels >= 12.6f) {
             return sphereHighBatchIndex;
         }
-        if (projectedRadiusNdc >= 0.012f) {
+        if (projectedRadiusPixels >= 4.32f) {
             return sphereMediumBatchIndex;
         }
         return sphereLowBatchIndex;

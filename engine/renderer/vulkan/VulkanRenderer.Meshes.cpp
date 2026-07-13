@@ -210,7 +210,8 @@ void VulkanRenderer::Impl::createMeshes() {
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::Cube)] = createCubeMesh();
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh)] = createUvSphereMesh(32, 64);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(16, 32);
-        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(8, 16);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(4, 8);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereShadow)] = createUvSphereMesh(8, 16);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::GroundPlane)] = createPlaneMesh(12.0f, 12.0f);
         for (std::size_t meshIndex = 0; meshIndex < kBaseSceneMeshBatchOrder.size();
              ++meshIndex) {

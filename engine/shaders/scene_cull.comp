@@ -144,12 +144,12 @@ uint selectedMesh(const CullCandidate candidate) {
                                     cull.cameraForward.xyz) -
                                     candidate.bounds.w,
                                 0.001);
-    const float projectedRadius =
-        candidate.bounds.w * cull.cameraPositionProjectionScale.w / viewDepth;
-    if (projectedRadius >= 0.035) {
+    const float projectedRadiusPixels =
+        candidate.bounds.w * cull.cameraForward.w / viewDepth;
+    if (projectedRadiusPixels >= 12.6) {
         return cull.sphereLodMeshes.x;
     }
-    if (projectedRadius >= 0.012) {
+    if (projectedRadiusPixels >= 4.32) {
         return cull.sphereLodMeshes.y;
     }
     return cull.sphereLodMeshes.z;

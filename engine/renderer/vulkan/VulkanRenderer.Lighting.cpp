@@ -449,7 +449,7 @@ void VulkanRenderer::Impl::prepareShadowCasters(
 
     const auto meshIndexFor = [&](const SceneRenderItem& item) {
         return item.mesh == builtin_assets::kSphere
-                   ? sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)
+                   ? sceneMeshBatchIndex(SceneMeshBatchId::SphereShadow)
                    : meshBatchIndex(item.mesh);
     };
     for (std::uint32_t viewIndex = 0U;

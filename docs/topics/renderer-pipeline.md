@@ -74,7 +74,7 @@ The HDR path selects filtered B10G11R11 when supported and falls back to RGBA16F
 
 Meshes share device-local vertex and index buffers. Upload converts full-float import data into compact GPU vertices, reorders indices/vertices for cache locality, and packs integer material classes into existing instance metadata. Generated landscape assets use the same mesh/material path as imported content.
 
-The GPU path uploads cull candidates and instance records, performs frustum and optional cluster tests, selects sphere LOD, rejects against the previous depth pyramid, compacts visible instances, and emits indexed indirect commands. Bindless textures and indirect drawing are capability-gated; unsupported devices use fixed descriptors and direct draws.
+The GPU path uploads cull candidates and instance records, performs frustum and optional cluster tests, selects sphere LOD, rejects against the previous depth pyramid, compacts visible instances, and emits indexed indirect commands. Built-in sphere transitions use projected-pixel thresholds; the 4×8 far mesh begins below a 4.32-pixel projected radius while shadows retain an independent 8×16 proxy. Bindless textures and indirect drawing are capability-gated; unsupported devices use fixed descriptors and direct draws.
 
 The current depth pyramid is half-resolution, reverse-Z, and preserves odd image edges. It is written after current depth rendering and read by the next frame.
 

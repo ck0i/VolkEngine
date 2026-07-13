@@ -169,13 +169,14 @@ enum class SceneMeshBatchId : std::uint8_t {
     SphereHigh,
     SphereMedium,
     SphereLow,
+    SphereShadow,
     GroundPlane
 };
 
-inline constexpr std::array<SceneMeshBatchId, 5> kBaseSceneMeshBatchOrder{
+inline constexpr std::array<SceneMeshBatchId, 6> kBaseSceneMeshBatchOrder{
     SceneMeshBatchId::Cube,         SceneMeshBatchId::SphereHigh,
     SceneMeshBatchId::SphereMedium, SceneMeshBatchId::SphereLow,
-    SceneMeshBatchId::GroundPlane,
+    SceneMeshBatchId::SphereShadow, SceneMeshBatchId::GroundPlane,
 };
 
 inline std::size_t sceneMeshBatchIndex(const SceneMeshBatchId batch) {
