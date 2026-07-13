@@ -44,6 +44,7 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
     Buffer sceneVertexBuffer;
     std::array<VkDeviceSize, 3> sceneVertexOffsets{};
     Buffer sceneIndexBuffer;
+    VkIndexType sceneIndexType = VK_INDEX_TYPE_UINT32;
     Buffer clusterData;
     Buffer clusterHierarchy;
     Buffer meshClusterRanges;
@@ -68,6 +69,8 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
     state.sceneVertexOffsets = resourceOwner_.sceneVertexOffsets;
     resourceOwner_.sceneVertexOffsets = {};
     state.sceneIndexBuffer = std::exchange(resourceOwner_.sceneIndexBuffer, {});
+    state.sceneIndexType =
+        std::exchange(resourceOwner_.sceneIndexType, VK_INDEX_TYPE_UINT32);
     state.clusterData = std::exchange(resourceOwner_.clusterData, {});
     state.clusterHierarchy = std::exchange(resourceOwner_.clusterHierarchy, {});
     state.meshClusterRanges =
@@ -99,6 +102,7 @@ void VulkanRenderer::Impl::reloadReferenceAssets(
         std::exchange(state.sceneVertexBuffer, {});
     resourceOwner_.sceneVertexOffsets = state.sceneVertexOffsets;
     resourceOwner_.sceneIndexBuffer = std::exchange(state.sceneIndexBuffer, {});
+    resourceOwner_.sceneIndexType = state.sceneIndexType;
     resourceOwner_.clusterData = std::exchange(state.clusterData, {});
     resourceOwner_.clusterHierarchy = std::exchange(state.clusterHierarchy, {});
     resourceOwner_.meshClusterRanges =

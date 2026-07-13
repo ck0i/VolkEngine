@@ -523,7 +523,7 @@ void VulkanRenderer::Impl::recordCommandBuffer(FrameResources& frame, const std:
             frame.commandBuffer, 0U,
             static_cast<std::uint32_t>(vertexBuffers.size()),
             vertexBuffers.data(), resourceOwner_.sceneVertexOffsets.data());
-        vkCmdBindIndexBuffer(frame.commandBuffer, resourceOwner_.sceneIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(frame.commandBuffer, resourceOwner_.sceneIndexBuffer.buffer, 0, resourceOwner_.sceneIndexType);
         vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineOwner_.sceneLayout,
                                 0, static_cast<std::uint32_t>(sceneSets.size()),
                                 sceneSets.data(), 0, nullptr);
@@ -951,7 +951,7 @@ void VulkanRenderer::Impl::recordShadowGraphPass(
         vertexBuffers.data(), resourceOwner_.sceneVertexOffsets.data());
     vkCmdBindIndexBuffer(context.frame->commandBuffer,
                          resourceOwner_.sceneIndexBuffer.buffer, 0U,
-                         VK_INDEX_TYPE_UINT32);
+                         resourceOwner_.sceneIndexType);
     constexpr std::uint32_t atlasColumns =
         kShadowAtlasExtent / kShadowAtlasSlotExtent;
     for (std::uint32_t viewIndex = 0U;

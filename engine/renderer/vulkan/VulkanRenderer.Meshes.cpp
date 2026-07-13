@@ -102,12 +102,17 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
     std::vector<MeshData>& meshes) {
     MeshUpload upload{};
     upload.meshes.resize(meshes.size());
+    bool useUint16Indices = true;
     for (const MeshData& mesh : meshes) {
         if (mesh.vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
             throw std::runtime_error("Scene mesh vertex offset exceeds VkDrawIndexed vertexOffset range");
         }
         if (mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
             throw std::runtime_error("Scene mesh index count exceeds uint32 range");
+        }
+        for (const std::uint32_t index : mesh.indices) {
+            useUint16Indices &=
+                index <= std::numeric_limits<std::uint16_t>::max();
         }
     }
     std::size_t vertexCount = 0;
@@ -123,12 +128,16 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
     constexpr std::size_t kPackedVertexSize =
         sizeof(GpuVertexPosition) + sizeof(GpuVertexUv) +
         sizeof(GpuVertexSurface);
+    upload.indexType = useUint16Indices ? VK_INDEX_TYPE_UINT16
+                                       : VK_INDEX_TYPE_UINT32;
+    const std::size_t indexElementSize =
+        useUint16Indices ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
     if (vertexCount > static_cast<std::size_t>(
                           std::numeric_limits<VkDeviceSize>::max() /
                           kPackedVertexSize) ||
         indexCount > static_cast<std::size_t>(
                          std::numeric_limits<VkDeviceSize>::max() /
-                         sizeof(std::uint32_t))) {
+                         indexElementSize)) {
         throw std::runtime_error("Scene geometry upload exceeds VkDeviceSize range");
     }
     upload.vertexOffsets[1] = static_cast<VkDeviceSize>(
@@ -138,7 +147,7 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
     upload.vertexSize =
         static_cast<VkDeviceSize>(vertexCount * kPackedVertexSize);
     upload.indexSize =
-        static_cast<VkDeviceSize>(indexCount * sizeof(std::uint32_t));
+        static_cast<VkDeviceSize>(indexCount * indexElementSize);
     if (upload.indexSize >
         std::numeric_limits<VkDeviceSize>::max() - upload.vertexSize) {
         throw std::runtime_error("Scene geometry staging size exceeds VkDeviceSize range");
@@ -157,8 +166,8 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
                 stagingBytes + static_cast<std::size_t>(upload.vertexOffsets[1]));
             auto* surfaceDst = reinterpret_cast<GpuVertexSurface*>(
                 stagingBytes + static_cast<std::size_t>(upload.vertexOffsets[2]));
-            auto* indexDst = reinterpret_cast<std::uint32_t*>(
-                stagingBytes + static_cast<std::size_t>(upload.vertexSize));
+            auto* indexBytes =
+                stagingBytes + static_cast<std::size_t>(upload.vertexSize);
             std::size_t vertexCursor = 0;
             std::size_t indexCursor = 0;
             const auto appendMesh = [&](MeshData& mesh) -> GpuMesh {
@@ -187,7 +196,23 @@ VulkanRenderer::Impl::MeshUpload VulkanRenderer::Impl::stageMeshUpload(
                 }
                 vertexCursor += meshVertexCount;
                 if (meshIndexCount > 0U) {
-                    std::memcpy(indexDst + indexCursor, mesh.indices.data(), meshIndexCount * sizeof(std::uint32_t));
+                    if (useUint16Indices) {
+                        auto* indexDst =
+                            reinterpret_cast<std::uint16_t*>(indexBytes);
+                        for (std::size_t index = 0; index < meshIndexCount;
+                             ++index) {
+                            indexDst[indexCursor + index] =
+                                static_cast<std::uint16_t>(
+                                    mesh.indices[index]);
+                        }
+                    } else {
+                        auto* indexDst =
+                            reinterpret_cast<std::uint32_t*>(indexBytes);
+                        std::memcpy(indexDst + indexCursor,
+                                    mesh.indices.data(),
+                                    meshIndexCount *
+                                        sizeof(std::uint32_t));
+                    }
                 }
                 indexCursor += meshIndexCount;
                 return GpuMesh{static_cast<std::uint32_t>(meshIndexCount),
@@ -324,6 +349,7 @@ void VulkanRenderer::Impl::createMeshes() {
     resourceOwner_.sceneVertexBuffer = takeBuffer(meshUpload.vertices);
     resourceOwner_.sceneVertexOffsets = meshUpload.vertexOffsets;
     resourceOwner_.sceneIndexBuffer = takeBuffer(meshUpload.indices);
+    resourceOwner_.sceneIndexType = meshUpload.indexType;
     resourceOwner_.sceneMeshes = meshUpload.meshes;
     resourceOwner_.sceneClusters = std::move(gpuClusters);
     resourceOwner_.sceneClusterHierarchy = std::move(gpuHierarchy);

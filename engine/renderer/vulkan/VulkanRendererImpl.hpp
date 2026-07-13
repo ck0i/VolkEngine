@@ -674,6 +674,7 @@ private:
         std::array<VkDeviceSize, 3> vertexOffsets{};
         VkDeviceSize vertexSize = 0;
         VkDeviceSize indexSize = 0;
+        VkIndexType indexType = VK_INDEX_TYPE_UINT32;
         std::vector<GpuMesh> meshes;
     };
 
@@ -1379,6 +1380,7 @@ private:
         std::vector<GpuClusterNode> sceneClusterHierarchy;
         std::vector<std::uint32_t> sceneClusterRoots;
         Buffer sceneIndexBuffer;
+        VkIndexType sceneIndexType = VK_INDEX_TYPE_UINT32;
         std::vector<GpuMesh> sceneMeshes;
         std::vector<MeshBounds> sceneMeshBounds;
         std::vector<std::uint32_t> sceneMeshTriangleCounts;
