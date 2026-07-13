@@ -110,6 +110,9 @@ int main() {
         std::numeric_limits<float>::denorm_min();
     assert(throwsInvalidArgument(
         [&] { ve::validateReflectionProbes(probes); }));
+    probes[0].positionRadius.w = 1.0e19F;
+    assert(throwsInvalidArgument(
+        [&] { ve::validateReflectionProbes(probes); }));
     probes[0].positionRadius.w =
         std::numeric_limits<float>::max();
     assert(throwsInvalidArgument(

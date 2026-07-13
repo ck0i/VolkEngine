@@ -132,10 +132,14 @@ void validateReflectionProbes(
     for (const RenderReflectionProbe& probe : probes) {
         const float radius = probe.positionRadius.w;
         const float radiusSquared = radius * radius;
+        const float inverseRadiusSquared =
+            radiusSquared > 0.0F && std::isfinite(radiusSquared)
+            ? 1.0F / radiusSquared
+            : 0.0F;
         const bool representableRadius =
-            radius > 0.0F && radiusSquared > 0.0F &&
-            std::isfinite(radiusSquared) &&
-            std::isfinite(1.0F / radiusSquared);
+            radius > 0.0F &&
+            inverseRadiusSquared >= std::numeric_limits<float>::min() &&
+            std::isfinite(inverseRadiusSquared);
         if (!finiteVec4(probe.positionRadius) ||
             !finiteVec4(probe.tintIntensity) ||
             !representableRadius ||
