@@ -164,8 +164,8 @@ vec2 environmentUv(vec3 direction) {
 vec4 environmentProbeBlend(vec3 worldPosition) {
     vec3 weightedTint = vec3(0.0);
     float totalWeight = 1.0;
-    uint probeCount = uint(clamp(
-        round(lighting.environmentParameters.z), 0.0, 4.0));
+    uint probeCount = floatBitsToUint(
+        lighting.environmentParameters.z);
     for (uint probeIndex = 0U; probeIndex < probeCount;
          ++probeIndex) {
         ReflectionProbe probe =

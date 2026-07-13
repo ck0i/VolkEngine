@@ -676,8 +676,8 @@ void VulkanRenderer::Impl::prepareLighting(
         std::sin(environmentRotation);
     uniforms.environmentDiffuseRadiance =
         resourceOwner_.environmentDiffuseRadiance;
-    uniforms.environment.parameters.z =
-        static_cast<float>(probes.size());
+    uniforms.environment.parameters.z = std::bit_cast<float>(
+        static_cast<std::uint32_t>(probes.size()));
     std::copy(probes.begin(), probes.end(),
               uniforms.reflectionProbes.begin());
     uniforms.environment.parameters.w = static_cast<float>(
