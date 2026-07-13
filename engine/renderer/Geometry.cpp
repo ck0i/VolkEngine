@@ -420,6 +420,12 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
         vertexTriangles[vertexTriangleCursors[indices[offset + 1U]]++] = triangle;
         vertexTriangles[vertexTriangleCursors[indices[offset + 2U]]++] = triangle;
     }
+    std::vector<std::size_t> liveTriangleCounts(vertexCount);
+    for (std::size_t vertex = 0; vertex < vertexCount; ++vertex) {
+        liveTriangleCounts[vertex] =
+            vertexTriangleOffsets[vertex + 1U] -
+            vertexTriangleOffsets[vertex];
+    }
 
     std::vector<std::uint8_t> emitted(triangleCount);
     std::vector<std::uint32_t> optimized;
@@ -440,6 +446,12 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
                (cacheContains(indices[offset + 1U]) ? 1 : 0) +
                (cacheContains(indices[offset + 2U]) ? 1 : 0);
     };
+    const auto triangleLiveCount = [&](const std::uint32_t triangle) {
+        const std::size_t offset = static_cast<std::size_t>(triangle) * 3U;
+        return liveTriangleCounts[indices[offset + 0U]] +
+               liveTriangleCounts[indices[offset + 1U]] +
+               liveTriangleCounts[indices[offset + 2U]];
+    };
     const auto touchVertex = [&](const std::uint32_t vertex) {
         if (const auto found = std::find(cache.begin(), cache.end(), vertex); found != cache.end()) {
             cache.erase(found);
@@ -455,6 +467,9 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
         optimized.push_back(indices[offset + 1U]);
         optimized.push_back(indices[offset + 2U]);
         emitted[triangle] = 1U;
+        --liveTriangleCounts[indices[offset + 0U]];
+        --liveTriangleCounts[indices[offset + 1U]];
+        --liveTriangleCounts[indices[offset + 2U]];
         touchVertex(indices[offset + 2U]);
         touchVertex(indices[offset + 1U]);
         touchVertex(indices[offset + 0U]);
@@ -473,10 +488,16 @@ void optimizeTriangleIndexOrderForVertexCache(std::vector<std::uint32_t>& indice
         }
         std::uint32_t bestTriangle = std::numeric_limits<std::uint32_t>::max();
         int bestScore = -1;
+        std::size_t bestLiveCount = std::numeric_limits<std::size_t>::max();
         for (const std::uint32_t triangle : candidates) {
             const int score = triangleScore(triangle);
-            if (score > bestScore || (score == bestScore && triangle < bestTriangle)) {
+            const std::size_t liveCount = triangleLiveCount(triangle);
+            if (score > bestScore ||
+                (score == bestScore && liveCount < bestLiveCount) ||
+                (score == bestScore && liveCount == bestLiveCount &&
+                 triangle < bestTriangle)) {
                 bestScore = score;
+                bestLiveCount = liveCount;
                 bestTriangle = triangle;
             }
         }
