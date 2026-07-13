@@ -189,7 +189,7 @@ vec4 environmentProbeBlend(vec3 worldPosition) {
         totalWeight += weight;
     }
     float normalization = 1.0 / totalWeight;
-    return vec4(weightedTint * normalization, normalization);
+    return vec4(weightedTint, normalization);
 }
 
 vec3 environmentRadiance(vec3 direction, vec3 radiance,
@@ -201,7 +201,7 @@ vec3 environmentRadiance(vec3 direction, vec3 radiance,
         lighting.environmentSky.rgb,
         skyWeight);
     return radiance *
-        (globalTint * probeBlend.a + probeBlend.rgb);
+        ((globalTint + probeBlend.rgb) * probeBlend.a);
 }
 
 
