@@ -740,10 +740,15 @@ void VulkanRenderer::Impl::recordLightAssignment(
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             pipelineOwner_.lightAssignmentLayout, 1U, 1U,
                             &descriptorSet, 0U, nullptr);
+    const std::uint32_t depthMip =
+        std::min(3U, resourceOwner_.depthPyramid.mipLevels - 1U);
     const LightAssignmentPushConstants push{
         depthBoundsEnabled
             ? (resourceOwner_.depthPyramidExtremaEnabled ? 2U : 1U)
-            : 0U};
+            : 0U,
+        depthMip,
+        std::max(1U, resourceOwner_.depthPyramid.extent.width >> depthMip),
+        std::max(1U, resourceOwner_.depthPyramid.extent.height >> depthMip)};
     vkCmdPushConstants(commandBuffer, pipelineOwner_.lightAssignmentLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0U, sizeof(push), &push);
     vkCmdDispatch(commandBuffer, (tileColumns + 7U) / 8U,

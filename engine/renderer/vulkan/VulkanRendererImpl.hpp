@@ -876,6 +876,9 @@ private:
     };
     struct LightAssignmentPushConstants {
         std::uint32_t depthBoundsEnabled = 0;
+        std::uint32_t depthMip = 0;
+        std::uint32_t depthWidth = 1;
+        std::uint32_t depthHeight = 1;
     };
     struct alignas(16) GpuReflectionProbe {
         Vec4 positionInverseRadiusSquared{};
@@ -993,7 +996,7 @@ private:
     static_assert(offsetof(GpuLightingUniforms, reflectionProbes) == 1504);
     static_assert(sizeof(GpuLightListCounters) == 16);
     static_assert(sizeof(ShadowPushConstants) == 4);
-    static_assert(sizeof(LightAssignmentPushConstants) == 4);
+    static_assert(sizeof(LightAssignmentPushConstants) == 16);
 
     void createInstance();
     void createDebugMessenger();

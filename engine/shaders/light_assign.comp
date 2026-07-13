@@ -5,6 +5,8 @@
 layout(set = 1, binding = 8) uniform sampler2D depthPyramid;
 layout(push_constant) uniform LightAssignmentPush {
     uint depthBoundsEnabled;
+    int depthMip;
+    ivec2 depthExtent;
 } pushData;
 
 
@@ -156,13 +158,10 @@ void main() {
             maximumNdc.x * rowW - rowX);
         if (pushData.depthBoundsEnabled != 0U) {
             // Pyramid mip zero reduces 2x2 depth; mip three covers one 16x16 tile.
-            int lightTileDepthMip =
-                min(3, textureQueryLevels(depthPyramid) - 1);
             ivec2 depthCoordinate = min(
-                ivec2(tile), textureSize(
-                    depthPyramid, lightTileDepthMip) - 1);
+                ivec2(tile), pushData.depthExtent - 1);
             vec2 depthExtrema = texelFetch(
-                depthPyramid, depthCoordinate, lightTileDepthMip).rg;
+                depthPyramid, depthCoordinate, pushData.depthMip).rg;
             float farthestDepth = depthExtrema.r;
             float nearestDepth = -depthExtrema.g;
             vec4 rowZ = vec4(
