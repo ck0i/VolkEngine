@@ -209,7 +209,7 @@ void VulkanRenderer::Impl::createMeshes() {
         std::vector<MeshClusterData> meshClusters(meshes.size());
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::Cube)] = createCubeMesh();
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereHigh)] = createUvSphereMesh(24, 48);
-        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(16, 32);
+        meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereMedium)] = createUvSphereMesh(12, 24);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereLow)] = createUvSphereMesh(4, 8);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereUltraLow)] = createUvSphereMesh(2, 4);
         meshes[sceneMeshBatchIndex(SceneMeshBatchId::SphereShadow)] = createUvSphereMesh(8, 16);
