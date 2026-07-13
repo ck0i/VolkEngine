@@ -9,6 +9,8 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
 layout(location = 3) in vec4 inTangent;
+const uint MATERIAL_TEXTURE_NORMAL = 2U;
+const uint MATERIAL_HAIR = 5U;
 
 
 layout(location = 0) out vec3 vWorldPosition;
@@ -27,7 +29,14 @@ void main() {
     vWorldPosition = world.xyz;
     mat3 normalMatrix = mat3(instance.normalMatrix0.xyz, instance.normalMatrix1.xyz, instance.normalMatrix2.xyz);
     vWorldNormal = normalize(normalMatrix * inNormal);
-    vWorldTangent = vec4(normalize(mat3(instance.model) * inTangent.xyz), inTangent.w * instance.normalMatrix0.w);
+    uint materialBits = instance.textureIndices.w;
+    bool needsTangent =
+        (materialBits & MATERIAL_TEXTURE_NORMAL) != 0U ||
+        ((materialBits >> 3U) & 15U) == MATERIAL_HAIR;
+    vWorldTangent = needsTangent
+        ? vec4(normalize(mat3(instance.model) * inTangent.xyz),
+               inTangent.w * instance.normalMatrix0.w)
+        : vec4(0.0);
     vUv = inUv;
     vAlbedoRoughness = instance.albedoRoughness;
     vEmissiveMetallic = instance.emissiveMetallic;
