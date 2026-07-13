@@ -108,6 +108,9 @@ const uint MATERIAL_WATER = 9U;
 const uint MATERIAL_FEATURE_ALPHA_MASK = 1U;
 const uint MATERIAL_FEATURE_GROUND_GRID = 4U;
 
+const uint MATERIAL_DIRECT_LOBE_MASK =
+    (1U << MATERIAL_CLEAR_COAT) | (1U << MATERIAL_HAIR) |
+    (1U << MATERIAL_CLOTH);
 uint materialClass() {
     return (vTextureIndices.w >> 3U) & 15U;
 }
@@ -214,32 +217,34 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
         vec3 specular = d * visibility * f;
         vec3 kd = (1.0 - f) * dielectricWeight;
         result = (kd * albedo / PI + specular) * radiance * ndotl;
-        if (model == MATERIAL_CLEAR_COAT) {
-            float coatRoughness = mix(0.18, 0.04, strength);
-            float coatAlpha = coatRoughness * coatRoughness;
-            float coatR = coatRoughness + 1.0;
-            vec3 coatF =
-                fresnelSchlick(max(dot(h, v), 0.0), vec3(0.04));
-            float coatD = distributionGGX(
-                n, h, coatAlpha * coatAlpha);
-            float coatVisibility = geometrySmithVisibility(
-                ndotv, ndotl, coatR * coatR * 0.125);
-            vec3 coat = coatD * coatVisibility * coatF;
-            result = result * (1.0 - 0.25 * strength) +
-                     coat * radiance * ndotl * strength;
-        } else if (model == MATERIAL_CLOTH) {
-            float sheen = pow5(1.0 - max(dot(h, v), 0.0));
-            result += albedo * radiance * ndotl * sheen *
-                      (0.35 * strength);
-        } else if (model == MATERIAL_HAIR) {
-            vec3 tangent = normalize(vWorldTangent.xyz);
-            float tangentDotH = dot(tangent, h);
-            float sinTheta = sqrt(max(
-                1.0 - tangentDotH * tangentDotH, 0.0));
-            float longitudinal =
-                pow(sinTheta, mix(24.0, 96.0, strength));
-            result += radiance * ndotl * longitudinal *
-                      mix(vec3(0.04), albedo, 0.35) * strength;
+        if ((MATERIAL_DIRECT_LOBE_MASK & (1U << model)) != 0U) {
+            if (model == MATERIAL_CLEAR_COAT) {
+                float coatRoughness = mix(0.18, 0.04, strength);
+                float coatAlpha = coatRoughness * coatRoughness;
+                float coatR = coatRoughness + 1.0;
+                vec3 coatF =
+                    fresnelSchlick(max(dot(h, v), 0.0), vec3(0.04));
+                float coatD = distributionGGX(
+                    n, h, coatAlpha * coatAlpha);
+                float coatVisibility = geometrySmithVisibility(
+                    ndotv, ndotl, coatR * coatR * 0.125);
+                vec3 coat = coatD * coatVisibility * coatF;
+                result = result * (1.0 - 0.25 * strength) +
+                         coat * radiance * ndotl * strength;
+            } else if (model == MATERIAL_CLOTH) {
+                float sheen = pow5(1.0 - max(dot(h, v), 0.0));
+                result += albedo * radiance * ndotl * sheen *
+                          (0.35 * strength);
+            } else {
+                vec3 tangent = normalize(vWorldTangent.xyz);
+                float tangentDotH = dot(tangent, h);
+                float sinTheta = sqrt(max(
+                    1.0 - tangentDotH * tangentDotH, 0.0));
+                float longitudinal =
+                    pow(sinTheta, mix(24.0, 96.0, strength));
+                result += radiance * ndotl * longitudinal *
+                          mix(vec3(0.04), albedo, 0.35) * strength;
+            }
         }
     }
     if (model == MATERIAL_FOLIAGE ||
