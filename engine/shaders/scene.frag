@@ -208,10 +208,10 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
     if (ndotl > 0.0) {
         vec3 h = normalize(v + l);
         float d = distributionGGX(n, h, brdfParameters.x);
-        float g = geometrySmith(ndotv, ndotl, brdfParameters.y);
+        float visibility =
+            geometrySmithVisibility(ndotv, ndotl, brdfParameters.y);
         vec3 f = fresnelSchlick(max(dot(h, v), 0.0), f0);
-        vec3 specular =
-            (d * g * f) / max(4.0 * ndotv * ndotl, 0.0001);
+        vec3 specular = d * visibility * f;
         vec3 kd = (1.0 - f) * dielectricWeight;
         result = (kd * albedo / PI + specular) * radiance * ndotl;
         if (model == MATERIAL_CLEAR_COAT) {
@@ -222,10 +222,9 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
                 fresnelSchlick(max(dot(h, v), 0.0), vec3(0.04));
             float coatD = distributionGGX(
                 n, h, coatAlpha * coatAlpha);
-            float coatG = geometrySmith(
+            float coatVisibility = geometrySmithVisibility(
                 ndotv, ndotl, coatR * coatR * 0.125);
-            vec3 coat = coatD * coatG * coatF /
-                        max(4.0 * ndotv * ndotl, 0.0001);
+            vec3 coat = coatD * coatVisibility * coatF;
             result = result * (1.0 - 0.25 * strength) +
                      coat * radiance * ndotl * strength;
         } else if (model == MATERIAL_CLOTH) {

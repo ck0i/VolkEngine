@@ -7,13 +7,16 @@ float distributionGGX(vec3 n, vec3 h, float alphaSquared) {
     return alphaSquared / max(PI * denom * denom, 0.0001);
 }
 
-float geometrySchlickGGX(float ndotv, float k) {
-    return ndotv / max(ndotv * (1.0 - k) + k, 0.0001);
-}
 
-float geometrySmith(float ndotv, float ndotl, float k) {
-    return geometrySchlickGGX(ndotv, k) *
-           geometrySchlickGGX(ndotl, k);
+float geometrySmithVisibility(float ndotv, float ndotl, float k) {
+    float viewDenominator =
+        max(ndotv * (1.0 - k) + k, 0.0001);
+    float lightDenominator =
+        max(ndotl * (1.0 - k) + k, 0.0001);
+    float ndotProduct = ndotv * ndotl;
+    return ndotProduct /
+        (viewDenominator * lightDenominator *
+         max(4.0 * ndotProduct, 0.0001));
 }
 
 float pow5(float value) {
