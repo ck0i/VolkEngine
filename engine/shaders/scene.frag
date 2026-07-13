@@ -112,7 +112,7 @@ uint materialClass() {
     return (vTextureIndices.w >> 3U) & 15U;
 }
 uint packedMaterialFeatures() {
-    return uint(round(max(vMaterialFlags.x, 0.0)));
+    return floatBitsToUint(vMaterialFlags.x);
 }
 bool hasMaterialFeature(uint feature) {
     return (packedMaterialFeatures() & feature) != 0U;

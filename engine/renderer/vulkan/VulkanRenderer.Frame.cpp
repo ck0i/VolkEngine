@@ -1,5 +1,7 @@
 #include "renderer/vulkan/VulkanRendererImpl.hpp"
+#include <bit>
 #include <cmath>
+#include <limits>
 
 namespace ve {
 
@@ -306,6 +308,13 @@ VulkanRenderer::Impl::InstanceData VulkanRenderer::Impl::instanceDataFor(
         std::clamp(std::lround(item.material.flags.y), 0L, 9L));
     const std::uint32_t textureMetadata =
         textureMask | (materialClass << 3U);
+    const double roundedFeatures =
+        std::round(std::max<double>(item.material.flags.x, 0.0));
+    const auto packedFeatures = static_cast<std::uint32_t>(std::min(
+        roundedFeatures,
+        static_cast<double>(std::numeric_limits<std::uint32_t>::max())));
+    Vec4 materialFlags = item.material.flags;
+    materialFlags.x = std::bit_cast<float>(packedFeatures);
     return InstanceData{
         item.model,
         normalMatrix[0],
@@ -313,7 +322,7 @@ VulkanRenderer::Impl::InstanceData VulkanRenderer::Impl::instanceDataFor(
         normalMatrix[2],
         item.material.albedoRoughness,
         item.material.emissiveMetallic,
-        item.material.flags,
+        materialFlags,
         {textureIndex(item.material.textures[0], 0U),
          textureIndex(item.material.textures[1], 1U),
          textureIndex(item.material.textures[2], 2U), textureMetadata}};

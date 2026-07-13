@@ -14,7 +14,7 @@ layout(location = 1) flat in vec4 vMaterialFlags;
 layout(location = 2) flat in uvec4 vTextureIndices;
 
 void main() {
-    uint packedFeatures = uint(round(max(vMaterialFlags.x, 0.0)));
+    uint packedFeatures = floatBitsToUint(vMaterialFlags.x);
     if ((packedFeatures & 1U) == 0U) return;
     float alpha = 1.0;
     if ((vTextureIndices.w & 1U) != 0U) {
