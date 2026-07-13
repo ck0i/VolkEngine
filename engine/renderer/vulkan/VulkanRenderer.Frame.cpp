@@ -1214,7 +1214,7 @@ void VulkanRenderer::Impl::recordDepthPyramidGraphPass(
         const bool sourceHasExtrema =
             resourceOwner_.depthPyramidExtremaEnabled && mip != 0U;
         const DepthPyramidPushConstants push{
-            sourceWidth, sourceHeight,
+            sourceWidth, sourceHeight, destinationWidth, destinationHeight,
             resourceOwner_.depthReductionSamplerEnabled &&
                     (!resourceOwner_.depthPyramidExtremaEnabled || mip != 0U)
                 ? 1U

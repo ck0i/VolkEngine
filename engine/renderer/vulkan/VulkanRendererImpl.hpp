@@ -869,6 +869,8 @@ private:
     struct DepthPyramidPushConstants {
         std::uint32_t sourceWidth = 0;
         std::uint32_t sourceHeight = 0;
+        std::uint32_t destinationWidth = 0;
+        std::uint32_t destinationHeight = 0;
         std::uint32_t useReductionSampler = 0;
         std::uint32_t sourceHasExtrema = 0;
     };

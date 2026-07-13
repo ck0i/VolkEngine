@@ -10,13 +10,14 @@ layout(r32f, set = 0, binding = 1) uniform writeonly image2D destinationDepth;
 
 layout(push_constant) uniform BuildData {
     uvec2 sourceExtent;
+    uvec2 destinationExtent;
     uint useReductionSampler;
     uint sourceHasExtrema;
 } build;
 
 void main() {
     const uvec2 destination = gl_GlobalInvocationID.xy;
-    const uvec2 destinationExtent = uvec2(imageSize(destinationDepth));
+    const uvec2 destinationExtent = build.destinationExtent;
     if (any(greaterThanEqual(destination, destinationExtent))) {
         return;
     }
