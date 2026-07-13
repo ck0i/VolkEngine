@@ -201,7 +201,7 @@ vec3 environmentRadiance(vec3 direction, vec3 radiance,
 
 vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
                          float ndotv, vec3 radiance, vec3 albedo,
-                         vec2 brdfParameters, float metallic, vec3 f0,
+                         vec2 brdfParameters, float dielectricWeight, vec3 f0,
                          uint model, float strength) {
     float ndotl = max(rawNdotL, 0.0);
     vec3 h = normalize(v + l);
@@ -212,7 +212,7 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
         vec3 f = fresnelSchlick(max(dot(h, v), 0.0), f0);
         vec3 specular =
             (d * g * f) / max(4.0 * ndotv * ndotl, 0.0001);
-        vec3 kd = (1.0 - f) * (1.0 - metallic);
+        vec3 kd = (1.0 - f) * dielectricWeight;
         result = (kd * albedo / PI + specular) * radiance * ndotl;
     }
     if (model == MATERIAL_CLEAR_COAT && ndotl > 0.0) {
@@ -246,14 +246,15 @@ vec3 evaluateDirectLight(vec3 n, vec3 v, vec3 l, float rawNdotL,
                      strength;
         float wrapped = max((rawNdotL + wrap) / (1.0 + wrap), 0.0);
         result += albedo * radiance * max(wrapped - ndotl, 0.0) *
-                  (1.0 - metallic) / PI;
+                  dielectricWeight / PI;
     }
     return result;
 }
 
 vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
                         float ndotv, vec3 albedo, vec2 brdfParameters,
-                        float metallic, vec3 f0, uint model, float strength) {
+                        float dielectricWeight, vec3 f0, uint model,
+                        float strength) {
     vec3 toLight = light.positionRange.xyz - worldPosition;
     float distanceSquared = dot(toLight, toLight);
     float range = light.positionRange.w;
@@ -297,7 +298,7 @@ vec3 evaluateLocalLight(LocalLight light, vec3 worldPosition, vec3 n, vec3 v,
     float visibility =
         localShadowVisibility(light, worldPosition, n, l);
     return evaluateDirectLight(n, v, l, rawNdotL, ndotv, radiance, albedo,
-                               brdfParameters, metallic, f0, model,
+                               brdfParameters, dielectricWeight, f0, model,
                                strength) * visibility;
 }
 
@@ -350,6 +351,7 @@ void main() {
     }
 
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
+    float dielectricWeight = 1.0 - metallic;
     float alpha = roughness * roughness;
     float geometryR = roughness + 1.0;
     vec2 brdfParameters = vec2(
@@ -370,7 +372,7 @@ void main() {
     vec3 directional = evaluateDirectLight(
         n, v, directionalL, directionalNdotL, ndotv,
         lighting.directionalColor.rgb, albedo, brdfParameters,
-        metallic, f0, model, materialStrength) *
+        dielectricWeight, f0, model, materialStrength) *
         directionalVisibility;
     uvec2 tile = uvec2(gl_FragCoord.xy) / LIGHT_TILE_SIZE;
     LightTileHeader header =
@@ -380,11 +382,11 @@ void main() {
         uint lightIndex = lightTileIndices[header.offset + index];
         local += evaluateLocalLight(
             localLights[lightIndex], vWorldPosition, n, v, ndotv, albedo,
-            brdfParameters, metallic, f0, model, materialStrength);
+            brdfParameters, dielectricWeight, f0, model, materialStrength);
     }
 
     vec3 ambientF = fresnelSchlickRoughness(ndotv, f0, roughness);
-    vec3 ambientKd = (1.0 - ambientF) * (1.0 - metallic);
+    vec3 ambientKd = (1.0 - ambientF) * dielectricWeight;
     float maximumEnvironmentLod =
         lighting.environmentParameters.w;
     vec4 probeBlend =
