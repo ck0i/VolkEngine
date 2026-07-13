@@ -117,7 +117,7 @@ void VulkanRenderer::Impl::draw(const Camera& camera, const SceneRenderList& ren
                 retryScreenshotRequest = false;
             } else if (!screenshotFormatSupported()) {
                 logger()->warn("Screenshot requested but swapchain format {} is not "
-                       "BGRA8/RGBA8 UNORM",
+                       "BGRA8/RGBA8",
                                static_cast<int>(swapchainOwner_.format));
                 retryScreenshotRequest = false;
             } else {

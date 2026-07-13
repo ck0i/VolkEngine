@@ -11,7 +11,10 @@ void VulkanRenderer::Impl::requestScreenshot(std::filesystem::path path) {
 }
 
 bool VulkanRenderer::Impl::screenshotFormatSupported() const {
-    return swapchainOwner_.format == VK_FORMAT_B8G8R8A8_UNORM || swapchainOwner_.format == VK_FORMAT_R8G8B8A8_UNORM;
+    return swapchainOwner_.format == VK_FORMAT_B8G8R8A8_UNORM ||
+           swapchainOwner_.format == VK_FORMAT_B8G8R8A8_SRGB ||
+           swapchainOwner_.format == VK_FORMAT_R8G8B8A8_UNORM ||
+           swapchainOwner_.format == VK_FORMAT_R8G8B8A8_SRGB;
 }
 
 void VulkanRenderer::Impl::recordScreenshotCopy(const VkCommandBuffer commandBuffer,
@@ -33,7 +36,11 @@ void VulkanRenderer::Impl::recordScreenshotCopy(const VkCommandBuffer commandBuf
 }
 
 void VulkanRenderer::Impl::writeScreenshotPpm(const Buffer& readback, const VkExtent2D extent, const VkFormat format, const std::filesystem::path& path) const {
-    if (format != VK_FORMAT_B8G8R8A8_UNORM && format != VK_FORMAT_R8G8B8A8_UNORM) {
+    const bool bgra = format == VK_FORMAT_B8G8R8A8_UNORM ||
+                      format == VK_FORMAT_B8G8R8A8_SRGB;
+    const bool rgba = format == VK_FORMAT_R8G8B8A8_UNORM ||
+                      format == VK_FORMAT_R8G8B8A8_SRGB;
+    if (!bgra && !rgba) {
         throw std::runtime_error("Screenshot capture only supports BGRA8/RGBA8 swapchain formats");
     }
 
@@ -60,7 +67,7 @@ void VulkanRenderer::Impl::writeScreenshotPpm(const Buffer& readback, const VkEx
             for (std::uint32_t x = 0; x < extent.width; ++x) {
                 const std::size_t srcOffset = static_cast<std::size_t>(x) * 4U;
                 const std::size_t dstOffset = static_cast<std::size_t>(x) * 3U;
-                if (format == VK_FORMAT_B8G8R8A8_UNORM) {
+                if (bgra) {
                     row[dstOffset + 0U] = srcRow[srcOffset + 2U];
                     row[dstOffset + 1U] = srcRow[srcOffset + 1U];
                     row[dstOffset + 2U] = srcRow[srcOffset + 0U];

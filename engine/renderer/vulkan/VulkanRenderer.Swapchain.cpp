@@ -23,8 +23,19 @@ VulkanRenderer::Impl::SwapchainSupport VulkanRenderer::Impl::querySwapchainSuppo
 }
 
 VkSurfaceFormatKHR VulkanRenderer::Impl::chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const {
-    // The tonemap shader normally writes sRGB-encoded LDR values. Prefer UNORM
-    // swapchain formats so Vulkan does not apply a second conversion on color writes.
+    // Prefer fixed-function sRGB encoding when no overlay shares the attachment.
+    // ImGui vertex colors retain the existing shader-encoded UNORM path.
+    if (!config_.debugOverlay) {
+        for (const VkSurfaceFormatKHR& format : formats) {
+            const bool screenshotCompatibleSrgb =
+                format.format == VK_FORMAT_B8G8R8A8_SRGB ||
+                format.format == VK_FORMAT_R8G8B8A8_SRGB;
+            if (screenshotCompatibleSrgb &&
+                format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                return format;
+            }
+        }
+    }
     for (const VkSurfaceFormatKHR& format : formats) {
         if (isUnormSwapchainFormat(format.format) && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return format;
