@@ -9,8 +9,8 @@
 #include <utility>
 
 #if defined(_WIN32)
-#include <bcrypt.h>
 #include <windows.h>
+#include <bcrypt.h>
 #elif defined(__linux__)
 #include <cerrno>
 #include <sys/random.h>
