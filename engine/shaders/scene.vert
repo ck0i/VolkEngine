@@ -23,30 +23,40 @@ layout(location = 6) out vec4 vWorldTangent;
 layout(location = 7) flat out uvec4 vTextureIndices;
 
 void main() {
-    SceneInstance instance = sceneInstance();
-    vec3 localPosition = applyFoliageWind(inPosition, instance);
-    vec4 world = instance.model * vec4(localPosition, 1.0);
+    uint instanceIndex = sceneInstanceIndex();
+    mat4 model = instanceData.instances[instanceIndex].model;
+    uvec4 textureIndices =
+        instanceData.instances[instanceIndex].textureIndices;
+    uint materialBits = textureIndices.w;
+    vec3 localPosition =
+        applyFoliageWind(inPosition, model, materialBits);
+    vec4 world = model * vec4(localPosition, 1.0);
     vWorldPosition = world.xyz;
-    uint materialBits = instance.textureIndices.w;
     if ((materialBits & (1U << 31U)) != 0U) {
-        vWorldNormal = normalize(mat3(instance.model) * inNormal);
+        vWorldNormal = normalize(mat3(model) * inNormal);
     } else {
-        mat3 normalMatrix =
-            mat3(instance.normalMatrix0.xyz, instance.normalMatrix1.xyz,
-                 instance.normalMatrix2.xyz);
+        mat3 normalMatrix = mat3(
+            instanceData.instances[instanceIndex].normalMatrix0.xyz,
+            instanceData.instances[instanceIndex].normalMatrix1.xyz,
+            instanceData.instances[instanceIndex].normalMatrix2.xyz);
         vWorldNormal = normalize(normalMatrix * inNormal);
     }
     bool needsTangent =
         (materialBits & MATERIAL_TEXTURE_NORMAL) != 0U ||
         ((materialBits >> 3U) & 15U) == MATERIAL_HAIR;
     vWorldTangent = needsTangent
-        ? vec4(normalize(mat3(instance.model) * inTangent.xyz),
-               inTangent.w * instance.normalMatrix0.w)
+        ? vec4(
+              normalize(mat3(model) * inTangent.xyz),
+              inTangent.w *
+                  instanceData.instances[instanceIndex].normalMatrix0.w)
         : vec4(0.0);
     vUv = inUv;
-    vAlbedoRoughness = instance.albedoRoughness;
-    vEmissiveMetallic = instance.emissiveMetallic;
-    vMaterialFlags = instance.materialFlags;
-    vTextureIndices = instance.textureIndices;
+    vAlbedoRoughness =
+        instanceData.instances[instanceIndex].albedoRoughness;
+    vEmissiveMetallic =
+        instanceData.instances[instanceIndex].emissiveMetallic;
+    vMaterialFlags =
+        instanceData.instances[instanceIndex].materialFlags;
+    vTextureIndices = textureIndices;
     gl_Position = scene.viewProjection * world;
 }

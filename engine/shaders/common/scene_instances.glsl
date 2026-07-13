@@ -19,6 +19,14 @@ layout(std430, set = 0, binding = 2) readonly buffer VisibleInstanceIndices {
 } visibleInstanceIndices;
 #endif
 
+uint sceneInstanceIndex() {
+#if VE_GPU_VISIBILITY
+    return visibleInstanceIndices.indices[gl_InstanceIndex];
+#else
+    return gl_InstanceIndex;
+#endif
+}
+
 SceneInstance sceneInstance() {
 #if VE_GPU_VISIBILITY
     return instanceData.instances[
