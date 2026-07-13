@@ -271,7 +271,8 @@ void VulkanRenderer::Impl::createMeshes() {
         for (std::size_t meshIndex = 0; meshIndex < kBaseSceneMeshBatchOrder.size();
              ++meshIndex) {
             optimizeTriangleIndexOrderForVertexCache(
-                meshes[meshIndex].indices, meshes[meshIndex].vertices.size());
+                meshes[meshIndex].indices, meshes[meshIndex].vertices.size(),
+                16U);
             optimizeVertexFetchOrder(meshes[meshIndex]);
             meshClusters[meshIndex] = buildMeshClusters(meshes[meshIndex]);
         }
